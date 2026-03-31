@@ -143,6 +143,9 @@ export class EngineCore {
       // Désaccord inter-modèles (V2)
       model_disagreement:   null,
 
+      // Recommandations paris
+      betting_recommendations: engineResult.betting_recommendations ?? null,
+
       // Contexte pour l'IA
       explanation_context:  this._buildExplanationContext(
         sport, engineResult, robustness, dataQuality, confidenceLevel
