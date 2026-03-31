@@ -16,7 +16,7 @@ import { Logger }          from '../utils/utils.logger.js';
 
 const WORKER_URL = 'https://manibetpro.emmanueldelasse.workers.dev';
 const AI_ENDPOINT = `${WORKER_URL}/ai/messages`;
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-sonnet-4-20250514';
 const MAX_TOKENS = 600;
 
 // Map tâche → prompt système
@@ -80,18 +80,8 @@ export class AIClient {
 
       if (!rawText) throw new Error('Réponse IA vide');
 
-      // Supprimer le markdown de la réponse
-      const cleanText = rawText
-        .replace(/^#{1,3} .+$/gm, '')        // titres #, ##, ###
-        .replace(/\*\*(.+?)\*\*/g, '$1')      // gras **texte**
-        .replace(/\*(.+?)\*/g, '$1')          // italique *texte*
-        .replace(/^[-•] /gm, '')              // listes
-        .replace(/
-{3,}/g, '\n\n')         // espaces multiples
-        .trim();
-
       // Validation anti-hallucination
-      const validated = AIGuard.validate(cleanText, context);
+      const validated = AIGuard.validate(rawText, context);
 
       const explanation = {
         ai_explanation_id: crypto.randomUUID(),
