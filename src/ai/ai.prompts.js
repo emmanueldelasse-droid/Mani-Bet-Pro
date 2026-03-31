@@ -1,49 +1,76 @@
 /**
- * MANI BET PRO — ai.prompts.js v2.1
- *
- * Prompts optimisés pour minimiser les tokens Haiku.
+ * MANI BET PRO — ai.prompts.js v2.2
+ * Prompts orientés décision, langage simple.
  */
-
-const RULES = `Règles : données fournies uniquement, pas de probabilité inventée, pas de vainqueur affirmé, français factuel.`;
 
 export const AI_PROMPTS = {
 
-  VERSION: '0.2.1',
+  VERSION: '0.2.2',
 
-  SYSTEM_EXPLAIN: `Auditeur analytique NBA. Explique ce que le moteur a calculé : signaux dominants, direction, contribution. Mentionne les données manquantes si présentes. Max 200 mots. ${RULES}`,
+  SYSTEM_EXPLAIN: `Tu es un analyste sportif NBA. Tu reçois les données calculées par un moteur statistique sur un match NBA.
 
-  SYSTEM_AUDIT: `Auditeur analytique NBA. Audite la cohérence des signaux : contradictions, valeurs anormales, robustesse vs signaux. Max 150 mots. ${RULES}`,
+OBJECTIF : Expliquer en langage simple et direct pourquoi une équipe est favorisée, et si le pari suggéré est justifié.
 
-  SYSTEM_DETECT_INCONSISTENCY: `Auditeur analytique NBA. Détecte les incohérences : signal fort + faible robustesse, variable critique manquante, forme récente vs bilan saison. Si aucune → dis-le. Max 120 mots. ${RULES}`,
+FORMAT :
+1. Une phrase de verdict clair (qui est favori et pourquoi)
+2. Les 2-3 raisons principales (statistiques fournies uniquement)
+3. Une phrase sur la fiabilité de l'analyse
+4. Si un pari est suggéré : confirmer ou nuancer en 1 phrase
 
-  SYSTEM_BETTING: `Auditeur analytique NBA. Explique les recommandations de paris détectées par le moteur. Pour chaque paris : nomme le marché, explique l'edge calculé, rappelle les limites (edge ≠ certitude). Max 150 mots. ${RULES}`,
+RÈGLES : Uniquement les données fournies. Pas de joueur inventé. Pas de score inventé. Français simple. Max 150 mots.`,
 
-  SYSTEM_SCENARIO: `Auditeur analytique NBA. Explore le scénario en t'appuyant uniquement sur les données fournies. Conditionnel uniquement. Max 150 mots. ${RULES}`,
+  SYSTEM_AUDIT: `Tu es un analyste sportif NBA. Vérifie si les signaux du moteur sont cohérents entre eux. Signale uniquement les vraies contradictions. Langage simple. Max 100 mots. Données fournies uniquement.`,
+
+  SYSTEM_DETECT_INCONSISTENCY: `Tu es un analyste sportif NBA. Cherche les anomalies : signal fort mais données peu fiables, forme récente qui contredit le bilan saison. Si tout est cohérent, dis-le clairement. Max 80 mots. Données fournies uniquement.`,
+
+  SYSTEM_BETTING: `Tu es un analyste sportif NBA. Explique simplement le pari suggéré : quel marché, pourquoi l'edge existe, et quelle est la limite de cette analyse. Langage accessible. Max 100 mots. Données fournies uniquement.`,
+
+  SYSTEM_SCENARIO: `Tu es un analyste sportif NBA. Réponds à la question posée en utilisant uniquement les données fournies. Conditionnel uniquement. Max 100 mots.`,
 
   buildUserMessage(task, context) {
     const { match_meta, engine_output } = context;
 
+    const home = match_meta?.home ?? '—';
+    const away = match_meta?.away ?? '—';
+
+    const score = engine_output.predictive_score !== null
+      ? Math.round(engine_output.predictive_score * 100)
+      : null;
+
+    const favori = score !== null
+      ? (score > 50 ? `${home} favori (${score}%)` : score < 50 ? `${away} favori (${100 - score}%)` : 'Match équilibré')
+      : 'Favori non déterminé';
+
     const signals = (engine_output.top_signals ?? [])
       .filter(s => Math.abs(s.contribution) > 0.02)
       .slice(0, 3)
-      .map(s => `${s.label}:${s.direction}(${(s.contribution * 100).toFixed(0)}%)`)
-      .join(', ');
+      .map(s => `${s.label} → ${s.direction === 'POSITIVE' ? home : away} (+${(Math.abs(s.contribution) * 100).toFixed(0)}%)`)
+      .join('\n');
 
-    const score  = engine_output.predictive_score !== null ? Math.round(engine_output.predictive_score * 100) + '%' : '—';
-    const rob    = engine_output.robustness_score !== null ? Math.round(engine_output.robustness_score * 100) + '%' : '—';
-    const qual   = engine_output.data_quality_score !== null ? Math.round(engine_output.data_quality_score * 100) + '%' : '—';
+    const qual = engine_output.data_quality_score !== null
+      ? Math.round(engine_output.data_quality_score * 100) + '%'
+      : '—';
+
     const missing = (engine_output.missing_critical ?? []).join(', ') || 'aucune';
 
-    const reversal = engine_output.reversal_threshold
-      ? `${engine_output.reversal_threshold.variable}@${engine_output.reversal_threshold.step_pct}%`
-      : 'aucun';
+    const betting = engine_output.betting_recommendations?.best
+      ? (() => {
+          const b = engine_output.betting_recommendations.best;
+          const side = b.side === 'HOME' ? home : b.side === 'AWAY' ? away : b.side;
+          return `Pari suggéré : ${b.label} — ${side} (edge +${b.edge}%, fiabilité ${b.confidence})`;
+        })()
+      : 'Aucun pari suggéré';
 
-    const needsRobustness = ['AUDIT', 'INCONSISTENCY'].some(t => task.toUpperCase().includes(t));
+    return `Match : ${home} vs ${away} (NBA)
+Verdict moteur : ${favori}
+Fiabilité données : ${qual}
 
-    return `${match_meta?.home ?? '—'} vs ${match_meta?.away ?? '—'} | NBA | ${engine_output.confidence_level}
-Score:${score} Rob:${rob} Qual:${qual}
-Signaux: ${signals || 'aucun'}
-Manquantes: ${missing}${needsRobustness ? `\nRenversement: ${reversal}` : ''}
+Raisons principales :
+${signals || 'Aucun signal significatif'}
+
+${betting}
+Données manquantes : ${missing}
+
 → ${task}`;
   },
 };
