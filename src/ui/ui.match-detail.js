@@ -542,7 +542,13 @@ function renderBloc7(analysis, match) {
           <span class="mono betting-row__odds">${oddsStr}</span>
         </div>
         <div class="betting-row__stats">
-          <span class="text-muted" style="font-size:11px">Moteur ${r.motor_prob}% · Bookmaker ${r.implied_prob}%</span>
+          <span class="text-muted" style="font-size:11px">${
+            r.type === 'OVER_UNDER'
+              ? `Moteur : ${r.motor_prob} pts · Ligne : ${r.implied_prob} pts`
+              : r.type === 'SPREAD'
+              ? `Moteur : ~${r.motor_prob} pts d'écart · Spread : ${r.implied_prob > 0 ? '+' : ''}${r.implied_prob}`
+              : `Moteur : ${r.motor_prob}% · Bookmaker : ${r.implied_prob}%`
+          }</span>
           <span class="betting-row__edge" style="color:${confColor};font-size:11px;font-weight:600">
             Cote sous-estimée de ${r.edge}%
           </span>
