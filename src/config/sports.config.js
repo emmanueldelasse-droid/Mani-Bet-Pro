@@ -29,7 +29,7 @@ export const SPORTS_CONFIG = {
       { id: 'ts_diff',           label: 'TS% différentiel',             critical: false },
       { id: 'win_pct_diff',      label: 'Win% différentiel (saison)',   critical: true  },
       { id: 'home_away_split',   label: 'Split Domicile/Extérieur',     critical: false },
-      { id: 'recent_form_ema',   label: 'Forme récente (EMA W/L)',      critical: true  },
+      { id: 'recent_form_ema',   label: 'Forme récente (EMA W/L)',      critical: false },
       { id: 'absences_impact',   label: 'Impact absences (PDF NBA)',    critical: false },
       { id: 'avg_pts_diff',      label: 'Points marqués (différentiel)',critical: false },
     ],
