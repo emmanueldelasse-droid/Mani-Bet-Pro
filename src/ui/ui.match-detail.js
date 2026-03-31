@@ -633,7 +633,7 @@ async function triggerAIExplanation(container, analysis, match, task) {
   responseEl.innerHTML = '<span class="text-muted">Analyse en cours…</span>';
 
   const TASK_PROMPTS = {
-    EXPLAIN: `Tu es un analyste sportif NBA qui parle à un parieur. Réponds en 3-4 phrases courtes en prose, sans titres, sans gras, sans listes. Phrase 1 : qui est favorisé et pourquoi. Phrase 2 : la raison principale en termes simples. Phrase 3 : si un pari est suggéré, dis si tu le confirmes. Phrase 4 : une limite courte. Uniquement les données fournies. Max 80 mots.`,
+    EXPLAIN: `Tu es un analyste sportif NBA. Réponds en 3-4 phrases courtes, sans titres, sans gras, sans listes. INTERDIT ABSOLU : inventer un chiffre, un pourcentage, un joueur, un résultat non présent dans les données fournies. Utilise UNIQUEMENT les valeurs exactes du contexte. Phrase 1 : quelle équipe est favorisée selon le score moteur fourni et pourquoi. Phrase 2 : le signal principal en termes simples. Phrase 3 : confirmer ou non le pari suggéré si présent. Phrase 4 : une limite courte. Max 80 mots.`,
 
     AUDIT: `Tu es un analyste sportif NBA. En 2-3 phrases simples sans titres ni listes : dis si les signaux sont cohérents entre eux. Si contradiction, explique laquelle. Uniquement les données fournies. Max 60 mots.`,
 
@@ -642,8 +642,15 @@ async function triggerAIExplanation(container, analysis, match, task) {
 
   const systemPrompt = TASK_PROMPTS[task] ?? TASK_PROMPTS.EXPLAIN;
 
+  const home = match.home_team?.name ?? '—';
+  const away = match.away_team?.name ?? '—';
+  const score = analysis.predictive_score !== null ? Math.round(analysis.predictive_score * 100) : null;
+  const favori = score !== null ? (score > 50 ? `${home} (score moteur: ${score}%)` : score < 50 ? `${away} (score moteur: ${100 - score}%)` : 'Match équilibré (50%)') : 'Non déterminé';
+
   const userMessage = `
-Analyse le match ${match.home_team?.name ?? '—'} vs ${match.away_team?.name ?? '—'}.
+N'INVENTE AUCUN CHIFFRE. Utilise uniquement les valeurs ci-dessous.
+Match : ${home} vs ${away}
+Favori selon le moteur : ${favori}
 
 Contexte moteur :
 - Score prédictif : ${analysis.predictive_score !== null ? Math.round(analysis.predictive_score * 100) + '%' : 'non calculé'}
