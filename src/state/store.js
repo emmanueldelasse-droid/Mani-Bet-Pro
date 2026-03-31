@@ -64,6 +64,11 @@ const INITIAL_STATE = {
     sidebarOpen:     false,
   },
 
+  // ── Historique des analyses ──────────────────────────────────────────────
+  // Structure : [{ analysis_id, match_id, date, home, away, sport, confidence_level,
+  //               predictive_score, robustness_score, saved_at }]
+  history: [],
+
   // ── Erreurs globales ─────────────────────────────────────────────────────
   errors: [],
 
@@ -217,6 +222,7 @@ class Store {
     const PERSISTABLE_KEYS = [
       'dashboardFilters',
       'ui.displayMode',
+      'history',
     ];
 
     for (const key of PERSISTABLE_KEYS) {
@@ -283,3 +289,17 @@ class Store {
 
 // Export singleton
 export const store = new Store();
+
+// Charger l'historique depuis localStorage au démarrage
+try {
+  const saved = localStorage.getItem('mbp_state');
+  if (saved) store.load(JSON.parse(saved));
+} catch {}
+
+// Sauvegarder history dans localStorage à chaque changement
+store.subscribe('history', (history) => {
+  try {
+    const saved = JSON.parse(localStorage.getItem('mbp_state') ?? '{}');
+    localStorage.setItem('mbp_state', JSON.stringify({ ...saved, history }));
+  } catch {}
+});
