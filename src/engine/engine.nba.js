@@ -57,6 +57,11 @@ export class EngineNBA {
       scoreMethod = 'WEIGHTED_SUM';
     }
 
+    // Calcul des recommandations paris (value betting)
+    const bettingRecs = (score !== null && matchData?.odds)
+      ? this._computeBettingRecommendations(score, matchData.odds, matchData)
+      : null;
+
     const result = {
       sport:               'NBA',
       score,
@@ -67,6 +72,7 @@ export class EngineNBA {
       missing_critical:    missingCritical,
       uncalibrated_weights: uncalibrated,
       variables_used:      variables,
+      betting_recommendations: bettingRecs,
       computed_at:         new Date().toISOString(),
     };
 
@@ -436,4 +442,123 @@ export class EngineNBA {
 
     return labels[varId] ?? `Variable ${varId} — signal ${intensity} ${direction}`;
   }
+  // ── RECOMMANDATIONS PARIS (VALUE BETTING) ────────────────────────────────
+  //
+  // Convertit les cotes américaines en probabilité implicite.
+  // Compare avec la probabilité calculée par le moteur.
+  // Recommande uniquement les paris où le moteur détecte un edge positif.
+  //
+  // Score moteur [0,1] → probabilité victoire domicile.
+  // Score > 0.5 = favori domicile. Score < 0.5 = favori extérieur.
+
+  static _computeBettingRecommendations(score, odds, matchData) {
+    const recs = [];
+
+    // Probabilité calculée par le moteur
+    const pHome = score;          // P(victoire domicile)
+    const pAway = 1 - score;      // P(victoire extérieur)
+
+    // ── MONEYLINE ──────────────────────────────────────────────────────────
+    if (odds.home_ml !== null && odds.away_ml !== null) {
+      const impliedHome = this._americanToProb(odds.home_ml);
+      const impliedAway = this._americanToProb(odds.away_ml);
+
+      const edgeHome = pHome - impliedHome;
+      const edgeAway = pAway - impliedAway;
+
+      // Recommander si edge > 3%
+      if (Math.abs(edgeHome) > 0.03) {
+        recs.push({
+          type:        'MONEYLINE',
+          label:       'Vainqueur du match',
+          side:        edgeHome > 0 ? 'HOME' : 'AWAY',
+          odds_line:   edgeHome > 0 ? odds.home_ml : odds.away_ml,
+          motor_prob:  edgeHome > 0 ? Math.round(pHome * 100) : Math.round(pAway * 100),
+          implied_prob: edgeHome > 0 ? Math.round(impliedHome * 100) : Math.round(impliedAway * 100),
+          edge:        Math.round(Math.abs(edgeHome > 0 ? edgeHome : edgeAway) * 100),
+          confidence:  this._edgeToConfidence(Math.abs(edgeHome > 0 ? edgeHome : edgeAway)),
+          has_value:   true,
+        });
+      }
+    }
+
+    // ── SPREAD ────────────────────────────────────────────────────────────
+    if (odds.spread !== null) {
+      // Le spread DraftKings est du point de vue de l'équipe HOME
+      // spread négatif = domicile favori (doit gagner de |spread| pts)
+      const spread = odds.spread;
+
+      // Signal directionnel du moteur → score > 0.6 = domicile fort favori
+      const motorMargin = (score - 0.5) * 30; // Conversion approx en pts
+      const spreadValue = motorMargin - (-spread); // Positif = moteur plus optimiste que le spread
+
+      if (Math.abs(spreadValue) > 3) {
+        recs.push({
+          type:        'SPREAD',
+          label:       'Handicap (spread)',
+          side:        spreadValue > 0 ? 'HOME' : 'AWAY',
+          odds_line:   spreadValue > 0 ? spread : -spread,
+          motor_prob:  Math.round(Math.abs(motorMargin)),
+          implied_prob: Math.round(Math.abs(spread)),
+          edge:        Math.round(Math.abs(spreadValue)),
+          confidence:  this._edgeToConfidence(Math.abs(spreadValue) / 30),
+          has_value:   Math.abs(spreadValue) > 5,
+          note:        `Moteur estime ${Math.round(Math.abs(motorMargin))} pts d'écart vs spread ${spread > 0 ? '+' : ''}${spread}`,
+        });
+      }
+    }
+
+    // ── OVER/UNDER ────────────────────────────────────────────────────────
+    if (odds.over_under !== null) {
+      const homeAvgPts = matchData?.home_season_stats?.avg_pts;
+      const awayAvgPts = matchData?.away_season_stats?.avg_pts;
+
+      if (homeAvgPts !== null && homeAvgPts !== undefined &&
+          awayAvgPts !== null && awayAvgPts !== undefined) {
+        const projectedTotal = homeAvgPts + awayAvgPts;
+        const ouLine         = odds.over_under;
+        const diff           = projectedTotal - ouLine;
+
+        if (Math.abs(diff) > 3) {
+          recs.push({
+            type:        'OVER_UNDER',
+            label:       'Total de points',
+            side:        diff > 0 ? 'OVER' : 'UNDER',
+            odds_line:   ouLine,
+            motor_prob:  Math.round(projectedTotal),
+            implied_prob: Math.round(ouLine),
+            edge:        Math.round(Math.abs(diff)),
+            confidence:  this._edgeToConfidence(Math.abs(diff) / 20),
+            has_value:   Math.abs(diff) > 5,
+            note:        `Moteur projette ${Math.round(projectedTotal)} pts total vs ligne ${ouLine}`,
+          });
+        }
+      }
+    }
+
+    // Trier par edge décroissant
+    recs.sort((a, b) => b.edge - a.edge);
+
+    return {
+      recommendations: recs,
+      best:            recs.find(r => r.has_value) ?? null,
+      computed_at:     new Date().toISOString(),
+    };
+  }
+
+  // Cotes américaines → probabilité implicite (avec marge bookmaker)
+  static _americanToProb(american) {
+    if (american === null || american === undefined) return null;
+    if (american > 0) return 100 / (american + 100);
+    return Math.abs(american) / (Math.abs(american) + 100);
+  }
+
+  // Edge → niveau de confiance
+  static _edgeToConfidence(edge) {
+    if (edge >= 0.10) return 'FORTE';
+    if (edge >= 0.06) return 'MOYENNE';
+    return 'FAIBLE';
+  }
+
+
 }
