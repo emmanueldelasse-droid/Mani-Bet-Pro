@@ -2,7 +2,7 @@
  * MANI BET PRO — ui.match-detail.js v2
  *
  * Fiche match complète — Blocs 1 à 6.
- *   01 — Résumé exécutif (scores + statut)
+ *   01 — Verdict (scores + statut)
  *   02 — Signaux dominants
  *   03 — Qualité des données (source + timestamp + statut)
  *   04 — Robustesse (sensibilité, variables critiques, seuil renversement)
@@ -129,7 +129,7 @@ function renderBloc1(analysis) {
     <div class="card match-detail__bloc" id="bloc-1">
       <div class="bloc-header">
         <span class="bloc-header__number mono text-muted">01</span>
-        <span class="bloc-header__title">Résumé exécutif</span>
+        <span class="bloc-header__title">Verdict</span>
         <span class="badge ${interp.cssClass}">${interp.label}</span>
       </div>
 
@@ -144,10 +144,10 @@ function renderBloc1(analysis) {
       ` : ''}
 
       <div class="scores-grid">
-        ${renderScoreBlock('Signal prédictif', pPct, 'signal', 'var(--color-signal)')}
-        ${renderScoreBlock('Robustesse', rPct, 'robust', null, rClass)}
+        ${renderScoreBlock('Force du signal', pPct, 'signal', 'var(--color-signal)')}
+        ${renderScoreBlock('Fiabilité', rPct, 'robust', null, rClass)}
         ${renderScoreBlock('Qualité données', dPct, 'data', 'var(--color-data-quality)')}
-        ${renderScoreBlock('Volatilité', vPct, 'volatility', 'var(--color-volatility)')}
+        ${renderScoreBlock('Incertitude', vPct, 'volatility', 'var(--color-volatility)')}
       </div>
 
       ${renderMissingCritical(analysis)}
@@ -196,7 +196,7 @@ function renderBloc2(analysis) {
     <div class="card match-detail__bloc" id="bloc-2">
       <div class="bloc-header">
         <span class="bloc-header__number mono text-muted">02</span>
-        <span class="bloc-header__title">Signaux dominants</span>
+        <span class="bloc-header__title">Pourquoi ce favori ?</span>
         <span class="text-muted" style="font-size:11px">${signals.length} signal${signals.length !== 1 ? 's' : ''}</span>
       </div>
 
@@ -276,7 +276,7 @@ function renderBloc3(analysis, match) {
     <div class="card match-detail__bloc" id="bloc-3">
       <div class="bloc-header">
         <span class="bloc-header__number mono text-muted">03</span>
-        <span class="bloc-header__title">Qualité des données</span>
+        <span class="bloc-header__title">Sources utilisées</span>
         ${analysis?.data_quality_score !== null && analysis?.data_quality_score !== undefined
           ? `<span class="mono" style="color:var(--color-data-quality); font-size:13px">${Math.round(analysis.data_quality_score * 100)}%</span>`
           : ''}
@@ -319,7 +319,7 @@ function renderBloc4(analysis) {
     <div class="card match-detail__bloc" id="bloc-4">
       <div class="bloc-header">
         <span class="bloc-header__number mono text-muted">04</span>
-        <span class="bloc-header__title">Robustesse</span>
+        <span class="bloc-header__title">Stabilité de l'analyse</span>
         ${rb?.score !== null && rb?.score !== undefined
           ? `<span class="mono ${rb.score >= 0.75 ? 'text-success' : rb.score >= 0.50 ? 'text-warning' : 'text-danger'}" style="font-size:13px">${Math.round(rb.score * 100)}%</span>`
           : ''}
@@ -387,34 +387,45 @@ function renderBloc4(analysis) {
 
 function renderBloc5(analysis, match) {
   const canCallAI = analysis && analysis.confidence_level !== null && analysis.explanation_context;
+  const best = analysis?.betting_recommendations?.best;
+
+  const bestStr = best
+    ? (() => {
+        const home = match?.home_team?.name ?? 'Domicile';
+        const away = match?.away_team?.name ?? 'Extérieur';
+        const side = best.side === 'HOME' ? home : best.side === 'AWAY' ? away : best.side;
+        const oddsStr = best.odds_line > 0 ? `+${best.odds_line}` : String(best.odds_line);
+        return `Pari suggéré : ${side} ${best.type === 'OVER_UNDER' ? best.side : ''} ${oddsStr} (edge +${best.edge}%)`;
+      })()
+    : null;
 
   return `
     <div class="card match-detail__bloc" id="bloc-5">
       <div class="bloc-header">
         <span class="bloc-header__number mono text-muted">05</span>
-        <span class="bloc-header__title">Explication IA</span>
-        <span class="text-muted" style="font-size:11px">Audit · Synthèse</span>
+        <span class="bloc-header__title">Analyse IA</span>
       </div>
 
       <div id="ai-content">
         ${!canCallAI ? `
           <div class="text-muted" style="font-size:12px">
-            L'explication IA nécessite une analyse complète (score non null).
+            Analyse non disponible pour ce match.
           </div>
         ` : `
-          <div class="ai-cta-group" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:var(--space-3)">
-            <button class="btn btn--ghost" data-ai-task="EXPLAIN" id="btn-ai-explain">
-              💬 Synthèse
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:var(--space-3)">
+            <button class="btn btn--primary" data-ai-task="EXPLAIN" id="btn-ai-explain">
+              💬 Expliquer ce match
             </button>
-            <button class="btn btn--ghost" data-ai-task="AUDIT" id="btn-ai-audit">
-              🔍 Audit cohérence
+            <button class="btn btn--ghost btn--sm" data-ai-task="AUDIT" id="btn-ai-audit">
+              🔍 Vérifier la cohérence
             </button>
-            <button class="btn btn--ghost" data-ai-task="DETECT_INCONSISTENCY" id="btn-ai-detect">
-              ⚡ Détecter incohérences
+            <button class="btn btn--ghost btn--sm" data-ai-task="DETECT_INCONSISTENCY" id="btn-ai-detect">
+              ⚡ Détecter les anomalies
             </button>
           </div>
-          <div id="ai-response" class="ai-response text-muted" style="font-size:12px; line-height:1.7; min-height:60px">
-            Choisis un mode d'analyse ci-dessus.
+          ${bestStr ? `<div style="font-size:12px;color:var(--color-success);margin-bottom:var(--space-3);padding:var(--space-2);border-left:2px solid var(--color-success)">${bestStr}</div>` : ''}
+          <div id="ai-response" class="ai-response text-muted" style="font-size:13px; line-height:1.8; min-height:60px">
+            Clique sur "Expliquer ce match" pour obtenir une analyse claire.
           </div>
         `}
       </div>
@@ -436,7 +447,7 @@ function renderBloc6(analysis) {
     <div class="card match-detail__bloc" id="bloc-6">
       <div class="bloc-header">
         <span class="bloc-header__number mono text-muted">06</span>
-        <span class="bloc-header__title">Volatilité &amp; Contexte</span>
+        <span class="bloc-header__title">Niveau d'incertitude</span>
         ${volLevel ? `<span class="${volLevel.cls} mono" style="font-size:13px">${Math.round(vi * 100)}%</span>` : ''}
       </div>
 
