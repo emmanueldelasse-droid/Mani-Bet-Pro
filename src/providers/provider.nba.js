@@ -1,303 +1,245 @@
 /**
  * MANI BET PRO — provider.nba.js v2
  *
- * Provider NBA — deux sources :
- * Source A : BallDontLie  — matchs du jour, wins/losses basiques
- * Source B : stats.nba.com — stats avancées (net rating, pace, eFG%, TS%)
+ * Sources :
+ *   ESPN API (gratuite, sans clé)     → matchs + stats avancées (eFG%, TS%, splits)
+ *   BallDontLie v1 (avec clé)          → forme récente W/L
+ *   PDF NBA officiel (via Worker)      → injury reports officiels
  *
- * Toutes les requêtes transitent par le Cloudflare Worker.
+ * Format ESPN retourné par le Worker :
+ *   matches[].home_season_stats  → { efg_pct, ts_pct, win_pct, home_win_pct, avg_pts, ... }
+ *   matches[].away_season_stats  → idem
+ *   matches[].odds               → { spread, over_under, home_ml, away_ml }
+ *
  * Aucune clé API côté front.
- * Si une donnée est indisponible → null explicite, jamais inventé.
+ * Si une donnée est indisponible → null (jamais inventée).
  */
 
-import { API_CONFIG }   from '../config/api.config.js';
+import { API_CONFIG }    from '../config/api.config.js';
 import { ProviderCache } from './provider.cache.js';
 import { Logger }        from '../utils/utils.logger.js';
 
-const WORKER     = API_CONFIG.WORKER_BASE_URL;
-const TIMEOUT    = API_CONFIG.TIMEOUTS.DEFAULT;
-const PROVIDER_A = 'BALLDONTLIE';
-const PROVIDER_B = 'NBA_STATS';
+const WORKER  = API_CONFIG.WORKER_BASE_URL;
+const TIMEOUT = API_CONFIG.TIMEOUTS.DEFAULT;
 
 export class ProviderNBA {
 
-  // ── MATCHS DU JOUR ────────────────────────────────────────────────────
+  // ── MATCHS DU JOUR (ESPN) ─────────────────────────────────────────────────
 
+  /**
+   * Récupère les matchs ESPN du jour avec stats et cotes intégrées.
+   * @param {string} date — YYYY-MM-DD
+   * @returns {Promise<ESPNMatchList|null>}
+   */
   static async getMatchesToday(date) {
-    const cacheKey = ProviderCache.buildKey('nba', 'matches', { date });
+    const cacheKey = ProviderCache.buildKey('nba', 'espn_matches', { date });
+    const cached   = ProviderCache.get(cacheKey);
+    if (cached) {
+      Logger.apiCall({ provider: 'ESPN', endpoint: '/nba/matches', statusCode: 200, cached: true });
+      return cached;
+    }
+
+    const dateESPN = date.replace(/-/g, '');
+    const url      = `${WORKER}${API_CONFIG.ROUTES.NBA.MATCHES}?date=${dateESPN}`;
+    const data     = await this._fetch(url, 'ESPN', '/nba/matches');
+    if (!data) return null;
+
+    const result = this._normalizeESPNMatches(data, date);
+    if (result) ProviderCache.set(cacheKey, result, 'MATCHES');
+    return result;
+  }
+
+  // ── STATS ÉQUIPE (ESPN — incluses dans les matchs) ────────────────────────
+
+  /**
+   * Récupère les stats saison ESPN d'une équipe depuis le scoreboard.
+   * Si l'équipe ne joue pas aujourd'hui, retourne null.
+   * @param {string} espnTeamId
+   * @returns {Promise<NBATeamStats|null>}
+   */
+  static async getTeamStats(espnTeamId) {
+    const cacheKey = ProviderCache.buildKey('nba', 'espn_team_stats', { espnTeamId });
     const cached   = ProviderCache.get(cacheKey);
     if (cached) return cached;
 
-    const data = await this._fetch(
-      `${WORKER}/nba/matches?date=${date}`,
-      PROVIDER_A, '/nba/matches'
-    );
-
+    const url  = `${WORKER}${API_CONFIG.ROUTES.NBA.TEAM_STATS.replace(':id', espnTeamId)}`;
+    const data = await this._fetch(url, 'ESPN', `/nba/team/${espnTeamId}/stats`);
     if (!data) return null;
 
-    const result = this._normalizeMatches(data, date);
+    const result = this._normalizeESPNTeamStats(data, espnTeamId);
+    if (result) ProviderCache.set(cacheKey, result, 'SEASON_STATS');
+    return result;
+  }
+
+  // ── FORME RÉCENTE (BallDontLie) ───────────────────────────────────────────
+
+  /**
+   * Récupère les W/L des N derniers matchs via BallDontLie.
+   * @param {string} bdlTeamId — ID BallDontLie (différent de l'ESPN ID)
+   * @param {string} season    — ex: '2025'
+   * @param {number} n         — nombre de matchs
+   * @returns {Promise<NBARecentForm|null>}
+   */
+  static async getRecentForm(bdlTeamId, season, n = 10) {
+    const cacheKey = ProviderCache.buildKey('nba', 'bdl_recent', { bdlTeamId, season, n });
+    const cached   = ProviderCache.get(cacheKey);
+    if (cached) return cached;
+
+    const url  = `${WORKER}${API_CONFIG.ROUTES.NBA.TEAM_RECENT.replace(':id', bdlTeamId)}?season=${season}&n=${n}`;
+    const data = await this._fetch(url, 'BallDontLie', `/nba/team/${bdlTeamId}/recent`, API_CONFIG.TIMEOUTS.DEFAULT);
+    if (!data) return null;
+
+    const result = {
+      team_id:    bdlTeamId,
+      season,
+      source:     'balldontlie_v1',
+      fetched_at: data.fetched_at ?? new Date().toISOString(),
+      matches:    (data.matches ?? []).map(m => ({
+        game_id:    m.game_id,
+        date:       m.date,
+        won:        m.won,
+        margin:     m.margin,
+        is_home:    m.is_home,
+        team_score: m.team_score,
+        opp_score:  m.opp_score,
+      })),
+    };
+
     if (result) ProviderCache.set(cacheKey, result, 'RECENT_FORM');
     return result;
   }
 
-  // ── STATS BASIQUES (wins/losses) — BallDontLie ───────────────────────
-
-  static async getTeamStats(teamId, statType, season) {
-    const cacheKey = ProviderCache.buildKey('nba', 'stats', { teamId, statType, season });
-    const cached   = ProviderCache.get(cacheKey);
-    if (cached) return cached;
-
-    const ttl  = statType === 'SEASON' ? 'SEASON_STATS' : 'RECENT_FORM';
-    const data = await this._fetch(
-      `${WORKER}/nba/team/${teamId}/stats?type=${statType}&season=${season}`,
-      PROVIDER_A, `/nba/team/${teamId}/stats`
-    );
-
-    if (!data) return null;
-
-    const result = {
-      team_id:      teamId,
-      stat_type:    statType,
-      source:       PROVIDER_A,
-      fetched_at:   new Date().toISOString(),
-      games_sample: data.games_played ?? null,
-      stats: {
-        net_rating:        null,   // Pas disponible BallDontLie gratuit
-        offensive_rating:  null,
-        defensive_rating:  null,
-        pace:              null,
-        efg_pct:           null,
-        ts_pct:            null,
-        tov_pct:           null,
-        orb_pct:           null,
-        wins:              data.wins    ?? null,
-        losses:            data.losses  ?? null,
-        win_pct:           data.win_pct ?? null,
-      },
-      matches: data.matches ?? null,
-    };
-
-    ProviderCache.set(cacheKey, result, ttl);
-    return result;
-  }
-
-  // ── STATS AVANCÉES — stats.nba.com ────────────────────────────────────
+  // ── INJURY REPORT (PDF NBA officiel via Worker) ───────────────────────────
 
   /**
-   * Récupère les stats avancées depuis stats.nba.com via le Worker.
-   * Net rating, pace, eFG%, TS%, TOV%, ORB%, PIE.
+   * Récupère les injury reports officiels NBA du jour.
+   * Source : ak-static.cms.nba.com/referee/injury/Injury-Report_*.pdf
+   * Parsing via Claude Haiku côté Worker.
    *
-   * @param {string} teamId — ID BallDontLie (à mapper vers ID NBA Stats)
-   * @param {string} season — ex: "2025"
-   * @returns {Promise<NBAAdvancedStats|null>}
+   * @param {string} date — YYYY-MM-DD
+   * @returns {Promise<NBAInjuryReport|null>}
    */
-  static async getTeamAdvancedStats(teamId, season) {
-    // Convertir l'ID BallDontLie vers l'ID stats.nba.com
-    const nbaStatsId = this._mapTeamId(teamId);
-    if (!nbaStatsId) {
-      Logger.warn('NBA_TEAM_ID_NOT_MAPPED', { teamId });
-      return this._buildEmptyAdvanced(teamId);
-    }
-
-    const cacheKey = ProviderCache.buildKey('nba', 'advanced', { teamId: nbaStatsId, season });
+  static async getInjuryReport(date) {
+    const cacheKey = ProviderCache.buildKey('nba', 'injuries', { date });
     const cached   = ProviderCache.get(cacheKey);
     if (cached) return cached;
 
-    const data = await this._fetch(
-      `${WORKER}/nba/team/${nbaStatsId}/advanced?season=${season}`,
-      PROVIDER_B, `/nba/team/${nbaStatsId}/advanced`
-    );
-
-    if (!data) return this._buildEmptyAdvanced(teamId);
-
-    const result = {
-      team_id:      teamId,
-      nba_stats_id: nbaStatsId,
-      source:       PROVIDER_B,
-      fetched_at:   new Date().toISOString(),
-      available:    data.available ?? false,
-      games_sample: data.games_played ?? null,
-      stats: {
-        net_rating:        data.net_rating       ?? null,
-        offensive_rating:  data.offensive_rating ?? null,
-        defensive_rating:  data.defensive_rating ?? null,
-        pace:              data.pace             ?? null,
-        efg_pct:           data.efg_pct          ?? null,
-        ts_pct:            data.ts_pct           ?? null,
-        tov_pct:           data.tov_pct          ?? null,
-        orb_pct:           data.orb_pct          ?? null,
-        wins:              data.wins             ?? null,
-        losses:            data.losses           ?? null,
-        win_pct:           data.win_pct          ?? null,
-        pie:               data.pie              ?? null,
-      },
-    };
-
-    if (data.available) {
-      ProviderCache.set(cacheKey, result, 'SEASON_STATS');
-    }
-
-    return result;
-  }
-
-  // ── FORME RÉCENTE (derniers matchs) ──────────────────────────────────
-
-  /**
-   * Récupère les N derniers matchs pour calculer l'EMA de forme.
-   * @param {string} teamId
-   * @param {string} season
-   * @param {number} n — 5 ou 10
-   */
-  static async getRecentForm(teamId, season, n = 10) {
-    const statType = n <= 5 ? 'LAST_5' : 'LAST_10';
-    const cacheKey = ProviderCache.buildKey('nba', 'recent', { teamId, season, n });
-    const cached   = ProviderCache.get(cacheKey);
-    if (cached) return cached;
-
-    const data = await this._fetch(
-      `${WORKER}/nba/team/${teamId}/stats?type=${statType}&season=${season}`,
-      PROVIDER_A, `/nba/team/${teamId}/stats`
-    );
-
-    if (!data) return null;
-
-    // Transformer les matchs en série won/lost pour l'EMA
-    const matches = (data.matches ?? []).map(game => {
-      const isHome    = String(game.home_team?.id) === String(teamId);
-      const teamScore = isHome ? game.home_team_score    : game.visitor_team_score;
-      const oppScore  = isHome ? game.visitor_team_score : game.home_team_score;
-      return {
-        date:    game.date,
-        won:     teamScore > oppScore,
-        margin:  teamScore - oppScore,
-      };
-    });
-
-    const result = {
-      team_id:    teamId,
-      source:     PROVIDER_A,
-      fetched_at: new Date().toISOString(),
-      matches,
-    };
-
-    ProviderCache.set(cacheKey, result, 'RECENT_FORM');
-    return result;
-  }
-
-  // ── BLESSURES ─────────────────────────────────────────────────────────
-
-  static async getInjuries(teamId) {
-    const cacheKey = ProviderCache.buildKey('nba', 'injuries', { teamId });
-    const cached   = ProviderCache.get(cacheKey);
-    if (cached) return cached;
-
-    const data = await this._fetch(
-      `${WORKER}/nba/injuries?teamId=${teamId}`,
-      PROVIDER_A, '/nba/injuries'
-    );
-
-    if (!data) return { team_id: teamId, players: [], available: false };
+    const url  = `${WORKER}${API_CONFIG.ROUTES.NBA.INJURIES}?date=${date}`;
+    const data = await this._fetch(url, 'NBA_PDF', '/nba/injuries', API_CONFIG.TIMEOUTS.INJURIES);
+    if (!data || !data.available) return null;
 
     ProviderCache.set(cacheKey, data, 'INJURIES');
     return data;
   }
 
-  // ── MAPPING IDs BALLDONTLIE → NBA STATS ──────────────────────────────
-  //
-  // BallDontLie et stats.nba.com utilisent des IDs différents.
-  // Ce mapping est basé sur la saison 2024-25 — à vérifier si des équipes
-  // changent d'ID entre saisons.
-
-  static _mapTeamId(bdlId) {
-    const MAP = {
-      '1':  '1610612737',   // Atlanta Hawks
-      '2':  '1610612738',   // Boston Celtics
-      '3':  '1610612751',   // Brooklyn Nets
-      '4':  '1610612766',   // Charlotte Hornets
-      '5':  '1610612741',   // Chicago Bulls
-      '6':  '1610612739',   // Cleveland Cavaliers
-      '7':  '1610612742',   // Dallas Mavericks
-      '8':  '1610612743',   // Denver Nuggets
-      '9':  '1610612765',   // Detroit Pistons
-      '10': '1610612744',   // Golden State Warriors
-      '11': '1610612745',   // Houston Rockets
-      '12': '1610612754',   // Indiana Pacers
-      '13': '1610612746',   // LA Clippers
-      '14': '1610612747',   // Los Angeles Lakers
-      '15': '1610612763',   // Memphis Grizzlies
-      '16': '1610612748',   // Miami Heat
-      '17': '1610612749',   // Milwaukee Bucks
-      '18': '1610612750',   // Minnesota Timberwolves
-      '19': '1610612740',   // New Orleans Pelicans
-      '20': '1610612752',   // New York Knicks
-      '21': '1610612760',   // Oklahoma City Thunder
-      '22': '1610612753',   // Orlando Magic
-      '23': '1610612755',   // Philadelphia 76ers
-      '24': '1610612756',   // Phoenix Suns
-      '25': '1610612757',   // Portland Trail Blazers
-      '26': '1610612758',   // Sacramento Kings
-      '27': '1610612759',   // San Antonio Spurs
-      '28': '1610612761',   // Toronto Raptors
-      '29': '1610612762',   // Utah Jazz
-      '30': '1610612764',   // Washington Wizards
-    };
-
-    return MAP[String(bdlId)] ?? null;
+  /**
+   * Filtre l'injury report pour une équipe donnée.
+   * @param {NBAInjuryReport} report
+   * @param {string} teamName — nom complet de l'équipe (ex: "Miami Heat")
+   * @returns {Array<InjuryPlayer>}
+   */
+  static getInjuriesForTeam(report, teamName) {
+    if (!report?.by_team) return [];
+    return report.by_team[teamName] ?? [];
   }
 
-  // ── NORMALISATEURS ────────────────────────────────────────────────────
+  // ── NORMALISATEURS ────────────────────────────────────────────────────────
 
-  static _normalizeMatches(data, date) {
-    if (!data?.data || !Array.isArray(data.data)) return null;
+  static _normalizeESPNMatches(data, date) {
+    if (!data?.matches) return null;
 
     return {
       date,
-      source:     PROVIDER_A,
+      source:     'espn',
       fetched_at: new Date().toISOString(),
-      matches: data.data.map(game => ({
-        id:     String(game.id ?? ''),
-        date:   game.date ?? date,
-        status: game.status ?? null,
-        time:   game.time ?? null,
-        period: game.period ?? null,
+      matches:    data.matches.map(m => ({
+        id:            m.id ?? m.espn_id,
+        espn_id:       m.espn_id,
+        date:          m.date ?? date,
+        datetime:      m.datetime,
+        name:          m.name,
+        status:        m.status,
+        status_detail: m.status_detail,
+        venue:         m.venue ?? null,
+        source:        'espn',
+        fetched_at:    m.fetched_at ?? new Date().toISOString(),
+
         home_team: {
-          id:           String(game.home_team?.id ?? ''),
-          name:         game.home_team?.full_name ?? null,
-          abbreviation: game.home_team?.abbreviation ?? null,
-          score:        game.home_team_score ?? null,
+          espn_id:      m.home_team?.espn_id ?? null,
+          name:         m.home_team?.name ?? null,
+          abbreviation: m.home_team?.abbreviation ?? null,
+          score:        m.home_team?.score ?? null,
+          record:       m.home_team?.record ?? null,
+          home_record:  m.home_team?.home_record ?? null,
+          away_record:  m.home_team?.away_record ?? null,
+          logo:         m.home_team?.logo ?? null,
         },
         away_team: {
-          id:           String(game.visitor_team?.id ?? ''),
-          name:         game.visitor_team?.full_name ?? null,
-          abbreviation: game.visitor_team?.abbreviation ?? null,
-          score:        game.visitor_team_score ?? null,
+          espn_id:      m.away_team?.espn_id ?? null,
+          name:         m.away_team?.name ?? null,
+          abbreviation: m.away_team?.abbreviation ?? null,
+          score:        m.away_team?.score ?? null,
+          record:       m.away_team?.record ?? null,
+          home_record:  m.away_team?.home_record ?? null,
+          away_record:  m.away_team?.away_record ?? null,
+          logo:         m.away_team?.logo ?? null,
         },
-        source:     PROVIDER_A,
-        fetched_at: new Date().toISOString(),
+
+        // Stats de saison ESPN (eFG%, TS%, splits, etc.)
+        home_season_stats: m.home_season_stats ?? null,
+        away_season_stats: m.away_season_stats ?? null,
+
+        // Cotes DraftKings temps réel
+        odds: m.odds ? {
+          source:        m.odds.source,
+          spread:        m.odds.spread ?? null,
+          over_under:    m.odds.over_under ?? null,
+          home_ml:       m.odds.home_ml ?? null,
+          away_ml:       m.odds.away_ml ?? null,
+          home_favorite: m.odds.home_favorite ?? null,
+          away_favorite: m.odds.away_favorite ?? null,
+          fetched_at:    m.odds.fetched_at ?? new Date().toISOString(),
+        } : null,
       })),
     };
   }
 
-  static _buildEmptyAdvanced(teamId) {
+  static _normalizeESPNTeamStats(data, espnTeamId) {
+    if (!data) return null;
+
     return {
-      team_id:    teamId,
-      source:     PROVIDER_B,
-      fetched_at: new Date().toISOString(),
-      available:  false,
-      games_sample: null,
+      espn_team_id: espnTeamId,
+      source:       data.source ?? 'espn',
+      fetched_at:   data.fetched_at ?? new Date().toISOString(),
+      available:    data.available ?? false,
       stats: {
-        net_rating: null, offensive_rating: null, defensive_rating: null,
-        pace: null, efg_pct: null, ts_pct: null, tov_pct: null,
-        orb_pct: null, wins: null, losses: null, win_pct: null, pie: null,
+        games_played:  data.games_played  ?? null,
+        wins:          data.wins          ?? null,
+        losses:        data.losses        ?? null,
+        win_pct:       data.win_pct       ?? null,
+        home_wins:     data.home_wins     ?? null,
+        home_losses:   data.home_losses   ?? null,
+        home_win_pct:  data.home_win_pct  ?? null,
+        away_wins:     data.away_wins     ?? null,
+        away_losses:   data.away_losses   ?? null,
+        away_win_pct:  data.away_win_pct  ?? null,
+        efg_pct:       data.efg_pct       ?? null,
+        ts_pct:        data.ts_pct        ?? null,
+        fg_pct:        data.fg_pct        ?? null,
+        fg3_pct:       data.fg3_pct       ?? null,
+        ft_pct:        data.ft_pct        ?? null,
+        avg_pts:       data.avg_pts       ?? null,
+        avg_reb:       data.avg_reb       ?? null,
+        avg_ast:       data.avg_ast       ?? null,
       },
     };
   }
 
-  // ── FETCH UTILITAIRE ─────────────────────────────────────────────────
+  // ── FETCH UTILITAIRE ──────────────────────────────────────────────────────
 
-  static async _fetch(url, provider, endpoint) {
+  static async _fetch(url, provider, endpoint, timeout = TIMEOUT) {
     const controller = new AbortController();
-    const timer      = setTimeout(() => controller.abort(), TIMEOUT);
+    const timer      = setTimeout(() => controller.abort(), timeout);
 
     try {
       const response = await fetch(url, {
@@ -309,8 +251,8 @@ export class ProviderNBA {
       Logger.apiCall({
         provider, endpoint,
         statusCode: response.status,
-        cached:     false,
-        error:      response.ok ? null : `HTTP ${response.status}`,
+        cached: false,
+        error: response.ok ? null : `HTTP ${response.status}`,
       });
 
       if (!response.ok) return null;
