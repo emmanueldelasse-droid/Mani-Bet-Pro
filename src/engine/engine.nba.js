@@ -476,7 +476,7 @@ export class EngineNBA {
       const edgeAway = pAway - impliedAway;
 
       // Recommander si edge > 3%
-      if (Math.abs(edgeHome) > 0.03) {
+      if (Math.abs(edgeHome) > 0.05) {
         recs.push({
           type:        'MONEYLINE',
           label:       'Vainqueur du match',
