@@ -181,8 +181,8 @@ async function analyzeMatchesBatch(list, matches, storeInstance, container, date
   // BallDontLie utilise ses propres IDs — on map depuis ESPN
   const teamIds = new Set();
   matches.forEach(m => {
-    const homeId = getBDLId(m.home_team?.espn_id);
-    const awayId = getBDLId(m.away_team?.espn_id);
+    const homeId = getBDLId(m.home_team?.espn_id, m.home_team?.name);
+    const awayId = getBDLId(m.away_team?.espn_id, m.away_team?.name);
     if (homeId) teamIds.add(homeId);
     if (awayId) teamIds.add(awayId);
   });
