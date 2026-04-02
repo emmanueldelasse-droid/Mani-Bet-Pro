@@ -69,6 +69,11 @@ const INITIAL_STATE = {
   //               predictive_score, robustness_score, saved_at }]
   history: [],
 
+  // ── Paper Trading ────────────────────────────────────────────────────────
+  // Géré par paper.engine.js — l'état est stocké directement dans localStorage
+  // Le store expose uniquement un signal de mise à jour pour l'UI
+  paperTradingVersion: 0,  // Incrémenté à chaque changement pour notifier l'UI
+
   // ── Erreurs globales ─────────────────────────────────────────────────────
   errors: [],
 
