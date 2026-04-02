@@ -15,17 +15,25 @@ import { Logger }           from '../utils/utils.logger.js';
 // ── POINT D'ENTRÉE ────────────────────────────────────────────────────────
 
 export async function render(container, storeInstance) {
-  container.innerHTML = renderShell();
+  // Date sélectionnée — par défaut aujourd'hui
+  let selectedDate = storeInstance.get('dashboardFilters')?.selectedDate ?? _getTodayDate();
+
+  container.innerHTML = renderShell(selectedDate);
   bindFilterEvents(container, storeInstance);
-  await _loadAndDisplay(container, storeInstance);
+  bindDateSelector(container, storeInstance, selectedDate, async (newDate) => {
+    selectedDate = newDate;
+    storeInstance.set({ 'dashboardFilters.selectedDate': newDate });
+    await _loadAndDisplay(container, storeInstance, newDate);
+  });
+  await _loadAndDisplay(container, storeInstance, selectedDate);
   return { destroy() {} };
 }
 
 // ── CHARGEMENT ────────────────────────────────────────────────────────────
 
-async function _loadAndDisplay(container, storeInstance) {
+async function _loadAndDisplay(container, storeInstance, date = null) {
   const list = container.querySelector('#matches-list');
-  const date = _getTodayDate();
+  date = date ?? _getTodayDate();
 
   try {
     LoadingUI.show();
@@ -64,10 +72,13 @@ async function _loadAndDisplay(container, storeInstance) {
 
 // ── SHELL ─────────────────────────────────────────────────────────────────
 
-function renderShell() {
-  const today = new Date().toLocaleDateString('fr-FR', {
+function renderShell(selectedDate) {
+  const displayDate = new Date(selectedDate + 'T12:00:00').toLocaleDateString('fr-FR', {
     weekday: 'long', day: 'numeric', month: 'long',
   });
+  const today    = _getTodayDate();
+  const tomorrow = _offsetDate(today, 1);
+  const yesterday = _offsetDate(today, -1);
 
   return `
     <div class="dashboard">
@@ -75,7 +86,30 @@ function renderShell() {
       <div class="page-header">
         <div class="page-header__eyebrow">Mani Bet Pro</div>
         <div class="page-header__title">Dashboard</div>
-        <div class="page-header__sub">${today}</div>
+        <div class="page-header__sub">${displayDate}</div>
+      </div>
+
+      <!-- Sélecteur de date -->
+      <div class="date-selector" id="date-selector" style="
+        display:flex; gap:8px; margin-bottom:var(--space-4); flex-wrap:wrap;
+      ">
+        <button class="chip ${selectedDate === yesterday ? 'chip--active' : ''}"
+          data-date="${yesterday}">Hier</button>
+        <button class="chip ${selectedDate === today ? 'chip--active' : ''}"
+          data-date="${today}">Aujourd'hui</button>
+        <button class="chip ${selectedDate === tomorrow ? 'chip--active' : ''}"
+          data-date="${tomorrow}">Demain</button>
+        <input type="date" id="date-picker" value="${selectedDate}"
+          style="
+            background:var(--color-card);
+            border:1px solid var(--color-border);
+            color:var(--color-text);
+            border-radius:20px;
+            padding:4px 12px;
+            font-size:12px;
+            cursor:pointer;
+          "
+        />
       </div>
 
       <div class="dashboard__summary" id="day-summary">
@@ -268,6 +302,32 @@ function updateSummary(container, total, conclusive, rejected) {
 
 // ── FILTRES ───────────────────────────────────────────────────────────────
 
+function bindDateSelector(container, storeInstance, initialDate, onDateChange) {
+  const selector = container.querySelector('#date-selector');
+  const picker   = container.querySelector('#date-picker');
+  if (!selector) return;
+
+  // Chips de date
+  selector.addEventListener('click', (e) => {
+    const chip = e.target.closest('.chip[data-date]');
+    if (!chip) return;
+    const newDate = chip.dataset.date;
+    selector.querySelectorAll('.chip').forEach(c => c.classList.remove('chip--active'));
+    chip.classList.add('chip--active');
+    if (picker) picker.value = newDate;
+    onDateChange(newDate);
+  });
+
+  // Input date picker
+  if (picker) {
+    picker.addEventListener('change', (e) => {
+      const newDate = e.target.value;
+      selector.querySelectorAll('.chip').forEach(c => c.classList.remove('chip--active'));
+      onDateChange(newDate);
+    });
+  }
+}
+
 function bindFilterEvents(container, storeInstance) {
   container.addEventListener('click', (e) => {
     const chip = e.target.closest('.chip');
@@ -331,6 +391,12 @@ function renderError(container) {
 
 function _getTodayDate() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function _offsetDate(dateStr, days) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
 function _toP(v) {

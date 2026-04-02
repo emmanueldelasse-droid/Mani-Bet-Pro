@@ -143,6 +143,8 @@ function renderBloc1(analysis) {
         </div>
       ` : ''}
 
+      ${renderDataIncompleteWarning(analysis)}
+
       <div class="scores-grid">
         ${renderScoreBlock('Force du signal', pPct, 'signal', 'var(--color-signal)')}
         ${renderScoreBlock('Fiabilité', rPct, 'robust', null, rClass)}
@@ -538,12 +540,26 @@ function renderBloc7(analysis, match) {
     const confColor = CONF_COLORS[r.confidence] ?? 'var(--color-muted)';
     const isBest    = best && r.type === best.type && r.side === best.side;
 
+    // Kelly stake formaté
+    const kellyPct = r.kelly_stake != null
+      ? `${(r.kelly_stake * 100).toFixed(1)}% bankroll`
+      : null;
+
     return `
       <div class="betting-row${isBest ? ' betting-row--best' : ''}">
         <div class="betting-row__type text-muted" style="font-size:11px">${r.label}</div>
         <div class="betting-row__main">
           <span class="betting-row__side">${sideLabel}</span>
           <span class="mono betting-row__odds">${oddsStr}</span>
+          ${kellyPct ? `<span class="betting-row__kelly" style="
+            font-size:10px;
+            color:var(--color-signal);
+            background:rgba(var(--color-signal-rgb,99,179,237),0.12);
+            padding:2px 6px;
+            border-radius:3px;
+            font-weight:600;
+            margin-left:auto;
+          ">Mise : ${kellyPct}</span>` : ''}
         </div>
         <div class="betting-row__stats">
           <span class="text-muted" style="font-size:11px">${
@@ -554,7 +570,7 @@ function renderBloc7(analysis, match) {
               : `Moteur : ${r.motor_prob}% · Bookmaker : ${r.implied_prob}%`
           }</span>
           <span class="betting-row__edge" style="color:${confColor};font-size:11px;font-weight:600">
-            Cote sous-estimée de ${r.edge}%
+            Edge : ${r.edge}%
           </span>
         </div>
         ${r.note ? `<div class="text-muted" style="font-size:10px;margin-top:4px">${r.note}</div>` : ''}
@@ -587,6 +603,54 @@ function renderContextFactor(label, value, level) {
     <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px">
       <span>${label}</span>
       <span class="${cls}" style="font-size:11px; text-align:right; max-width:200px">${value}</span>
+    </div>
+  `;
+}
+
+// ── AVERTISSEMENT DONNÉES INCOMPLÈTES ────────────────────────────────────
+
+/**
+ * Badge orange si qualité données < 80%.
+ * Liste les sources manquantes.
+ */
+function renderDataIncompleteWarning(analysis) {
+  const quality = analysis?.data_quality_score;
+  if (quality === null || quality === undefined || quality >= 0.80) return '';
+
+  const missing = analysis?.missing_variables ?? [];
+  const missingLabels = {
+    recent_form_ema:  'Forme récente (BallDontLie)',
+    absences_impact:  'Blessures (ESPN Injuries)',
+    back_to_back:     'Back-to-back (ESPN Schedule)',
+    rest_days_diff:   'Jours de repos (ESPN Schedule)',
+  };
+
+  const missingList = missing
+    .map(v => missingLabels[v] ?? v)
+    .filter(Boolean)
+    .slice(0, 3);
+
+  return `
+    <div class="data-incomplete-warning" style="
+      display:flex; align-items:flex-start; gap:8px;
+      padding:var(--space-2) var(--space-3);
+      background:rgba(255,165,0,0.08);
+      border-left:2px solid var(--color-warning);
+      border-radius:4px;
+      margin-bottom:var(--space-3);
+      font-size:11px;
+    ">
+      <span style="color:var(--color-warning);font-size:13px">⚠</span>
+      <div>
+        <div style="color:var(--color-warning);font-weight:600;margin-bottom:2px">
+          Données incomplètes — qualité ${Math.round(quality * 100)}%
+        </div>
+        ${missingList.length > 0 ? `
+          <div class="text-muted">
+            Manquant : ${missingList.join(' · ')}
+          </div>
+        ` : ''}
+      </div>
     </div>
   `;
 }
