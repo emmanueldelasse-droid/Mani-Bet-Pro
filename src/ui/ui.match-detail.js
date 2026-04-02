@@ -16,6 +16,7 @@
 import { router }     from './ui.router.js';
 import { EngineCore }   from '../engine/engine.core.js';
 import { PaperEngine } from '../paper/paper.engine.js';
+import { ProviderNBA } from '../providers/provider.nba.js';
 
 // Cotes américaines → décimales (format français)
 function _americanToDecimal(american) {
@@ -50,6 +51,9 @@ export async function render(container, storeInstance) {
 
   container.innerHTML = renderShell(match, analysis);
   bindEvents(container, storeInstance, match, analysis);
+
+  // Charger cotes multi-books en arrière-plan (non bloquant)
+  _loadAndRenderMultiBookOdds(container, match, analysis);
 
   return { destroy() {} };
 }
@@ -509,6 +513,88 @@ function renderBloc6(analysis) {
 }
 
 // ── BLOC 7 : RECOMMANDATIONS PARIS ────────────────────────────────────────
+
+// ── COTES MULTI-BOOKS ────────────────────────────────────────────────────
+
+async function _loadAndRenderMultiBookOdds(container, match, analysis) {
+  try {
+    const comparison = await ProviderNBA.getOddsComparison();
+    if (!comparison) return;
+
+    const matchOdds = ProviderNBA.findMatchOdds(
+      comparison,
+      match.home_team?.name,
+      match.away_team?.name
+    );
+    if (!matchOdds?.bookmakers?.length) return;
+
+    // Injecter le tableau multi-books dans le bloc 07
+    const bloc7 = container.querySelector('#bloc-7');
+    if (!bloc7) return;
+
+    const existing = bloc7.querySelector('.multibook-table');
+    if (existing) existing.remove();
+
+    const BOOK_LABELS = {
+      winamax:    'Winamax',
+      betclic:    'Betclic',
+      unibet_eu:  'Unibet',
+      betsson:    'Betsson',
+      pinnacle:   'Pinnacle',
+      bet365:     'Bet365',
+    };
+
+    const isFlipped = matchOdds.home_team !== match.home_team?.name;
+
+    const rows = matchOdds.bookmakers.map(bk => {
+      const homeOdds = isFlipped ? bk.away_ml : bk.home_ml;
+      const awayOdds = isFlipped ? bk.home_ml : bk.away_ml;
+      const label    = BOOK_LABELS[bk.key] ?? bk.title;
+
+      // Meilleure cote = plus haute
+      const bestHome = matchOdds.best_home_ml;
+      const bestAway = matchOdds.best_away_ml;
+
+      return `
+        <tr style="border-bottom:1px solid var(--color-border)">
+          <td style="padding:6px 8px;font-size:12px;color:var(--color-muted)">${label}</td>
+          <td style="padding:6px 8px;font-size:12px;text-align:center;font-weight:${homeOdds === bestHome ? '700' : '400'};color:${homeOdds === bestHome ? 'var(--color-success)' : 'var(--color-text)'}">
+            ${homeOdds?.toFixed(2) ?? '—'}
+          </td>
+          <td style="padding:6px 8px;font-size:12px;text-align:center;font-weight:${awayOdds === bestAway ? '700' : '400'};color:${awayOdds === bestAway ? 'var(--color-success)' : 'var(--color-text)'}">
+            ${awayOdds?.toFixed(2) ?? '—'}
+          </td>
+        </tr>`;
+    }).join('');
+
+    const table = document.createElement('div');
+    table.className = 'multibook-table';
+    table.style.cssText = 'margin-top:16px;border-top:1px solid var(--color-border);padding-top:12px';
+    table.innerHTML = `
+      <div style="font-size:11px;color:var(--color-muted);margin-bottom:8px;font-weight:600">
+        Comparaison cotes — ${matchOdds.bookmakers.length} bookmakers
+      </div>
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="border-bottom:1px solid var(--color-border)">
+            <th style="padding:4px 8px;font-size:10px;color:var(--color-muted);text-align:left;font-weight:500">Book</th>
+            <th style="padding:4px 8px;font-size:10px;color:var(--color-muted);text-align:center;font-weight:500">${match.home_team?.abbreviation ?? 'DOM'}</th>
+            <th style="padding:4px 8px;font-size:10px;color:var(--color-muted);text-align:center;font-weight:500">${match.away_team?.abbreviation ?? 'EXT'}</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div style="font-size:10px;color:var(--color-muted);margin-top:6px">
+        ★ Meilleure cote disponible · Source : The Odds API
+      </div>
+    `;
+
+    bloc7.appendChild(table);
+
+  } catch (err) {
+    // Silencieux — les cotes multi-books sont optionnelles
+  }
+}
 
 function renderBloc7(analysis, match) {
   const betting = analysis?.betting_recommendations;
