@@ -730,6 +730,13 @@ function bindEvents(container, storeInstance, match, analysis) {
     });
   });
 
+  // Boutons paper trading
+  container.querySelectorAll('.paper-bet-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _openBetModal(btn, match, analysis, storeInstance);
+    });
+  });
+
   // Boutons IA
   if (analysis?.explanation_context) {
     container.querySelectorAll('[data-ai-task]').forEach(btn => {
