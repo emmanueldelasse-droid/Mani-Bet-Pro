@@ -61,6 +61,7 @@ async function _loadAndDisplay(container, storeInstance, date = null) {
     });
 
     updateSummary(container, result.matches.length, conclusive, rejected);
+    _renderBestOpportunity(container, result.matches, result.analyses);
 
   } catch (err) {
     Logger.error('DASHBOARD_RENDER_ERROR', { message: err.message });
@@ -143,7 +144,19 @@ function renderShell(selectedDate) {
             <button class="chip" data-status="INCONCLUSIVE">Inconclus</button>
           </div>
         </div>
+        <div class="filter-row">
+          <span class="filter-label">Edge min.</span>
+          <div class="filter-chips" id="filter-edge">
+            <button class="chip chip--active" data-edge="0">Tous</button>
+            <button class="chip" data-edge="5">5%+</button>
+            <button class="chip" data-edge="8">8%+</button>
+            <button class="chip" data-edge="12">12%+</button>
+          </div>
+        </div>
       </div>
+
+      <!-- Badge meilleure opportunité du jour -->
+      <div id="best-opportunity" style="display:none"></div>
 
       <div class="dashboard__matches" id="matches-list">
         <div class="loading-state">
@@ -260,6 +273,15 @@ function updateMatchCard(list, matchId, analysis) {
   badge.textContent = interp.label;
   badge.className   = `match-card__status-badge badge ${interp.cssClass}`;
 
+  // Couleur de bordure de la carte selon le meilleur edge détecté
+  const card = list.querySelector(`[data-match-id="${matchId}"]`);
+  if (card && analysis.betting_recommendations?.best) {
+    const edge = analysis.betting_recommendations.best.edge ?? 0;
+    if (edge >= 12)      card.style.borderLeft = '3px solid var(--color-success)';
+    else if (edge >= 8)  card.style.borderLeft = '3px solid var(--color-warning)';
+    else if (edge >= 5)  card.style.borderLeft = '3px solid var(--color-signal)';
+  }
+
   const bars = scores.querySelectorAll('.score-bar');
 
   if (bars[0] && analysis.predictive_score !== null) {
@@ -338,8 +360,63 @@ function bindFilterEvents(container, storeInstance) {
     chip.classList.add('chip--active');
     const sport  = chip.dataset.sport;
     const status = chip.dataset.status;
-    if (sport)  _applyFilter(container, storeInstance, 'sport', sport);
-    if (status) _applyFilter(container, storeInstance, 'status', status);
+    const edge   = chip.dataset.edge;
+    if (sport)              _applyFilter(container, storeInstance, 'sport', sport);
+    if (status)             _applyFilter(container, storeInstance, 'status', status);
+    if (edge !== undefined) _applyFilter(container, storeInstance, 'edge', edge);
+  });
+}
+
+function _renderBestOpportunity(container, matches, analyses) {
+  const el = container.querySelector('#best-opportunity');
+  if (!el) return;
+
+  // Trouver le match avec le meilleur edge
+  let bestMatch = null, bestAnalysis = null, bestEdge = 0;
+  matches.forEach(m => {
+    const a = analyses[m.id];
+    if (!a?.betting_recommendations?.best) return;
+    const edge = a.betting_recommendations.best.edge ?? 0;
+    if (edge > bestEdge) { bestEdge = edge; bestMatch = m; bestAnalysis = a; }
+  });
+
+  if (!bestMatch || bestEdge < 5) { el.style.display = 'none'; return; }
+
+  const best      = bestAnalysis.betting_recommendations.best;
+  const SIDE_MAP  = { HOME: bestMatch.home_team?.name, AWAY: bestMatch.away_team?.name, OVER: 'Over', UNDER: 'Under' };
+  const sideLabel = SIDE_MAP[best.side] ?? best.side;
+  const oddsDecimal = best.odds_line > 0
+    ? Math.round((best.odds_line / 100 + 1) * 100) / 100
+    : Math.round((100 / Math.abs(best.odds_line) + 1) * 100) / 100;
+
+  el.style.display = 'block';
+  el.innerHTML = `
+    <div style="
+      background:linear-gradient(135deg,rgba(72,199,142,0.12),rgba(72,199,142,0.04));
+      border:1px solid rgba(72,199,142,0.3);
+      border-radius:10px;
+      padding:12px 14px;
+      margin-bottom:var(--space-4);
+      cursor:pointer;
+    " id="best-opp-card">
+      <div style="font-size:10px;color:var(--color-success);font-weight:700;margin-bottom:4px">
+        ★ MEILLEURE OPPORTUNITÉ DU JOUR
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:13px;font-weight:600">${bestMatch.home_team?.abbreviation} vs ${bestMatch.away_team?.abbreviation}</div>
+          <div style="font-size:12px;color:var(--color-muted);margin-top:2px">${sideLabel} · ${oddsDecimal}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:18px;font-weight:700;color:var(--color-success)">+${bestEdge}%</div>
+          <div style="font-size:10px;color:var(--color-muted)">edge</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  el.querySelector('#best-opp-card')?.addEventListener('click', () => {
+    import('./ui.router.js').then(m => m.router.navigate('match', { matchId: bestMatch.id }));
   });
 }
 
@@ -353,9 +430,14 @@ function _applyFilter(container, storeInstance, filterType, value) {
     let visible = true;
     if (filterType === 'sport' && value !== 'ALL')  visible = match?.sport === value;
     if (filterType === 'status' && value !== 'ALL') {
-      if (!analysis)                   visible = false;
-      else if (value === 'CONCLUSIVE') visible = analysis.confidence_level !== 'INCONCLUSIVE';
+      if (!analysis)                     visible = false;
+      else if (value === 'CONCLUSIVE')   visible = analysis.confidence_level !== 'INCONCLUSIVE';
       else if (value === 'INCONCLUSIVE') visible = analysis.confidence_level === 'INCONCLUSIVE';
+    }
+    if (filterType === 'edge' && value !== '0') {
+      const minEdge = parseInt(value);
+      const bestEdge = analysis?.betting_recommendations?.best?.edge ?? 0;
+      if (bestEdge < minEdge) visible = false;
     }
     card.style.display = visible ? '' : 'none';
   });

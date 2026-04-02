@@ -64,7 +64,10 @@ function renderShell(match, analysis) {
   return `
     <div class="match-detail">
 
-      <button class="btn btn--ghost back-btn" id="back-btn">← Retour</button>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-3)">
+        <button class="btn btn--ghost back-btn" id="back-btn">← Retour</button>
+        <button class="btn btn--ghost" id="share-btn" style="font-size:12px">📤 Partager</button>
+      </div>
 
       <!-- En-tête match -->
       <div class="match-detail__header card">
@@ -591,9 +594,68 @@ async function _loadAndRenderMultiBookOdds(container, match, analysis) {
 
     bloc7.appendChild(table);
 
+    // Alerte si meilleure cote différente de DraftKings
+    _checkBetterOddsAlert(bloc7, matchOdds, match, analysis);
+
   } catch (err) {
     // Silencieux — les cotes multi-books sont optionnelles
   }
+}
+
+function _checkBetterOddsAlert(bloc7, matchOdds, match, analysis) {
+  if (!analysis?.betting_recommendations?.best) return;
+  const best = analysis.betting_recommendations.best;
+
+  const isFlipped    = matchOdds.home_team !== match.home_team?.name;
+  const draftKings   = _americanToDecimal(best.odds_line);
+  const sideIsHome   = best.side === 'HOME';
+
+  // Meilleure cote disponible sur les autres books
+  let bestExternal = null, bestBook = null;
+  for (const bk of (matchOdds.bookmakers ?? [])) {
+    const odds = isFlipped
+      ? (sideIsHome ? bk.away_ml : bk.home_ml)
+      : (sideIsHome ? bk.home_ml : bk.away_ml);
+    if (odds && (!bestExternal || odds > bestExternal)) {
+      bestExternal = odds;
+      bestBook     = bk.title;
+    }
+  }
+
+  if (!bestExternal || !draftKings || bestExternal <= draftKings) return;
+
+  // Afficher l'alerte
+  const existing = bloc7.querySelector('.better-odds-alert');
+  if (existing) existing.remove();
+
+  const alert = document.createElement('div');
+  alert.className = 'better-odds-alert';
+  alert.style.cssText = `
+    margin-top:10px;
+    padding:10px 12px;
+    background:rgba(72,199,142,0.1);
+    border-left:3px solid var(--color-success);
+    border-radius:6px;
+    font-size:12px;
+  `;
+  alert.innerHTML = `
+    <div style="color:var(--color-success);font-weight:700;margin-bottom:2px">
+      💡 Meilleure cote disponible ailleurs
+    </div>
+    <div style="color:var(--color-muted)">
+      ${bestBook} offre <strong style="color:var(--color-text)">${bestExternal.toFixed(2)}</strong>
+      vs DraftKings <strong style="color:var(--color-text)">${draftKings}</strong>
+      — misez sur ${bestBook} pour maximiser le gain.
+    </div>
+  `;
+  bloc7.appendChild(alert);
+
+  // Pré-remplir la cote dans les boutons paper-bet-btn
+  bloc7.querySelectorAll('.paper-bet-btn').forEach(btn => {
+    if (btn.dataset.side === best.side && btn.dataset.market === best.type) {
+      btn.dataset.odds = _decimalToAmerican(bestExternal) ?? btn.dataset.odds;
+    }
+  });
 }
 
 function renderBloc7(analysis, match) {
@@ -644,70 +706,79 @@ function renderBloc7(analysis, match) {
     : null;
 
   const rows = betting.recommendations.map(r => {
-    const sideLabel = SIDE_LABELS[r.side] ?? r.side;
-    const oddsStr   = r.odds_line > 0 ? `+${r.odds_line}` : String(r.odds_line);
-    const confColor = CONF_COLORS[r.confidence] ?? 'var(--color-muted)';
-    const isBest    = best && r.type === best.type && r.side === best.side;
+    const sideLabel  = SIDE_LABELS[r.side] ?? r.side;
+    const isBest     = best && r.type === best.type && r.side === best.side;
+    const confColor  = CONF_COLORS[r.confidence] ?? 'var(--color-muted)';
 
-    // Kelly stake formaté — masquer si 0
-    const kellyPct = (r.kelly_stake != null && r.kelly_stake > 0)
-      ? `${(r.kelly_stake * 100).toFixed(1)}% bankroll`
+    // Cote décimale DraftKings
+    const oddsDecimal = _americanToDecimal(r.odds_line);
+
+    // Kelly en euros depuis bankroll actuelle
+    const paperState  = PaperEngine.load();
+    const bankroll    = paperState.current_bankroll ?? 1000;
+    const kellyEuros  = (r.kelly_stake != null && r.kelly_stake > 0)
+      ? Math.round(r.kelly_stake * bankroll * 100) / 100
       : null;
 
-    // Explication claire si le pari suggéré n'est pas sur le favori moteur
-    const motorFavProb = analysis?.predictive_score != null
+    // Marché label
+    const marketLabel = { MONEYLINE: 'Vainqueur du match', SPREAD: 'Handicap (spread)', OVER_UNDER: 'Total de points' };
+
+    // Explication "Pourquoi" style option 2
+    const isFavoriteMotor   = r.type === 'MONEYLINE' && motorFavorite === sideLabel;
+    const isValueOnUnderdog = r.type === 'MONEYLINE' && motorFavorite && !isFavoriteMotor;
+    const motorFavProb      = analysis?.predictive_score != null
       ? Math.round((r.side === 'HOME' ? analysis.predictive_score : 1 - analysis.predictive_score) * 100)
       : null;
-    const bookProb = r.implied_prob;
-    const isFavoriteMotor = r.type === 'MONEYLINE' && motorFavorite && sideLabel === motorFavorite;
-    const isValueOnUnderdog = r.type === 'MONEYLINE' && !isFavoriteMotor && motorFavorite;
 
-    // Phrase d'explication contextuelle
-    let contextNote = null;
+    let whyText = null;
     if (r.type === 'MONEYLINE' && motorFavProb !== null) {
       if (isValueOnUnderdog) {
-        contextNote = `${motorFavorite} reste favori selon le moteur, mais sa cote est trop chère. La valeur est sur ${sideLabel} dont la cote sous-estime ses chances réelles.`;
+        whyText = `${motorFavorite} devrait gagner ce match, mais sa cote est tellement basse qu'elle ne vaut pas la mise. ${sideLabel} à ${oddsDecimal} est la vraie opportunité ici — tu paies moins cher pour une chance réelle que ce que le marché reconnaît.`;
       } else {
-        contextNote = `${sideLabel} est favori selon le moteur (${motorFavProb}%) et sa cote confirme cette opportunité.`;
+        whyText = `${sideLabel} est favori et sa cote le reflète bien. Le moteur détecte que le marché sous-estime légèrement ses chances réelles (${motorFavProb}% vs ${r.implied_prob}% selon le bookmaker).`;
       }
+    } else if (r.type === 'SPREAD') {
+      whyText = `Le moteur estime un écart de ${r.motor_prob} pts. Le spread de ${Math.abs(r.odds_line)} pts offert par le bookmaker est plus généreux — c'est là que se trouve la valeur.`;
+    } else if (r.type === 'OVER_UNDER') {
+      whyText = `Le moteur projette ${r.motor_prob} pts au total. La ligne à ${r.implied_prob} pts du bookmaker est ${r.side === 'OVER' ? 'trop basse' : 'trop haute'} par rapport à cette projection.`;
     }
 
     return `
-      <div class="betting-row${isBest ? ' betting-row--best' : ''}">
-        <div class="betting-row__type text-muted" style="font-size:11px">${r.label}</div>
-        <div class="betting-row__main">
-          <span class="betting-row__side">${sideLabel}</span>
-          <span class="mono betting-row__odds">${oddsStr}</span>
-          ${kellyPct ? `<span class="betting-row__kelly" style="
-            font-size:10px;
-            color:var(--color-signal);
-            background:rgba(99,179,237,0.12);
-            padding:2px 6px;
-            border-radius:3px;
-            font-weight:600;
-            margin-left:auto;
-          ">Mise : ${kellyPct}</span>` : ''}
+      <div class="betting-row${isBest ? ' betting-row--best' : ''}" style="
+        background:var(--color-bg);
+        border-radius:10px;
+        padding:14px;
+        margin-bottom:10px;
+        border:1px solid ${isBest ? 'var(--color-success)' : 'var(--color-border)'};
+      ">
+        ${isBest ? '<div style="font-size:10px;color:var(--color-success);font-weight:600;margin-bottom:8px">★ MEILLEUR PARI DU MATCH</div>' : ''}
+
+        <!-- Fiche style Option 3 -->
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin-bottom:10px">
+          <span style="font-size:10px;color:var(--color-muted);align-self:center">PARIER SUR</span>
+          <span style="font-size:15px;font-weight:700">${sideLabel}</span>
+
+          <span style="font-size:10px;color:var(--color-muted);align-self:center">MARCHÉ</span>
+          <span style="font-size:12px">${marketLabel[r.type] ?? r.type}</span>
+
+          <span style="font-size:10px;color:var(--color-muted);align-self:center">COTE</span>
+          <span style="font-size:15px;font-weight:700;color:var(--color-signal)">${oddsDecimal ?? r.odds_line}</span>
+
+          ${kellyEuros ? `
+          <span style="font-size:10px;color:var(--color-muted);align-self:center">MISE KELLY</span>
+          <span style="font-size:13px;font-weight:600;color:var(--color-text)">${kellyEuros} €</span>
+          ` : ''}
+
+          <span style="font-size:10px;color:var(--color-muted);align-self:center">EDGE</span>
+          <span style="font-size:13px;font-weight:600;color:${confColor}">+${r.edge}%</span>
+
+          ${whyText ? `
+          <span style="font-size:10px;color:var(--color-muted);align-self:flex-start;padding-top:2px">POURQUOI</span>
+          <span style="font-size:12px;color:var(--color-muted);line-height:1.5">${whyText}</span>
+          ` : ''}
         </div>
-        ${contextNote ? `
-          <div style="font-size:11px;color:var(--color-muted);margin:4px 0 6px;line-height:1.4">
-            ${contextNote}
-          </div>
-        ` : ''}
-        <div class="betting-row__stats">
-          <span class="text-muted" style="font-size:11px">${
-            r.type === 'OVER_UNDER'
-              ? `Moteur : ${r.motor_prob} pts · Ligne : ${r.implied_prob} pts`
-              : r.type === 'SPREAD'
-              ? `Moteur : ~${r.motor_prob} pts d'écart · Spread : ${r.implied_prob > 0 ? '+' : ''}${r.implied_prob}`
-              : `Moteur : ${r.motor_prob}% · Bookmaker : ${r.implied_prob}%`
-          }</span>
-          <span class="betting-row__edge" style="color:${confColor};font-size:11px;font-weight:600">
-            Edge : ${r.edge}%
-          </span>
-        </div>
-        ${r.note ? `<div class="text-muted" style="font-size:10px;margin-top:4px">${r.note}</div>` : ''}
-        ${isBest ? '<div style="font-size:10px;color:var(--color-success);margin-top:4px">★ Meilleur pari du match</div>' : ''}
-        <button class="btn btn--primary btn--sm paper-bet-btn" style="margin-top:8px;width:100%"
+
+        <button class="btn btn--primary paper-bet-btn" style="width:100%;padding:10px;font-size:13px;font-weight:600"
           data-market="${r.type}"
           data-side="${r.side}"
           data-side-label="${sideLabel}"
@@ -822,6 +893,23 @@ function renderMissingCritical(analysis) {
 function bindEvents(container, storeInstance, match, analysis) {
   container.querySelector('#back-btn')?.addEventListener('click', () => {
     router.navigate('dashboard');
+  });
+
+  // Bouton partage
+  container.querySelector('#share-btn')?.addEventListener('click', () => {
+    if (!analysis?.betting_recommendations?.best) return;
+    const best      = analysis.betting_recommendations.best;
+    const SIDE_MAP  = { HOME: match.home_team?.name, AWAY: match.away_team?.name, OVER: 'Over', UNDER: 'Under' };
+    const sideLabel = SIDE_MAP[best.side] ?? best.side;
+    const odds      = _americanToDecimal(best.odds_line);
+    const text = `🏀 ${match.home_team?.name} vs ${match.away_team?.name}\n` +
+                 `✅ Pari : ${sideLabel} @ ${odds}\n` +
+                 `📊 Edge : +${best.edge}% · Moteur : ${best.motor_prob}%\n` +
+                 `🤖 Mani Bet Pro`;
+    navigator.clipboard?.writeText(text).then(() => {
+      const btn = container.querySelector('#share-btn');
+      if (btn) { btn.textContent = '✓ Copié !'; setTimeout(() => btn.textContent = '📤 Partager', 2000); }
+    });
   });
 
   // Collapsibles

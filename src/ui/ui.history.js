@@ -33,6 +33,7 @@ function _renderPage(container, storeInstance) {
       </div>
 
       ${_renderBankrollCard(state)}
+      ${_renderBankrollChart(state)}
       ${_renderMetricsCard(metrics)}
       ${_renderStrategyCard(metrics)}
       ${_renderBiasCard(metrics)}
@@ -79,8 +80,71 @@ function _renderBankrollCard(state) {
         </div>
       </div>
 
+      ${state.current_bankroll < state.initial_bankroll * 0.8 ? `
+        <div style="margin-top:10px;padding:8px 10px;background:rgba(255,99,99,0.1);border-left:2px solid var(--color-danger);border-radius:4px;font-size:11px;color:var(--color-danger)">
+          ⚠ Stop loss — bankroll sous 80% du capital initial. Réduisez les mises.
+        </div>
+      ` : ''}
       <div style="margin-top:var(--space-3);display:flex;gap:8px">
         <button class="btn btn--ghost btn--sm" id="configure-bankroll">⚙ Configurer bankroll</button>
+      </div>
+    </div>
+  `;
+}
+
+// ── COURBE BANKROLL ──────────────────────────────────────────────────────
+
+function _renderBankrollChart(state) {
+  const bets = state.bets.filter(b => b.result !== 'PENDING');
+  if (bets.length < 2) return '';
+
+  // Construire les points de la courbe
+  let bankroll = state.initial_bankroll;
+  const points = [{ x: 0, y: bankroll, label: 'Départ' }];
+
+  bets.forEach((bet, i) => {
+    bankroll += (bet.pnl ?? 0);
+    points.push({ x: i + 1, y: Math.round(bankroll * 100) / 100, label: `${bet.home?.split(' ').pop()} vs ${bet.away?.split(' ').pop()}` });
+  });
+
+  const minY   = Math.min(...points.map(p => p.y)) * 0.98;
+  const maxY   = Math.max(...points.map(p => p.y)) * 1.02;
+  const rangeY = maxY - minY || 1;
+  const W = 300, H = 80;
+
+  const toX = (i) => (i / (points.length - 1)) * W;
+  const toY = (y) => H - ((y - minY) / rangeY) * H;
+
+  const pathData = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${toX(i).toFixed(1)} ${toY(p.y).toFixed(1)}`).join(' ');
+  const areaData = `${pathData} L ${toX(points.length-1).toFixed(1)} ${H} L 0 ${H} Z`;
+
+  const lastY    = points[points.length - 1].y;
+  const isProfit = lastY >= state.initial_bankroll;
+  const color    = isProfit ? '#48c78e' : '#f14668';
+
+  return `
+    <div class="card" style="margin-bottom:var(--space-4)">
+      <div style="font-weight:600;font-size:13px;margin-bottom:var(--space-3)">Courbe de bankroll</div>
+      <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:80px;overflow:visible">
+        <defs>
+          <linearGradient id="bankroll-grad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="${color}" stop-opacity="0.3"/>
+            <stop offset="100%" stop-color="${color}" stop-opacity="0.02"/>
+          </linearGradient>
+        </defs>
+        <!-- Zone remplie -->
+        <path d="${areaData}" fill="url(#bankroll-grad)" />
+        <!-- Ligne -->
+        <path d="${pathData}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>
+        <!-- Ligne de référence (capital initial) -->
+        <line x1="0" y1="${toY(state.initial_bankroll).toFixed(1)}" x2="${W}" y2="${toY(state.initial_bankroll).toFixed(1)}"
+          stroke="rgba(255,255,255,0.15)" stroke-width="1" stroke-dasharray="4,4"/>
+        <!-- Point final -->
+        <circle cx="${toX(points.length-1).toFixed(1)}" cy="${toY(lastY).toFixed(1)}" r="3" fill="${color}"/>
+      </svg>
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--color-muted);margin-top:4px">
+        <span>Départ : ${state.initial_bankroll} €</span>
+        <span>Actuel : ${lastY.toFixed(2)} €</span>
       </div>
     </div>
   `;
@@ -89,7 +153,7 @@ function _renderBankrollCard(state) {
 // ── MÉTRIQUES ─────────────────────────────────────────────────────────────
 
 function _renderMetricsCard(metrics) {
-  if (metrics.total_bets === 0) {
+  if (metrics.total_bets === 0 && state.bets.length === 0) {
     return `
       <div class="card" style="margin-bottom:var(--space-4);text-align:center;padding:var(--space-6)">
         <div style="font-size:24px;margin-bottom:var(--space-2)">📋</div>
