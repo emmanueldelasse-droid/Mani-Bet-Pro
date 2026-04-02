@@ -553,15 +553,17 @@ export class EngineNBA {
       const spreadEdgePct = Math.abs(spreadValue) / 30;
 
       if (spreadEdgePct >= EDGE_THRESHOLDS.SPREAD) {
-        const side     = spreadValue > 0 ? 'HOME' : 'AWAY';
-        const oddsLine = side === 'HOME' ? spread : -spread;
-        const kelly    = this._computeKelly(0.52, -110); // prob approx spread ~52%
+        const side       = spreadValue > 0 ? 'HOME' : 'AWAY';
+        // spread_line = ligne de points (ex: -5.5), odds_line = cote réelle (~-110)
+        const spreadLine = side === 'HOME' ? spread : -spread;
+        const kelly      = this._computeKelly(0.52, -110);
 
         recs.push({
           type:         'SPREAD',
           label:        'Handicap (spread)',
           side,
-          odds_line:    oddsLine,
+          odds_line:    -110,        // cote standard spread américain
+          spread_line:  spreadLine,  // ligne de points affichée
           motor_prob:   Math.round(Math.abs(motorMargin)),
           implied_prob: Math.round(Math.abs(spread)),
           edge:         Math.round(Math.abs(spreadValue)),
@@ -592,7 +594,8 @@ export class EngineNBA {
             type:         'OVER_UNDER',
             label:        'Total de points',
             side,
-            odds_line:    ouLine,
+            odds_line:    -110,       // cote standard O/U américain
+            ou_line:      ouLine,    // ligne de points
             motor_prob:   Math.round(projectedTotal),
             implied_prob: Math.round(ouLine),
             edge:         Math.round(Math.abs(diff)),
