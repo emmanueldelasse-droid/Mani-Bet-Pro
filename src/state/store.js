@@ -1,109 +1,98 @@
 /**
- * MANI BET PRO — store.js
+ * MANI BET PRO — store.js v2
  *
  * État applicatif global — vanilla JS, sans framework.
  * Pattern : store observable avec abonnements par clé.
- * Aucune donnée fictive. État initial entièrement vide / null.
+ *
+ * CORRECTIONS v2 :
+ *   - set() notation pointée : vérification typeof avant de créer
+ *     l'objet intermédiaire. En v1, si une clé intermédiaire était
+ *     une primitive (string, number), l'assignation échouait silencieusement.
+ *   - dashboardFilters.selectedDate ajouté dans INITIAL_STATE.
+ *     Était lu par ui.dashboard.js mais absent de l'état initial →
+ *     première lecture retournait undefined au lieu de null.
  */
 
 const INITIAL_STATE = {
 
   // ── Navigation ──────────────────────────────────────────────────────────
-  currentRoute: 'dashboard',
+  currentRoute:  'dashboard',
   previousRoute: null,
 
-  // ── Matches chargés ─────────────────────────────────────────────────────
-  // Structure : { [matchId]: MatchObject }
+  // ── Matches ─────────────────────────────────────────────────────────────
+  // { [matchId]: MatchObject }
   matches: {},
 
-  // ── Analyses calculées ──────────────────────────────────────────────────
-  // Structure : { [analysisId]: AnalysisOutput }
+  // ── Analyses ────────────────────────────────────────────────────────────
+  // { [analysisId]: AnalysisOutput }
   analyses: {},
 
-  // ── Match actuellement affiché en fiche détail ──────────────────────────
-  activeMatchId: null,
-
-  // ── Analyse active (fiche match) ────────────────────────────────────────
+  // ── Fiche match ─────────────────────────────────────────────────────────
+  activeMatchId:    null,
   activeAnalysisId: null,
 
-  // ── Simulations en cours ────────────────────────────────────────────────
-  // Structure : { [simulationId]: SimulationSnapshot }
+  // ── Simulations ─────────────────────────────────────────────────────────
   simulations: {},
 
-  // ── Explications IA en cache mémoire ────────────────────────────────────
-  // Structure : { [analysisId_task]: AIExplanation }
+  // ── Cache IA en mémoire ─────────────────────────────────────────────────
+  // { [analysisId_task]: AIExplanation }
   aiExplanations: {},
 
   // ── Filtres dashboard ───────────────────────────────────────────────────
   dashboardFilters: {
-    sports:          [],      // [] = tous les sports activés
-    minRobustness:   null,    // Seuil minimum robustesse (null = pas de filtre)
-    status:          null,    // 'CONCLUANT' | 'INCONCLUS' | 'REJETE' | null
-    dateOffset:      0,       // 0 = aujourd'hui, 1 = demain, -1 = hier
+    selectedDate:  null,   // CORRECTION : était absent → undefined au lieu de null
+    sports:        [],
+    minRobustness: null,
+    status:        null,
+    dateOffset:    0,
   },
 
-  // ── État des providers API ───────────────────────────────────────────────
-  // Structure : { [providerName]: ProviderStatus }
+  // ── Providers ───────────────────────────────────────────────────────────
   providerStatus: {},
-
-  // ── Quotas API ──────────────────────────────────────────────────────────
-  // Structure : { [providerName]: { used, limit, reset_at } }
-  quotas: {},
+  quotas:         {},
 
   // ── Logs API ────────────────────────────────────────────────────────────
-  apiLogs: [],   // Tableau des derniers logs (limité à 100 entrées en mémoire)
+  apiLogs: [],
 
-  // ── UI State ─────────────────────────────────────────────────────────────
+  // ── UI ───────────────────────────────────────────────────────────────────
   ui: {
-    isLoading:       false,
-    loaderText:      '',
-    toasts:          [],
-    modalOpen:       false,
-    modalContent:    null,
-    displayMode:     'analyst',   // 'synthesis' | 'analyst' | 'lab'
-    sidebarOpen:     false,
+    isLoading:   false,
+    loaderText:  '',
+    toasts:      [],
+    modalOpen:   false,
+    modalContent: null,
+    displayMode: 'analyst',   // 'synthesis' | 'analyst' | 'lab'
+    sidebarOpen: false,
   },
 
   // ── Historique des analyses ──────────────────────────────────────────────
-  // Structure : [{ analysis_id, match_id, date, home, away, sport, confidence_level,
-  //               predictive_score, robustness_score, saved_at }]
   history: [],
 
   // ── Paper Trading ────────────────────────────────────────────────────────
-  // Géré par paper.engine.js — l'état est stocké directement dans localStorage
-  // Le store expose uniquement un signal de mise à jour pour l'UI
-  paperTradingVersion: 0,  // Incrémenté à chaque changement pour notifier l'UI
+  paperTradingVersion: 0,
 
   // ── Erreurs globales ─────────────────────────────────────────────────────
   errors: [],
-
 };
 
 class Store {
 
   constructor() {
-    this._state = this._deepClone(INITIAL_STATE);
-    this._subscribers = {};   // { [key]: Set<callback> }
-    this._globalSubs = new Set();
+    this._state       = this._deepClone(INITIAL_STATE);
+    this._subscribers = {};
+    this._globalSubs  = new Set();
   }
 
   // ── LECTURE ────────────────────────────────────────────────────────────
 
   /**
-   * Lire une valeur de l'état.
-   * Supporte la notation pointée : get('ui.isLoading')
-   * @param {string} key
-   * @returns {*}
+   * Lire une valeur. Supporte la notation pointée : get('ui.isLoading')
    */
   get(key) {
     if (!key) return this._deepClone(this._state);
     return key.split('.').reduce((obj, k) => obj?.[k], this._state);
   }
 
-  /**
-   * Retourne une copie complète de l'état (lecture seule).
-   * @returns {object}
-   */
   getState() {
     return this._deepClone(this._state);
   }
@@ -111,26 +100,32 @@ class Store {
   // ── ÉCRITURE ───────────────────────────────────────────────────────────
 
   /**
-   * Mettre à jour une ou plusieurs clés de l'état.
-   * Déclenche les abonnements correspondants.
-   * @param {object} updates — { key: value } ou notation pointée
+   * Mettre à jour une ou plusieurs clés.
+   *
+   * CORRECTION : vérification typeof avant création objet intermédiaire.
+   * En v1, si obj[keys[i]] était une string ou un number, l'opération
+   * obj = obj[keys[i]] retournait une primitive et l'assignation
+   * suivante échouait silencieusement (JS non-strict) ou levait une
+   * TypeError (strict mode).
    */
   set(updates) {
     const changedKeys = new Set();
 
     for (const [path, value] of Object.entries(updates)) {
       const keys = path.split('.');
-      let obj = this._state;
+      let obj    = this._state;
 
       for (let i = 0; i < keys.length - 1; i++) {
-        if (obj[keys[i]] === undefined || obj[keys[i]] === null) {
-          obj[keys[i]] = {};
+        const k = keys[i];
+        // CORRECTION : s'assurer que la clé intermédiaire est bien un objet
+        if (typeof obj[k] !== 'object' || obj[k] === null) {
+          obj[k] = {};
         }
-        obj = obj[keys[i]];
+        obj = obj[k];
       }
 
       const lastKey = keys[keys.length - 1];
-      obj[lastKey] = value;
+      obj[lastKey]  = value;
       changedKeys.add(keys[0]);
       changedKeys.add(path);
     }
@@ -138,11 +133,6 @@ class Store {
     this._notify(changedKeys);
   }
 
-  /**
-   * Merger un objet dans une clé existante.
-   * @param {string} key
-   * @param {object} partial
-   */
   merge(key, partial) {
     const current = this.get(key);
     if (typeof current !== 'object' || current === null) {
@@ -152,34 +142,17 @@ class Store {
     }
   }
 
-  /**
-   * Ajouter un item dans un tableau d'état.
-   * @param {string} key
-   * @param {*} item
-   * @param {number} [maxLength] — limite optionnelle
-   */
   push(key, item, maxLength = null) {
     const current = this.get(key) ?? [];
     const updated = [...current, item];
     this.set({ [key]: maxLength ? updated.slice(-maxLength) : updated });
   }
 
-  /**
-   * Ajouter ou mettre à jour un item dans un objet indexé par id.
-   * @param {string} key — clé de l'objet (ex: 'matches')
-   * @param {string} id  — clé de l'item
-   * @param {object} item
-   */
   upsert(key, id, item) {
     const current = this.get(key) ?? {};
     this.set({ [key]: { ...current, [id]: item } });
   }
 
-  /**
-   * Supprimer un item d'un objet indexé.
-   * @param {string} key
-   * @param {string} id
-   */
   remove(key, id) {
     const current = this.get(key) ?? {};
     const updated = { ...current };
@@ -189,26 +162,14 @@ class Store {
 
   // ── ABONNEMENTS ────────────────────────────────────────────────────────
 
-  /**
-   * S'abonner aux changements d'une clé spécifique.
-   * @param {string} key
-   * @param {function} callback — appelé avec (newValue, key)
-   * @returns {function} unsubscribe
-   */
   subscribe(key, callback) {
     if (!this._subscribers[key]) {
       this._subscribers[key] = new Set();
     }
     this._subscribers[key].add(callback);
-
     return () => this._subscribers[key]?.delete(callback);
   }
 
-  /**
-   * S'abonner à tous les changements de l'état.
-   * @param {function} callback — appelé avec (changedKeys, state)
-   * @returns {function} unsubscribe
-   */
   subscribeAll(callback) {
     this._globalSubs.add(callback);
     return () => this._globalSubs.delete(callback);
@@ -217,9 +178,8 @@ class Store {
   // ── PERSISTENCE ────────────────────────────────────────────────────────
 
   /**
-   * Charger l'état persisté depuis le storage.
-   * Fusionne uniquement les clés persistables.
-   * @param {object} persisted
+   * Charge l'état persisté depuis localStorage.
+   * Ne charge que les clés autorisées.
    */
   load(persisted) {
     if (!persisted || typeof persisted !== 'object') return;
@@ -250,14 +210,14 @@ class Store {
   setRoute(route) {
     this.set({
       previousRoute: this.get('currentRoute'),
-      currentRoute: route,
+      currentRoute:  route,
     });
   }
 
   addError(error) {
     this.push('errors', {
-      id: crypto.randomUUID(),
-      message: error.message ?? String(error),
+      id:        crypto.randomUUID(),
+      message:   error.message ?? String(error),
       timestamp: new Date().toISOString(),
     }, 50);
   }
@@ -295,13 +255,14 @@ class Store {
 // Export singleton
 export const store = new Store();
 
-// Charger l'historique depuis localStorage au démarrage
+// Charger l'état persisté au démarrage
 try {
   const saved = localStorage.getItem('mbp_state');
   if (saved) store.load(JSON.parse(saved));
 } catch {}
 
-// Sauvegarder history dans localStorage à chaque changement
+// Persister history à chaque changement
+// Note : app.js._persistState() merge l'état existant — pas de conflit.
 store.subscribe('history', (history) => {
   try {
     const saved = JSON.parse(localStorage.getItem('mbp_state') ?? '{}');
