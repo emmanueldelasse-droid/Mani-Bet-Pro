@@ -98,7 +98,7 @@ function renderShell(match, analysis) {
       </div>
 
       ${renderBloc7(analysis, match)}
-      ${renderBloc1(analysis)}
+      ${renderBloc1(analysis, match)}
       ${renderBloc2(analysis)}
       ${renderBloc3(analysis, match)}
       ${renderBloc4(analysis)}
@@ -134,55 +134,128 @@ function renderOddsBar(odds) {
   `;
 }
 
-// ── BLOC 1 : RÉSUMÉ EXÉCUTIF ──────────────────────────────────────────────
+// ── BLOC 1 : VERDICT ORIENTÉ DÉCISION ────────────────────────────────────
 
-function renderBloc1(analysis) {
-  const interp  = EngineCore.interpretConfidence(analysis?.confidence_level ?? 'INCONCLUSIVE');
+function renderBloc1(analysis, match) {
+  if (!analysis || analysis.confidence_level === 'INCONCLUSIVE') {
+    return `
+      <div class="card match-detail__bloc" id="bloc-1">
+        <div class="bloc-header">
+          <span class="bloc-header__number mono text-muted">01</span>
+          <span class="bloc-header__title">Verdict</span>
+          <span class="badge badge--inconclusive">Inconclus</span>
+        </div>
+        <div class="text-muted" style="font-size:13px;padding:var(--space-3) 0">
+          ${analysis?.rejection_reason ? formatRejection(analysis.rejection_reason) : 'Données insuffisantes pour une analyse fiable.'}
+        </div>
+      </div>`;
+  }
 
-  const pPct    = pct(analysis?.predictive_score);
-  const rPct    = pct(analysis?.robustness_score);
-  const dPct    = pct(analysis?.data_quality_score);
-  const vPct    = pct(analysis?.volatility_index);
+  // Probabilité moteur
+  const score     = analysis.predictive_score;
+  const homeProb  = Math.round(score * 100);
+  const awayProb  = 100 - homeProb;
+  const homeName  = match?.home_team?.name ?? 'Domicile';
+  const awayName  = match?.away_team?.name ?? 'Extérieur';
 
-  const rClass  = rPct !== null
-    ? (rPct >= 75 ? 'text-success' : rPct >= 50 ? 'text-warning' : 'text-danger')
-    : 'text-muted';
+  // Favori selon le moteur
+  const motorFav     = score >= 0.5 ? homeName : awayName;
+  const motorFavProb = score >= 0.5 ? homeProb : awayProb;
+  const motorUndProb = 100 - motorFavProb;
+  const motorUndName = score >= 0.5 ? awayName : homeName;
+
+  // Cote équitable (sans marge bookmaker)
+  const fairOddsFav = motorFavProb > 0 ? (100 / motorFavProb).toFixed(2) : '—';
+  const fairOddsUnd = motorUndProb > 0 ? (100 / motorUndProb).toFixed(2) : '—';
+
+  // Meilleur pari détecté
+  const best = analysis.betting_recommendations?.best;
+  const hasBet = best && best.edge >= 5;
+
+  // Décision nette
+  let decision, decisionColor, decisionIcon;
+  const dataQuality = analysis.data_quality_score ?? 0;
+  const edge = best?.edge ?? 0;
+
+  if (!hasBet) {
+    decision = 'PASSER';
+    decisionColor = 'var(--color-muted)';
+    decisionIcon = '—';
+  } else if (edge >= 10 && dataQuality >= 0.80) {
+    decision = 'PARIER';
+    decisionColor = 'var(--color-success)';
+    decisionIcon = '✓';
+  } else if (edge >= 7) {
+    decision = 'À CONSIDÉRER';
+    decisionColor = 'var(--color-warning)';
+    decisionIcon = '△';
+  } else {
+    decision = 'PASSER';
+    decisionColor = 'var(--color-muted)';
+    decisionIcon = '—';
+  }
 
   return `
     <div class="card match-detail__bloc" id="bloc-1">
       <div class="bloc-header">
         <span class="bloc-header__number mono text-muted">01</span>
         <span class="bloc-header__title">Verdict</span>
-        <span class="badge ${interp.cssClass}">${interp.label}</span>
+        <span style="font-size:13px;font-weight:700;color:${decisionColor}">${decisionIcon} ${decision}</span>
       </div>
-
-      ${analysis?.rejection_reason ? `
-        <div class="rejection-banner">
-          <span class="rejection-banner__icon">⚠</span>
-          <div>
-            <div class="rejection-banner__title">Analyse non concluante</div>
-            <div class="rejection-banner__reason text-muted">${formatRejection(analysis.rejection_reason)}</div>
-          </div>
-        </div>
-      ` : ''}
 
       ${renderDataIncompleteWarning(analysis)}
 
-      <div class="scores-grid">
-        ${renderScoreBlock('Force du signal', pPct, 'signal', 'var(--color-signal)')}
-        ${renderScoreBlock('Fiabilité', rPct, 'robust', null, rClass)}
-        ${renderScoreBlock('Qualité données', dPct, 'data', 'var(--color-data-quality)')}
-        ${renderScoreBlock('Incertitude', vPct, 'volatility', 'var(--color-volatility)')}
+      <!-- Probabilités moteur -->
+      <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-bottom:16px">
+        <div style="text-align:left">
+          <div style="font-size:11px;color:var(--color-muted);margin-bottom:2px">${homeName}</div>
+          <div style="font-size:24px;font-weight:700;color:${score >= 0.5 ? 'var(--color-signal)' : 'var(--color-muted)'}">${homeProb}%</div>
+          <div style="font-size:10px;color:var(--color-muted)">Cote équitable : ${fairOddsFav}</div>
+        </div>
+        <div style="text-align:center;color:var(--color-muted);font-size:13px">vs</div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:var(--color-muted);margin-bottom:2px">${awayName}</div>
+          <div style="font-size:24px;font-weight:700;color:${score < 0.5 ? 'var(--color-signal)' : 'var(--color-muted)'}">${awayProb}%</div>
+          <div style="font-size:10px;color:var(--color-muted)">Cote équitable : ${fairOddsUnd}</div>
+        </div>
       </div>
 
-      ${renderMissingCritical(analysis)}
+      <!-- Barre de probabilité -->
+      <div style="height:6px;border-radius:3px;overflow:hidden;background:var(--color-border);margin-bottom:12px">
+        <div style="height:100%;width:${homeProb}%;background:var(--color-signal);border-radius:3px"></div>
+      </div>
+
+      <!-- Résumé décision -->
+      ${hasBet ? `
+        <div style="
+          background:rgba(${decisionColor === 'var(--color-success)' ? '72,199,142' : '255,193,7'},0.1);
+          border-left:3px solid ${decisionColor};
+          border-radius:6px;
+          padding:10px 12px;
+          font-size:12px;
+          margin-bottom:12px;
+        ">
+          <div style="font-weight:600;color:${decisionColor};margin-bottom:4px">
+            ${decisionIcon} ${decision}
+          </div>
+          <div style="color:var(--color-muted)">
+            Edge détecté : <strong style="color:var(--color-text)">+${edge}%</strong>
+            · Qualité données : <strong style="color:var(--color-text)">${Math.round(dataQuality * 100)}%</strong>
+            ${dataQuality < 0.80 ? ' · <span style="color:var(--color-warning)">⚠ Données incomplètes</span>' : ''}
+          </div>
+        </div>
+      ` : `
+        <div style="font-size:12px;color:var(--color-muted);margin-bottom:12px">
+          Aucun edge suffisant détecté sur ce match.
+        </div>
+      `}
 
       <div class="bloc-meta text-muted">
         <span class="mono" style="font-size:10px">
-          ${analysis?.computed_at
+          ${analysis.computed_at
             ? `Calculé ${new Date(analysis.computed_at).toLocaleTimeString('fr-FR')}`
-            : 'Non calculé'}
-          ${analysis?.model_version ? ` · v${analysis.model_version}` : ''}
+            : ''}
+          ${analysis.model_version ? ` · v${analysis.model_version}` : ''}
         </span>
       </div>
     </div>
@@ -764,13 +837,16 @@ function renderBloc7(analysis, match) {
           <span style="font-size:12px">${marketLabel[r.type] ?? r.type}</span>
 
           <span style="font-size:10px;color:var(--color-muted);align-self:center">COTE</span>
-          <span style="font-size:15px;font-weight:700;color:var(--color-signal)">
-            ${r.type === 'SPREAD'
-              ? `${r.spread_line > 0 ? '+' : ''}${r.spread_line} pts · 1.91`
-              : r.type === 'OVER_UNDER'
-              ? `${r.side === 'OVER' ? 'Over' : 'Under'} ${r.ou_line} · 1.91`
-              : (oddsDecimal ?? r.odds_line)}
-          </span>
+          <div>
+            <span style="font-size:18px;font-weight:700;color:var(--color-signal)">
+              ${r.type === 'SPREAD'
+                ? `${r.spread_line > 0 ? '+' : ''}${r.spread_line} pts`
+                : r.type === 'OVER_UNDER'
+                ? `${r.side === 'OVER' ? 'Over' : 'Under'} ${r.ou_line} pts`
+                : oddsDecimal ?? '—'}
+            </span>
+            ${r.odds_source ? `<span style="font-size:10px;color:var(--color-muted);margin-left:6px">${r.odds_source}</span>` : ''}
+          </div>
 
           ${kellyEuros ? `
           <span style="font-size:10px;color:var(--color-muted);align-self:center">MISE KELLY</span>
