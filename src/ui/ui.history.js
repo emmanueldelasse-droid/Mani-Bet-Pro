@@ -9,7 +9,7 @@
 import { PaperEngine, STRATEGIES } from '../paper/paper.engine.js';
 
 export async function render(container, storeInstance) {
-  _renderPage(container, storeInstance);
+  await _renderPage(container, storeInstance);
 
   // Re-render si paper trading mis à jour depuis la fiche match
   storeInstance.subscribe('paperTradingVersion', () => {
@@ -19,8 +19,8 @@ export async function render(container, storeInstance) {
 
 // ── RENDU PRINCIPAL ───────────────────────────────────────────────────────
 
-function _renderPage(container, storeInstance) {
-  const state   = PaperEngine.load();
+async function _renderPage(container, storeInstance) {
+  const state   = await PaperEngine.loadAsync();
   const metrics = PaperEngine.computeMetrics(state.bets);
 
   container.innerHTML = `
@@ -391,20 +391,22 @@ function _renderDangerZone(state) {
 
 function _bindEvents(container, storeInstance, state) {
   // Configurer bankroll
-  container.querySelector('#configure-bankroll')?.addEventListener('click', () => {
+  container.querySelector('#configure-bankroll')?.addEventListener('click', async () => {
     const input = prompt('Nouvelle bankroll initiale (€) :', state.initial_bankroll);
     const val   = parseFloat(input);
     if (!val || val <= 0) return;
-    PaperEngine.reset(val);
+    await PaperEngine.reset(val);
     storeInstance.set({ paperTradingVersion: (storeInstance.get('paperTradingVersion') ?? 0) + 1 });
   });
 
   // Settle buttons
   container.querySelectorAll('.settle-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const betId  = btn.dataset.betId;
       const result = btn.dataset.result;
-      PaperEngine.settleBet(betId, result);
+      btn.disabled = true;
+      btn.textContent = '…';
+      await PaperEngine.settleBet(betId, result);
       storeInstance.set({ paperTradingVersion: (storeInstance.get('paperTradingVersion') ?? 0) + 1 });
     });
   });
@@ -415,9 +417,9 @@ function _bindEvents(container, storeInstance, state) {
   });
 
   // Reset
-  container.querySelector('#reset-paper')?.addEventListener('click', () => {
+  container.querySelector('#reset-paper')?.addEventListener('click', async () => {
     if (confirm('Réinitialiser tout le paper trading ? Cette action est irréversible.')) {
-      PaperEngine.reset(state.initial_bankroll);
+      await PaperEngine.reset(state.initial_bankroll);
       storeInstance.set({ paperTradingVersion: (storeInstance.get('paperTradingVersion') ?? 0) + 1 });
     }
   });

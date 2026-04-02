@@ -1150,7 +1150,7 @@ function _openBetModal(btn, match, analysis, storeInstance) {
   modal.querySelector('#modal-cancel')?.addEventListener('click', () => modal.remove());
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
 
-  modal.querySelector('#modal-confirm')?.addEventListener('click', () => {
+  modal.querySelector('#modal-confirm')?.addEventListener('click', async () => {
     const stake        = parseFloat(modal.querySelector('#stake-input')?.value);
     const oddsDecimal  = parseFloat(modal.querySelector('#odds-input')?.value) || _americanToDecimal(odds);
     const oddsReal     = _decimalToAmerican(oddsDecimal) ?? odds; // stockage interne en américain
@@ -1161,7 +1161,7 @@ function _openBetModal(btn, match, analysis, storeInstance) {
       return;
     }
 
-    PaperEngine.placeBet({
+    await PaperEngine.placeBet({
       match_id:         match.id,
       date:             match.date,
       sport:            'NBA',
