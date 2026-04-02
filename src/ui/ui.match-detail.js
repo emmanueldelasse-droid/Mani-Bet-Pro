@@ -16,6 +16,21 @@
 import { router }     from './ui.router.js';
 import { EngineCore }   from '../engine/engine.core.js';
 import { PaperEngine } from '../paper/paper.engine.js';
+
+// Cotes américaines → décimales (format français)
+function _americanToDecimal(american) {
+  if (!american) return null;
+  const n = Number(american);
+  if (n > 0) return Math.round((n / 100 + 1) * 100) / 100;
+  return Math.round((100 / Math.abs(n) + 1) * 100) / 100;
+}
+
+// Décimales → américaines (pour le calcul Kelly interne)
+function _decimalToAmerican(decimal) {
+  if (!decimal || decimal <= 1) return null;
+  if (decimal >= 2) return Math.round((decimal - 1) * 100);
+  return Math.round(-100 / (decimal - 1));
+}
 import { Logger }     from '../utils/utils.logger.js';
 
 const WORKER_URL = 'https://manibetpro.emmanueldelasse.workers.dev';
@@ -889,7 +904,7 @@ function _openBetModal(btn, match, analysis, storeInstance) {
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <span style="font-size:11px;color:var(--color-muted)">${marketLabels[market] ?? market}</span>
           <span style="font-size:14px;font-weight:700;color:var(--color-text)">${sideLabel}</span>
-          <span style="font-size:13px;font-weight:600;color:var(--color-signal)">${oddsStr}</span>
+          <span style="font-size:13px;font-weight:600;color:var(--color-signal)">${_americanToDecimal(odds)}</span>
         </div>
         <div style="display:flex;gap:12px;margin-top:6px;font-size:11px;color:var(--color-muted)">
           <span>Edge <strong style="color:var(--color-text)">${edge}%</strong></span>
@@ -911,10 +926,11 @@ function _openBetModal(btn, match, analysis, storeInstance) {
           <span style="color:var(--color-muted);font-style:italic"> — modifiez si vous misez sur Winamax, Unibet…</span>
         </label>
         <input type="number" id="odds-input" class="paper-modal__input"
-          value="${odds}"
-          placeholder="Cote américaine (ex: +170)"
-          step="5"
-          style="font-size:16px;font-weight:600;text-align:center"
+          value="${_americanToDecimal(odds)}"
+          placeholder="Ex: 2.70"
+          step="0.05"
+          min="1.01"
+          style="font-size:20px;font-weight:700;text-align:center;letter-spacing:0.05em"
         />
       </div>
 
@@ -961,9 +977,10 @@ function _openBetModal(btn, match, analysis, storeInstance) {
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
 
   modal.querySelector('#modal-confirm')?.addEventListener('click', () => {
-    const stake    = parseFloat(modal.querySelector('#stake-input')?.value);
-    const oddsReal = parseFloat(modal.querySelector('#odds-input')?.value) || odds;
-    const note     = modal.querySelector('#note-input')?.value?.trim() ?? null;
+    const stake        = parseFloat(modal.querySelector('#stake-input')?.value);
+    const oddsDecimal  = parseFloat(modal.querySelector('#odds-input')?.value) || _americanToDecimal(odds);
+    const oddsReal     = _decimalToAmerican(oddsDecimal) ?? odds; // stockage interne en américain
+    const note         = modal.querySelector('#note-input')?.value?.trim() ?? null;
 
     if (!stake || stake <= 0 || stake > bankroll) {
       modal.querySelector('#stake-input')?.classList.add('input--error');
@@ -980,6 +997,7 @@ function _openBetModal(btn, match, analysis, storeInstance) {
       side,
       side_label:       sideLabel,
       odds_taken:       oddsReal,
+      odds_decimal:     oddsDecimal,
       stake,
       kelly_stake:      kelly,
       edge,

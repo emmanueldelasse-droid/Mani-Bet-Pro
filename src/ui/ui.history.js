@@ -397,6 +397,13 @@ function _metricCell(label, value, color, subtitle = null) {
   `;
 }
 
+function _americanToDecimal(american) {
+  if (!american) return null;
+  const n = Number(american);
+  if (n > 0) return Math.round((n / 100 + 1) * 100) / 100;
+  return Math.round((100 / Math.abs(n) + 1) * 100) / 100;
+}
+
 function _formatDate(iso) {
   if (!iso) return '—';
   // Normaliser YYYYMMDD → YYYY-MM-DD
