@@ -33,9 +33,9 @@ export const SPORTS_CONFIG = {
     sport_tag_class: 'sport-tag--nba',
 
     variables: [
-      { id: 'efg_diff',        label: 'eFG% différentiel',             critical: true  },
+      { id: 'efg_diff',        label: 'eFG% différentiel',             critical: false },
       { id: 'ts_diff',         label: 'TS% différentiel',              critical: false },
-      { id: 'win_pct_diff',    label: 'Win% différentiel (saison)',    critical: true  },
+      { id: 'win_pct_diff',    label: 'Win% différentiel (saison)',    critical: false },
       { id: 'home_away_split', label: 'Split Domicile/Extérieur',      critical: false },
       { id: 'recent_form_ema', label: 'Forme récente (EMA W/L)',       critical: false },
       { id: 'absences_impact', label: 'Impact absences (PDF NBA)',     critical: false },
