@@ -18,7 +18,7 @@ import { Logger }     from '../utils/utils.logger.js';
 const CACHE_PREFIX  = 'mbp_cache_';
 const QUOTA_PREFIX  = 'mbp_quota_';
 const CACHE_VERSION = 'v5';
-const VERSION_KEY   = 'mbp_cache_version';
+const VERSION_KEY   = 'mbp_version_tag';  // NE PAS préfixer par CACHE_PREFIX — serait supprimé par invalidateAll()
 
 export class ProviderCache {
 
