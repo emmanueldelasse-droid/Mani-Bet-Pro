@@ -87,12 +87,12 @@ export class DataOrchestrator {
       const season  = _getCurrentNBASeason();
       const teamIds = _extractTeamIds(matches);
 
-      const [injuryReport, recentForms, oddsComparison, advancedStats] = await Promise.all([
+      const [injuryReport, recentForms, oddsComparison] = await Promise.all([
         _loadInjuries(date),
         _loadRecentForms(teamIds, season),
         _loadOddsComparison(),
-        _loadAdvancedStats(),
       ]);
+      const advancedStats = null;
 
       // ETAPE 3 : Analyser tous les matchs
       LoadingUI.update('Analyse en cours...', 70);
@@ -237,7 +237,7 @@ async function _loadOddsComparison() {
 async function _loadAdvancedStats() {
   try {
     const controller = new AbortController();
-    const timer = setTimeout(function() { controller.abort(); }, 15000);
+    const timer = setTimeout(function() { controller.abort(); }, 5000);
     const response = await fetch(
       API_CONFIG.WORKER_BASE_URL + '/nba/stats/advanced',
       { signal: controller.signal, headers: { 'Accept': 'application/json' } }
