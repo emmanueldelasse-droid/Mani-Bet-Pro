@@ -15,6 +15,7 @@
  */
 
 import { ProviderNBA }      from '../providers/provider.nba.js';
+import { API_CONFIG }       from '../config/api.config.js';
 import { ProviderInjuries } from '../providers/provider.injuries.js';
 import { EngineCore }       from '../engine/engine.core.js';
 import { Logger }           from '../utils/utils.logger.js';
@@ -298,6 +299,27 @@ async function _loadOddsComparison() {
     return await ProviderNBA.getOddsComparison();
   } catch (err) {
     Logger.warn('ORCHESTRATOR_ODDS_FAILED', { message: err.message });
+    return null;
+  }
+}
+
+/** Charge les stats avancees NBA (Net Rating + Pace) depuis le Worker */
+async function _loadAdvancedStats() {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    const response = await fetch(
+      API_CONFIG.WORKER_BASE_URL + '/nba/stats/advanced',
+      { signal: controller.signal, headers: { 'Accept': 'application/json' } }
+    );
+    clearTimeout(timer);
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (!data || !data.available || !data.teams) return null;
+    Logger.info('ADVANCED_STATS_LOADED', { teams: Object.keys(data.teams).length });
+    return data.teams;
+  } catch (err) {
+    Logger.warn('ADVANCED_STATS_FAILED', { message: err.message });
     return null;
   }
 }
