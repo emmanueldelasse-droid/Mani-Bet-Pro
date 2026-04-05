@@ -1,5 +1,12 @@
 /**
- * MANI BET PRO — data.orchestrator.js v2
+ * MANI BET PRO — data.orchestrator.js v3
+ *
+ * AJOUTS v3 :
+ *   - _loadAdvancedStats() appelle /nba/teams/stats (Tank01) au lieu de
+ *     /nba/stats/advanced (NBA Stats API bloquée par Cloudflare).
+ *   - net_rating_approx = ppg - oppg injecté dans le moteur via advanced_stats.
+ *   - Mapping teamAbv → nom ESPN complet pour compatibilité moteur.
+ *   - advancedStats n'est plus null — appel réel à Tank01.
  *
  * AJOUTS v2 :
  *   - _loadAdvancedStats() : charge Net Rating + Pace depuis NBA Stats API
@@ -49,6 +56,40 @@ const TEAM_NAME_TO_BDL_ID = {
   'Washington Wizards':      '30',
 };
 
+// Mapping Tank01 teamAbv → nom ESPN complet
+const ABV_TO_ESPN_NAME = {
+  'ATL': 'Atlanta Hawks',
+  'BOS': 'Boston Celtics',
+  'BKN': 'Brooklyn Nets',
+  'CHA': 'Charlotte Hornets',
+  'CHI': 'Chicago Bulls',
+  'CLE': 'Cleveland Cavaliers',
+  'DAL': 'Dallas Mavericks',
+  'DEN': 'Denver Nuggets',
+  'DET': 'Detroit Pistons',
+  'GS':  'Golden State Warriors',
+  'HOU': 'Houston Rockets',
+  'IND': 'Indiana Pacers',
+  'LAC': 'LA Clippers',
+  'LAL': 'Los Angeles Lakers',
+  'MEM': 'Memphis Grizzlies',
+  'MIA': 'Miami Heat',
+  'MIL': 'Milwaukee Bucks',
+  'MIN': 'Minnesota Timberwolves',
+  'NO':  'New Orleans Pelicans',
+  'NY':  'New York Knicks',
+  'OKC': 'Oklahoma City Thunder',
+  'ORL': 'Orlando Magic',
+  'PHI': 'Philadelphia 76ers',
+  'PHO': 'Phoenix Suns',
+  'POR': 'Portland Trail Blazers',
+  'SAC': 'Sacramento Kings',
+  'SA':  'San Antonio Spurs',
+  'TOR': 'Toronto Raptors',
+  'UTA': 'Utah Jazz',
+  'WAS': 'Washington Wizards',
+};
+
 export class DataOrchestrator {
 
   /**
@@ -87,12 +128,12 @@ export class DataOrchestrator {
       const season  = _getCurrentNBASeason();
       const teamIds = _extractTeamIds(matches);
 
-      const [injuryReport, recentForms, oddsComparison] = await Promise.all([
+      const [injuryReport, recentForms, oddsComparison, advancedStats] = await Promise.all([
         _loadInjuries(date),
         _loadRecentForms(teamIds, season),
         _loadOddsComparison(),
+        _loadAdvancedStats(),
       ]);
-      const advancedStats = null;
 
       // ETAPE 3 : Analyser tous les matchs
       LoadingUI.update('Analyse en cours...', 70);
@@ -233,31 +274,48 @@ async function _loadOddsComparison() {
 }
 
 /**
- * Charge les stats avancees NBA depuis le Worker.
- * Retourne { [teamName]: { net_rating, off_rating, def_rating, pace, ... } }
- * ou null si indisponible.
- * Non bloquant — le moteur fonctionne sans ces stats (quality=MISSING).
+ * Charge les stats avancees depuis Tank01 (/nba/teams/stats).
+ * net_rating_approx = ppg - oppg (approximation sans possessions).
+ * Retourne { [nomESPN]: { net_rating, pace } } ou null si indisponible.
+ * Non bloquant — le moteur fonctionne sans (quality=MISSING).
  */
 async function _loadAdvancedStats() {
   try {
     const controller = new AbortController();
-    const timer = setTimeout(function() { controller.abort(); }, 5000);
+    const timer = setTimeout(function() { controller.abort(); }, 8000);
     const response = await fetch(
-      API_CONFIG.WORKER_BASE_URL + '/nba/stats/advanced',
+      API_CONFIG.WORKER_BASE_URL + '/nba/teams/stats',
       { signal: controller.signal, headers: { 'Accept': 'application/json' } }
     );
     clearTimeout(timer);
+
     if (!response.ok) {
       Logger.warn('ADVANCED_STATS_HTTP_ERROR', { status: response.status });
       return null;
     }
+
     const data = await response.json();
+
     if (!data || !data.available || !data.teams) {
       Logger.warn('ADVANCED_STATS_UNAVAILABLE', { note: data && data.note });
       return null;
     }
-    Logger.info('ADVANCED_STATS_LOADED', { teams: Object.keys(data.teams).length, season: data.season });
-    return data.teams;
+
+    // Convertir teamAbv → nom ESPN complet pour compatibilité moteur
+    const byName = {};
+    for (const [abv, stats] of Object.entries(data.teams)) {
+      const name = ABV_TO_ESPN_NAME[abv];
+      if (name) {
+        byName[name] = {
+          net_rating: stats.net_rating_approx,
+          pace:       null,
+        };
+      }
+    }
+
+    Logger.info('ADVANCED_STATS_LOADED', { teams: Object.keys(byName).length, source: 'tank01' });
+    return byName;
+
   } catch (err) {
     Logger.warn('ADVANCED_STATS_FAILED', { message: err.message });
     return null;
