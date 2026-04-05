@@ -647,7 +647,7 @@ export class EngineNBA {
 
     const _getOdds = (bk) => {
       if (market === 'h2h')      return side === 'HOME' ? bk.home_ml : bk.away_ml;
-      if (market === 'spreads')  return side === 'HOME' ? bk.home_spread : bk.home_spread;
+      if (market === 'spreads')  return side === 'HOME' ? bk.home_spread : bk.away_spread;
       if (market === 'totals')   return side === 'OVER' ? bk.over_total : bk.over_total;
       return null;
     };
