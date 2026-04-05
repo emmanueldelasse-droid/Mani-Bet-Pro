@@ -532,14 +532,18 @@ export class EngineNBA {
     // La probabilité de couvrir un spread n'est pas la même que la probabilité
     // de gagner le match. Conversion via distribution normale NBA (σ ~12 pts).
     // P(couvrir spread S) = P(marge victoire > S) = 1 - Φ((S - μ) / σ)
-    // où μ = marge attendue estimée depuis le score prédictif.
     if (normalizedOdds.spread !== null) {
       const spreadLine = normalizedOdds.spread; // négatif = favori domicile
       const NBA_SIGMA  = 12; // écart-type historique des marges NBA
 
-      // Estimer la marge attendue depuis le score prédictif
-      // score=0.5 → marge=0, score=1 → marge≈+24pts, score=0 → marge≈-24pts
-      const expectedMargin = (pHome - 0.5) * 48;
+      // Ancre principale : spread Pinnacle = meilleur prédicteur de marge
+      // Adjustment moteur : delta marginal depuis signaux clés (±6 pts max)
+      const marketMargin   = -spreadLine;
+      const _sig = (id) => (signals.find(s => s.variable === id)?.normalized ?? 0);
+      const adjustment     = _sig("efg_diff") * 2.0
+                           + _sig("recent_form_ema") * 1.5
+                           + _sig("absences_impact") * 2.5;
+      const expectedMargin = marketMargin + adjustment;
 
       // P(domicile couvre spread) = P(marge > spreadLine)
       // spread négatif = domicile favori, doit gagner de plus que |spread|
