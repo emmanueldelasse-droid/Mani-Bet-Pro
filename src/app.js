@@ -1,14 +1,12 @@
 /**
- * MANI BET PRO — app.js v2
+ * MANI BET PRO — app.js v3
  *
- * Point d'entrée principal.
- * Initialise le store, le router, le cache, le paper settler.
+ * AJOUTS v3 :
+ *   - initThemeToggle() : bouton ☀️/🌙 pour basculer entre thème sombre et clair.
+ *     Préférence sauvegardée dans localStorage (clé 'mbp_theme').
  *
  * CORRECTIONS v2 :
  *   - persistState() merge l'état existant au lieu de l'écraser.
- *     En v1, une navigation déclenchait un écrasement de mbp_state
- *     qui effaçait le champ 'history' persisté par la subscription
- *     store.subscribe('history') de store.js → race condition.
  *   - window.MBP commenté comme debug uniquement.
  */
 
@@ -18,6 +16,39 @@ import { ProviderCache } from './providers/provider.cache.js';
 import { PaperSettler }  from './paper/paper.settler.js';
 import { Logger }        from './utils/utils.logger.js';
 import { APP_CONFIG }    from './config/sports.config.js';
+
+// ── THEME ─────────────────────────────────────────────────────────────────
+
+function initThemeToggle() {
+  // Lire la préférence sauvegardée
+  const saved = localStorage.getItem('mbp_theme') ?? 'dark';
+  _applyTheme(saved);
+
+  // Créer le bouton toggle
+  const btn = document.createElement('button');
+  btn.id          = 'theme-toggle';
+  btn.title       = 'Changer le thème';
+  btn.textContent = saved === 'light' ? '🌙' : '☀️';
+  document.body.appendChild(btn);
+
+  btn.addEventListener('click', () => {
+    const current = document.body.classList.contains('theme-light') ? 'light' : 'dark';
+    const next    = current === 'light' ? 'dark' : 'light';
+    _applyTheme(next);
+    localStorage.setItem('mbp_theme', next);
+    btn.textContent = next === 'light' ? '🌙' : '☀️';
+  });
+}
+
+function _applyTheme(theme) {
+  if (theme === 'light') {
+    document.body.classList.add('theme-light');
+    document.body.setAttribute('data-theme', 'light');
+  } else {
+    document.body.classList.remove('theme-light');
+    document.body.removeAttribute('data-theme');
+  }
+}
 
 // ── PERSISTENCE ───────────────────────────────────────────────────────────
 
@@ -32,20 +63,13 @@ function _loadPersistedState() {
   }
 }
 
-/**
- * Persiste les clés autorisées dans localStorage.
- *
- * CORRECTION : merge avec l'état existant au lieu d'écraser.
- * Sans merge, une navigation effaçait le champ 'history' que
- * store.subscribe('history') venait de persister.
- */
 function _persistState() {
   try {
     const state   = store.getState();
     const current = JSON.parse(localStorage.getItem('mbp_state') ?? '{}');
 
     localStorage.setItem('mbp_state', JSON.stringify({
-      ...current,                              // préserve history + autres champs persistés
+      ...current,
       dashboardFilters: state.dashboardFilters,
       ui: {
         ...(current.ui ?? {}),
@@ -105,14 +129,14 @@ async function init() {
   // 1. Cache — purge si nouvelle version, nettoyage des expirés
   ProviderCache.init();
 
-  // 2. Charger l'état persisté (dashboardFilters, displayMode, history)
+  // 2. Charger l'état persisté
   const persisted = _loadPersistedState();
   if (persisted) {
     store.load(persisted);
     Logger.debug('APP_STATE_LOADED', {});
   }
 
-  // 3. Persister à chaque changement de route (merge, pas écrasement)
+  // 3. Persister à chaque changement de route
   store.subscribe('currentRoute', () => _persistState());
 
   // 4. Persister avant fermeture de page
@@ -136,7 +160,10 @@ async function init() {
   // 6. Router
   router.init(store);
 
-  // 7. Clôture automatique des paris en attente (async, non bloquant)
+  // 7. Thème — bouton toggle ☀️/🌙
+  initThemeToggle();
+
+  // 8. Clôture automatique des paris en attente
   PaperSettler.settle(store).catch(() => {});
 
   Logger.info('APP_INIT_DONE', { version: APP_CONFIG.VERSION });
@@ -150,8 +177,7 @@ if (document.readyState === 'loading') {
   init();
 }
 
-// ── DEBUG — à retirer en production multi-utilisateur ────────────────────
-// Exposé sur window pour inspection dans la console DevTools uniquement.
+// ── DEBUG ─────────────────────────────────────────────────────────────────
 window.MBP = {
   store,
   router,
