@@ -419,7 +419,9 @@ function _updateMatchCard(list, matchId, analysis, match) {
         ? (rec.side === 'HOME'
             ? `${match.home_team?.abbreviation} ${rec.spread_line > 0 ? '+' : ''}${rec.spread_line}`
             : `${match.away_team?.abbreviation} ${-rec.spread_line > 0 ? '+' : ''}${-rec.spread_line}`)
-        : rec.side === 'OVER' ? '+ de points' : '- de points';
+        : rec.side === 'OVER'
+          ? `Plus de ${rec.ou_line ?? rec.market_total ?? '—'} pts`
+          : `Moins de ${rec.ou_line ?? rec.market_total ?? '—'} pts`;
 
       // Cote décimale
       const oddsDecimal = rec.odds_decimal ?? (rec.odds_line > 0
@@ -488,11 +490,9 @@ function _renderBestOpportunity(container, matches, analysisIndex) {
 
   const best = bestAnalysis.betting_recommendations.best;
   const SIDE_MAP = {
-    HOME:  bestMatch.home_team?.name,
+    OVER:  `Plus de ${best.ou_line ?? best.market_total ?? '—'} pts`,
     AWAY:  bestMatch.away_team?.name,
-    OVER:  '+ de points',
-    UNDER: '- de points',
-  };
+    UNDER: `Moins de ${best.ou_line ?? best.market_total ?? '—'} pts`,
   const sideLabel   = SIDE_MAP[best.side] ?? best.side;
   const oddsDecimal = americanToDecimal(best.odds_line) ?? '—';
   const gainPour100 = oddsDecimal !== '—' ? Math.round((oddsDecimal - 1) * 100) : null;
