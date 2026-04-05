@@ -270,9 +270,9 @@ function _createMatchCard(match) {
 
     <!-- Edge + qualité -->
     <div id="edge-${match.id}" style="display:none" class="match-card__edge">
-      <span class="text-muted" style="font-size:10px">EDGE</span>
+      <span style="font-size:10px;font-weight:600;color:var(--color-muted)">Avantage</span>
       <span class="match-card__edge-value" id="edge-val-${match.id}">—</span>
-      <span class="text-muted" style="font-size:10px">QUALITÉ</span>
+      <span style="font-size:10px;font-weight:600;color:var(--color-muted);margin-left:12px">Qualité données</span>
       <span class="mono" style="font-size:11px" id="quality-val-${match.id}">—</span>
     </div>
 
@@ -408,9 +408,9 @@ function _updateMatchCard(list, matchId, analysis, match) {
     recsContainer.innerHTML = recs.slice(0, 3).map(rec => {
 
       // Label du type de pari — vocabulaire simple
-      const typeLabel = rec.type === 'MONEYLINE' ? 'Vainqueur du match'
-                      : rec.type === 'SPREAD'    ? 'Handicap (points)'
-                      : 'Total de points';
+      const typeLabel = rec.type === 'MONEYLINE' ? 'Vainqueur'
+                      : rec.type === 'SPREAD'    ? 'Handicap'
+                      : 'O/U';
 
       // Équipe ou côté
       const sideLabel = rec.type === 'MONEYLINE'
@@ -442,7 +442,7 @@ function _updateMatchCard(list, matchId, analysis, match) {
         <span class="match-card__rec-type text-muted">${typeLabel}</span>
         <span class="match-card__rec-side">${sideLabel}</span>
         <span class="match-card__rec-odds mono">${oddsFormatted}
-          <span style="font-size:9px;color:var(--color-muted);margin-left:2px">${rec.odds_source ?? ''}</span>
+          <span style="font-size:9px;color:var(--color-muted);margin-left:2px;text-transform:uppercase">${rec.odds_source ?? ''}</span>
         </span>
         <span class="match-card__rec-edge" style="color:${edgeColor}">+${rec.edge}%</span>
       </div>`;
