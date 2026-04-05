@@ -69,7 +69,7 @@ export class EngineNBA {
     // Recommandations paris — utilise ESPN odds OU The Odds API (Pinnacle)
     const hasOdds = matchData?.odds != null || matchData?.market_odds != null;
     const bettingRecs = (score !== null && hasOdds)
-      ? this._computeBettingRecommendations(score, matchData?.odds ?? {}, matchData, variables)
+      ? this._computeBettingRecommendations(score, matchData?.odds ?? {}, matchData, variables, signals)
       : null;
 
     Logger.debug('ENGINE_NBA_RESULT', {
@@ -462,7 +462,7 @@ export class EngineNBA {
 
   // ── RECOMMANDATIONS PARIS ─────────────────────────────────────────────────
 
-  static _computeBettingRecommendations(score, odds, matchData, variables) {
+  static _computeBettingRecommendations(score, odds, matchData, variables, signals = []) {
     const recs = [];
     const marketOdds = matchData?.market_odds ?? null;
 
