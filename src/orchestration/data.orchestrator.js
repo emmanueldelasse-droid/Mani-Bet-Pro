@@ -109,7 +109,15 @@ export class DataOrchestrator {
         return null;
       }
 
-      const matches = espnData.matches;
+      // Filtrer les matchs en cours — ESPN retourne les stats du match live
+      // au lieu des moyennes de saison, ce qui perturbe complètement le moteur.
+      const LIVE_STATUSES = ['STATUS_IN_PROGRESS', 'STATUS_HALFTIME', 'STATUS_END_PERIOD'];
+      const matches = espnData.matches.filter(m => !LIVE_STATUSES.includes(m.status));
+
+      if (!matches.length) {
+        Logger.warn('ORCHESTRATOR_ALL_LIVE', { date });
+        return null;
+      }
 
       // Vider les analyses precedentes si on change de date
       const prevDate = store.get('dashboardFilters') && store.get('dashboardFilters').selectedDate;
