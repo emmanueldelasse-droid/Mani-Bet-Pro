@@ -49,6 +49,43 @@ async function _loadAndDisplay(container, storeInstance, date) {
   try {
     LoadingUI.show();
 
+    // ── Cache : si analyses déjà chargées pour cette date, réutiliser ──
+    const cachedAnalyses = storeInstance.get('analyses') ?? {};
+    const cachedMatches  = storeInstance.get('matches')  ?? {};
+    const cachedDate     = storeInstance.get('dashboardFilters')?.selectedDate;
+
+    if (
+      cachedDate === date &&
+      Object.keys(cachedAnalyses).length > 0 &&
+      Object.keys(cachedMatches).length > 0
+    ) {
+      const matchList     = Object.values(cachedMatches).filter(m => m.sport === 'NBA');
+      const analysisIndex = _buildAnalysisIndex(cachedAnalyses);
+
+      _renderMatchCards(list, matchList, storeInstance);
+
+      let analyser = 0, explorer = 0, insuffisant = 0, rejete = 0;
+      matchList.forEach(match => {
+        const analysis = analysisIndex[match.id];
+        if (!analysis) return;
+        _updateMatchCard(list, match.id, analysis, match);
+        switch (analysis.decision ?? _legacyDecision(analysis)) {
+          case 'ANALYSER':    analyser++;    break;
+          case 'EXPLORER':    explorer++;    break;
+          case 'INSUFFISANT': insuffisant++; break;
+          case 'REJETÉ':      rejete++;      break;
+        }
+      });
+
+      const conclusive = analyser + explorer;
+      const rejected   = insuffisant + rejete;
+      _updateSummary(container, matchList.length, conclusive, rejected);
+      _renderBestOpportunity(container, matchList, analysisIndex);
+      LoadingUI.hide();
+      return;
+    }
+
+    // ── Pas de cache — charger depuis l'API ──
     const result = await DataOrchestrator.loadAndAnalyze(date, storeInstance);
 
     if (!result?.matches?.length) {
