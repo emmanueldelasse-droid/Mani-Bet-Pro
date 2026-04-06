@@ -1,5 +1,13 @@
 /**
- * MANI BET PRO — engine.nba.js v5.3
+ * MANI BET PRO — engine.nba.js v5.4
+ *
+ * AJOUTS v5.4 :
+ *   - _computeAbsencesImpact() exploite le champ impact_weight pondéré par ppg
+ *     issu de la route /nba/injuries/impact (ESPN + Tank01).
+ *     Si source='tank01' → impact_weight = (ppg/team_ppg) × status_weight.
+ *     Si source='fallback' → comportement ESPN brut (status_weight plat).
+ *     Normalisation adaptée : seuil 1.0 (pondéré) vs 5.0 (brut ESPN).
+ *     quality passe à 'WEIGHTED' quand Tank01 disponible.
  *
  * AJOUTS v5 :
  *   1. net_rating_diff — signal dominant depuis NBA Stats API
@@ -401,22 +409,63 @@ export class EngineNBA {
     return ema !== null ? ema * 2 - 1 : null;
   }
 
+  /**
+   * v5.4 : Impact absences pondéré par importance du joueur (ppg).
+   *
+   * Deux modes selon la source des données :
+   *   - source='tank01'   → impact_weight = (ppg/team_ppg) × status_weight (calculé Worker)
+   *                         normFactor = 1.0 (déjà normalisé par importance)
+   *   - source='fallback' → impact_weight = status_weight brut ESPN (ancien comportement)
+   *                         normFactor = 5.0 (seuil ESPN classique)
+   *
+   * La valeur finale (as - hs) / normFactor est clampée [-1, 1] :
+   *   - Positive  = équipe domicile affaiblie par ses blessures
+   *   - Négative  = équipe visiteuse affaiblie par ses blessures
+   */
   static _computeAbsencesImpact(homeInj, awayInj) {
-    if (!homeInj || !awayInj) return { value: null, source: 'nba_official_pdf', quality: 'MISSING' };
+    if (!homeInj || !awayInj) return { value: null, source: 'espn_injuries', quality: 'MISSING' };
+
     const SW = { 'Out': 1.0, 'Doubtful': 0.75, 'Questionable': 0.5, 'Probable': 0.1, 'Available': 0.0 };
+
     const score = players => {
       if (!Array.isArray(players)) return 0;
       return players.reduce((acc, p) => {
-        const isGL = p.reason?.toLowerCase().includes('g league') || p.reason?.toLowerCase().includes('two-way');
-        return acc + (isGL ? (SW[p.status] ?? 0) * 0.3 : SW[p.status] ?? p.impact_weight ?? 0);
+        const isGL    = p.reason?.toLowerCase().includes('g league') || p.reason?.toLowerCase().includes('two-way');
+        const glFactor = isGL ? 0.3 : 1.0;
+
+        // Si impact_weight vient du calcul pondéré Tank01 (source='tank01') :
+        // il représente déjà (ppg/team_ppg) × status_weight — on l'utilise directement.
+        // Sinon : fallback sur status_weight brut ESPN.
+        const impact = (p.source === 'tank01' && p.impact_weight != null)
+          ? p.impact_weight * glFactor
+          : (SW[p.status] ?? p.impact_weight ?? 0) * glFactor;
+
+        return acc + impact;
       }, 0);
     };
-    const hs = score(homeInj), as = score(awayInj);
+
+    // Détecter si au moins un joueur provient de Tank01
+    const isWeighted = homeInj.some(p => p.source === 'tank01') || awayInj.some(p => p.source === 'tank01');
+
+    const hs = score(homeInj);
+    const as = score(awayInj);
+
+    // Normalisation :
+    // - Pondéré ppg (Tank01) : impacts déjà relatifs à l'équipe → seuil 1.0
+    // - Brut ESPN             : impacts absolus par statut        → seuil 5.0
+    const normFactor = isWeighted ? 1.0 : 5.0;
+
     return {
-      value:   Math.max(-1, Math.min(1, (as - hs) / 5)),
-      source:  'nba_official_pdf',
-      quality: 'ESTIMATED',
-      raw:     { home_score: hs, away_score: as, home_out: homeInj.filter(p => p.status === 'Out').length, away_out: awayInj.filter(p => p.status === 'Out').length },
+      value:   Math.max(-1, Math.min(1, (as - hs) / normFactor)),
+      source:  isWeighted ? 'espn_injuries+tank01' : 'nba_official_pdf',
+      quality: isWeighted ? 'WEIGHTED' : 'ESTIMATED',
+      raw: {
+        home_score:  Math.round(hs * 1000) / 1000,
+        away_score:  Math.round(as * 1000) / 1000,
+        home_out:    homeInj.filter(p => p.status === 'Out').length,
+        away_out:    awayInj.filter(p => p.status === 'Out').length,
+        is_weighted: isWeighted,
+      },
     };
   }
 
