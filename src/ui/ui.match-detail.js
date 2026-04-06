@@ -353,6 +353,8 @@ function renderBlocParis(analysis, match) {
           data-motor-prob="${r.motor_prob}"
           data-implied-prob="${r.implied_prob}"
           data-kelly="${r.kelly_stake ?? 0}"
+          data-spread-line="${r.spread_line ?? ""}"
+          data-ou-line="${r.ou_line ?? ""}"
         >
           📋 Enregistrer ce pari
         </button>
@@ -783,6 +785,8 @@ function _openBetModal(btn, match, analysis, storeInstance) {
   const motorProb   = Number(btn.dataset.motorProb);
   const impliedProb = Number(btn.dataset.impliedProb);
   const kelly       = Number(btn.dataset.kelly);
+  const spreadLine  = btn.dataset.spreadLine !== "" ? Number(btn.dataset.spreadLine) : null;
+  const ouLine      = btn.dataset.ouLine !== "" ? Number(btn.dataset.ouLine) : null;
 
   const state        = PaperEngine.load();
   const bankroll     = state.current_bankroll;
@@ -871,7 +875,7 @@ function _openBetModal(btn, match, analysis, storeInstance) {
       match_id: match.id, date: match.date, sport: 'NBA',
       home: match.home_team?.name ?? '—', away: match.away_team?.name ?? '—',
       market, side, side_label: sideLabel,
-      odds_taken: oddsAm, odds_decimal: oddsReal, odds_source: null, spread_line: null,
+      odds_taken: oddsAm, odds_decimal: oddsReal, odds_source: null, spread_line: spreadLine, ou_line: ouLine,
       stake, kelly_stake: kelly, edge, motor_prob: motorProb, implied_prob: impliedProb,
       confidence_level: analysis?.confidence_level ?? null,
       data_quality: analysis?.data_quality_score ?? null,
@@ -890,8 +894,8 @@ function _openBetModal(btn, match, analysis, storeInstance) {
       return;
     }
 
-    storeInstance.set({ paperTradingVersion: (storeInstance.get('paperTradingVersion') ?? 0) + 1 });
     modal.remove();
+    setTimeout(() => storeInstance.set({ paperTradingVersion: (storeInstance.get("paperTradingVersion") ?? 0) + 1 }), 150);
     _showBetConfirmation(sideLabel, odds > 0 ? `+${odds}` : String(odds), stake);
   });
 }
