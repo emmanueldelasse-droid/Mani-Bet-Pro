@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — ui.dashboard.js v3
+ * MANI BET PRO — ui.dashboard.js v4
  *
  * AMÉLIORATIONS v3 :
  *   - Labels recommandations plus clairs : 'Vainqueur du match', 'Handicap (points)', 'Total de points'
@@ -23,9 +23,66 @@ import { LoadingUI }        from './ui.loading.js';
 import { Logger }           from '../utils/utils.logger.js';
 import { americanToDecimal, formatEdge } from '../utils/utils.odds.js';
 
+// Injecter les styles dynamiques v4 (pulse, barre proba, countdown)
+function _injectStyles() {
+  if (document.querySelector('#mbp-dash-v4-styles')) return;
+  const s = document.createElement('style');
+  s.id = 'mbp-dash-v4-styles';
+  s.textContent = `
+    @keyframes mbp-pulse {
+      0%, 100% { opacity: 1; transform: translateY(-50%) scale(1); }
+      50%       { opacity: 0.4; transform: translateY(-50%) scale(0.7); }
+    }
+    .mbp-proba-bar {
+      height: 5px;
+      border-radius: 3px;
+      overflow: hidden;
+      background: var(--color-border);
+      margin: 6px 0 2px;
+      position: relative;
+    }
+    .mbp-proba-bar__fill {
+      height: 100%;
+      border-radius: 3px;
+      background: var(--color-signal);
+      transition: width 0.6s ease;
+    }
+    .mbp-countdown {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--color-warning);
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(255,165,0,0.08);
+    }
+    .mbp-countdown--soon { color: var(--color-danger); background: rgba(241,70,104,0.08); }
+    .mbp-countdown--live { color: var(--color-success); background: rgba(72,199,142,0.08); }
+    .mbp-bet-dot {
+      display: inline-block;
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--color-signal);
+      margin-right: 4px;
+      vertical-align: middle;
+    }
+    .match-card__net-rating-v4 {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 4px;
+      margin-top: 4px;
+    }
+  `;
+  document.head.appendChild(s);
+}
+
 // ── POINT D'ENTRÉE ────────────────────────────────────────────────────────
 
 export async function render(container, storeInstance) {
+  _injectStyles();
   let selectedDate = storeInstance.get('dashboardFilters')?.selectedDate ?? _getTodayDate();
 
   container.innerHTML = _renderShell(selectedDate);
@@ -217,6 +274,13 @@ function _renderShell(selectedDate) {
             <button class="chip" data-edge="12">12%+</button>
           </div>
         </div>
+        <div class="filter-row">
+          <span class="filter-label">Paris</span>
+          <div class="filter-chips" id="filter-bets">
+            <button class="chip chip--active" data-bets="ALL">Tous</button>
+            <button class="chip" data-bets="OPEN"><span class="mbp-bet-dot"></span>En cours</button>
+          </div>
+        </div>
       </div>
 
       <div id="best-opportunity" style="display:none"></div>
@@ -251,6 +315,7 @@ function _createMatchCard(match) {
   const time = match.datetime
     ? new Date(match.datetime).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
     : '—';
+  const countdownHtml = match.datetime ? _renderCountdown(match.datetime) : '';
 
   const homeRecord = match.home_team?.record ?? '—';
   const awayRecord = match.away_team?.record ?? '—';
@@ -265,7 +330,8 @@ function _createMatchCard(match) {
   card.innerHTML = `
     <div class="match-card__header">
       <span class="sport-tag sport-tag--nba">NBA</span>
-      <span class="match-card__time text-muted">${isFinal ? 'Terminé' : time}</span>
+      <span class="match-card__time text-muted">${isFinal ? 'Terminé' : time + ' (heure locale)'}</span>
+      ${!isFinal ? countdownHtml : ''}
       <span class="match-card__status-badge badge badge--inconclusive" id="badge-${match.id}">
         ${isFinal ? 'Final' : 'Analyse…'}
       </span>
@@ -341,8 +407,12 @@ function _updateMatchCard(list, matchId, analysis, match) {
   const badge = list.querySelector(`#badge-${matchId}`);
   if (badge) {
     const cfg = _decisionConfig(decision);
-    badge.textContent = cfg.label;
-    badge.className   = `match-card__status-badge badge ${cfg.cssClass}`;
+    badge.className = `match-card__status-badge badge ${cfg.cssClass}`;
+    if (decision === 'ANALYSER') {
+      badge.innerHTML = `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;margin-right:5px;vertical-align:middle;animation:mbp-pulse 1.5s ease-in-out infinite"></span>${cfg.label}`;
+    } else {
+      badge.textContent = cfg.label;
+    }
   }
 
   // Bordure carte
@@ -386,6 +456,15 @@ function _updateMatchCard(list, matchId, analysis, match) {
     if (marketAway && marketProbAway != null) marketAway.textContent = `Marché ${Math.round(marketProbAway * 100)}%`;
 
     probaBlock.style.display = '';
+
+    // Barre de probabilité horizontale
+    const existingBar = card?.querySelector('.mbp-proba-bar');
+    if (!existingBar && card) {
+      const bar = document.createElement('div');
+      bar.className = 'mbp-proba-bar';
+      bar.innerHTML = `<div class="mbp-proba-bar__fill" style="width:${homeProb}%"></div>`;
+      probaBlock.after(bar);
+    }
   }
 
   // Edge + qualité — 3 niveaux de couleur
@@ -417,23 +496,24 @@ function _updateMatchCard(list, matchId, analysis, match) {
     }
   }
 
-  // Net Rating — affiché discrètement si disponible
+  // Net Rating — badge coloré v4 (signal dominant du moteur)
   const netRating = analysis.variables_used?.net_rating_diff?.value;
   if (card && netRating != null) {
-    const existing = card.querySelector('.match-card__net-rating');
+    const existing = card.querySelector('.match-card__net-rating-v4');
     if (!existing) {
+      const sign  = netRating > 0 ? '+' : '';
+      const color = netRating > 3  ? 'var(--color-success)'
+                  : netRating < -3 ? 'var(--color-danger)'
+                  : 'var(--color-muted)';
+      const bg    = netRating > 3  ? 'rgba(72,199,142,0.10)'
+                  : netRating < -3 ? 'rgba(241,70,104,0.10)'
+                  : 'rgba(255,255,255,0.04)';
       const nr = document.createElement('div');
-      nr.className = 'match-card__net-rating text-muted';
-      nr.style.cssText = 'font-size:10px;margin-top:2px;opacity:0.7';
-      const sign = netRating > 0 ? '+' : '';
-      nr.textContent = `NET RTG ${sign}${netRating.toFixed(1)}`;
-      nr.style.color = netRating > 3
-        ? 'var(--color-success)'
-        : netRating < -3
-        ? 'var(--color-danger)'
-        : 'var(--color-muted)';
-      const probaEl = list.querySelector(`#proba-${matchId}`);
-      if (probaEl) probaEl.after(nr);
+      nr.className = 'match-card__net-rating-v4';
+      nr.style.cssText = `color:${color};background:${bg}`;
+      nr.innerHTML = `<span style="font-size:9px;opacity:0.7;font-weight:400">NET RTG</span><span>${sign}${netRating.toFixed(1)}</span>`;
+      const edgeBlock = list.querySelector(`#edge-${matchId}`);
+      if (edgeBlock) edgeBlock.before(nr);
     }
   }
 
@@ -479,12 +559,28 @@ function _updateMatchCard(list, matchId, analysis, match) {
         <span class="match-card__rec-type text-muted">${typeLabel}</span>
         <span class="match-card__rec-side">${sideLabel}</span>
         <span class="match-card__rec-odds mono">${oddsFormatted}
-          <span style="font-size:9px;color:var(--color-muted);margin-left:2px;text-transform:uppercase">${rec.odds_source ?? ''}</span>
+          <span style="font-size:9px;color:var(--color-muted);margin-left:2px">${rec.odds_source ?? ''}</span>
         </span>
         <span class="match-card__rec-edge" style="color:${edgeColor}">+${rec.edge}%</span>
       </div>`;
     }).join('');
     recsContainer.style.display = '';
+  }
+
+  // Point bleu si pari en cours sur ce match
+  if (card) {
+    try {
+      const ptState = JSON.parse(localStorage.getItem('mbp_paper_trading') ?? '{}');
+      const hasPending = (ptState.bets ?? []).some(b => b.match_id === matchId && b.result === 'PENDING');
+      if (hasPending && !card.querySelector('.mbp-open-bet-indicator')) {
+        const dot = document.createElement('div');
+        dot.className = 'mbp-open-bet-indicator';
+        dot.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:10px;color:var(--color-signal);margin-top:4px;font-weight:600';
+        dot.innerHTML = '<span class="mbp-bet-dot"></span>Pari en cours';
+        const cta = card.querySelector('.match-card__cta');
+        if (cta) cta.before(dot);
+      }
+    } catch {}
   }
 
   // Motif de rejet
@@ -537,29 +633,31 @@ function _renderBestOpportunity(container, matches, analysisIndex) {
   const gainPour100 = oddsDecimal !== '—' ? Math.round((oddsDecimal - 1) * 100) : null;
 
   el.style.display = 'block';
+  const bestCountdown = bestMatch.datetime ? _renderCountdown(bestMatch.datetime) : '';
   el.innerHTML = `
     <div style="
-      background:linear-gradient(135deg,rgba(34,197,94,0.10),rgba(34,197,94,0.03));
-      border:1px solid rgba(34,197,94,0.25);
+      background:linear-gradient(135deg,rgba(34,197,94,0.12),rgba(34,197,94,0.03));
+      border:1px solid rgba(34,197,94,0.35);
       border-radius:var(--radius-md);
-      padding:12px 14px;
+      padding:14px 16px;
       margin-bottom:var(--space-4);
       cursor:pointer;
     " id="best-opp-card">
-      <div style="font-size:10px;color:var(--color-success);font-weight:700;margin-bottom:4px;letter-spacing:0.05em">
-        ★ MEILLEURE OPPORTUNITÉ DU JOUR
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span style="font-size:11px;color:var(--color-success);font-weight:700;letter-spacing:0.05em">★ MEILLEURE OPPORTUNITÉ DU JOUR</span>
+        ${bestCountdown}
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
-          <div style="font-size:13px;font-weight:600">
+          <div style="font-size:15px;font-weight:700">
             ${bestMatch.home_team?.abbreviation} vs ${bestMatch.away_team?.abbreviation}
           </div>
-          <div style="font-size:12px;color:var(--color-muted);margin-top:2px">
-            Parier sur ${sideLabel} · cote ${oddsDecimal}${gainPour100 ? ` (+${gainPour100}€ / 100€)` : ''}
+          <div style="font-size:12px;color:var(--color-muted);margin-top:3px">
+            Parier sur <strong style="color:var(--color-text)">${sideLabel}</strong> · cote <strong style="color:var(--color-signal)">${oddsDecimal}</strong>${gainPour100 ? ` <span style="color:var(--color-muted)">(+${gainPour100}€ / 100€)</span>` : ''}
           </div>
         </div>
-        <div style="text-align:right">
-          <div style="font-size:20px;font-weight:700;color:var(--color-success)">+${bestEdge}%</div>
+        <div style="text-align:right;flex-shrink:0;margin-left:12px">
+          <div style="font-size:26px;font-weight:700;color:var(--color-success);line-height:1">+${bestEdge}%</div>
           <div style="font-size:10px;color:var(--color-muted)">avantage estimé</div>
         </div>
       </div>
@@ -612,6 +710,7 @@ function _bindFilterEvents(container, storeInstance) {
     if (chip.dataset.sport !== undefined)    _applyFilter(container, storeInstance, 'sport',    chip.dataset.sport,    analysisIndex);
     if (chip.dataset.decision !== undefined) _applyFilter(container, storeInstance, 'decision', chip.dataset.decision, analysisIndex);
     if (chip.dataset.edge !== undefined)     _applyFilter(container, storeInstance, 'edge',     chip.dataset.edge,     analysisIndex);
+    if (chip.dataset.bets !== undefined)     _applyFilter(container, storeInstance, 'bets',     chip.dataset.bets,     analysisIndex);
   });
 }
 
@@ -638,6 +737,19 @@ function _applyFilter(container, storeInstance, filterType, value, analysisIndex
       const minEdge  = parseInt(value);
       const bestEdge = analysis?.betting_recommendations?.best?.edge ?? 0;
       visible = bestEdge >= minEdge;
+    }
+
+    if (filterType === 'bets' && value === 'OPEN') {
+      // Lire les paris en cours depuis localStorage
+      try {
+        const ptState = JSON.parse(localStorage.getItem('mbp_paper_trading') ?? '{}');
+        const pendingMatchIds = new Set(
+          (ptState.bets ?? [])
+            .filter(b => b.result === 'PENDING')
+            .map(b => b.match_id)
+        );
+        visible = pendingMatchIds.has(matchId);
+      } catch { visible = false; }
     }
 
     card.style.display = visible ? '' : 'none';
@@ -671,6 +783,31 @@ function _renderError(container) {
 }
 
 // ── HELPERS ───────────────────────────────────────────────────────────────
+
+// Countdown jusqu'au tip-off
+function _renderCountdown(datetime) {
+  if (!datetime) return '';
+  const now      = Date.now();
+  const kickoff  = new Date(datetime).getTime();
+  const diffMs   = kickoff - now;
+  const diffMins = Math.round(diffMs / 60000);
+
+  if (diffMs < 0) {
+    // Match en cours
+    return '<span class="mbp-countdown mbp-countdown--live">● En cours</span>';
+  }
+  if (diffMins < 60) {
+    return `<span class="mbp-countdown mbp-countdown--soon">Dans ${diffMins} min</span>`;
+  }
+  if (diffMins < 120) {
+    const h = Math.floor(diffMins / 60);
+    const m = diffMins % 60;
+    return `<span class="mbp-countdown mbp-countdown--soon">Dans ${h}h${m > 0 ? m + 'min' : ''}</span>`;
+  }
+  const h = Math.floor(diffMins / 60);
+  const m = diffMins % 60;
+  return `<span class="mbp-countdown">Dans ${h}h${m > 0 ? m + 'min' : ''}</span>`;
+}
 
 function _decisionConfig(decision) {
   const map = {
