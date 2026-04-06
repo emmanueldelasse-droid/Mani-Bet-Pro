@@ -1,5 +1,15 @@
 /**
- * MANI BET PRO — data.orchestrator.js v3
+ * MANI BET PRO — data.orchestrator.js v3.2
+ *
+ * AJOUTS v3.2 :
+ *   - _loadInjuries() appelle /nba/injuries/impact (ESPN + Tank01 pondéré ppg)
+ *     au lieu de ProviderInjuries.getReport() directement.
+ *     Fallback automatique sur ESPN brut si la route impact échoue.
+ *   - Le format retourné reste compatible avec ProviderInjuries.getForTeam().
+ *   - impact_by_team exposé pour usage futur (pré-score par équipe).
+ *
+ * AJOUTS v3.1 :
+ *   - data.orchestrator.js v3.1 — voir historique v3.
  *
  * AJOUTS v3 :
  *   - _loadAdvancedStats() appelle /nba/teams/stats (Tank01) au lieu de
@@ -10,9 +20,9 @@
  *
  * AJOUTS v2 :
  *   - _loadAdvancedStats() : charge Net Rating + Pace depuis NBA Stats API
- *     en parallele avec BDL et injuries. Transmis au moteur via advanced_stats.
- *   - buildRawData() accepte advancedStats en parametre
- *   - BATCH_SIZE passe de 3 a 6, BATCH_DELAY de 500ms a 200ms
+ *     en parallèle avec BDL et injuries. Transmis au moteur via advanced_stats.
+ *   - buildRawData() accepte advancedStats en paramètre.
+ *   - BATCH_SIZE passe de 3 à 6, BATCH_DELAY de 500ms à 200ms.
  */
 
 import { ProviderNBA }      from '../providers/provider.nba.js';
@@ -22,7 +32,7 @@ import { Logger }           from '../utils/utils.logger.js';
 import { LoadingUI }        from '../ui/ui.loading.js';
 import { API_CONFIG }       from '../config/api.config.js';
 
-// Mapping nom equipe ESPN vers ID BallDontLie (officiel NBA 1-30)
+// Mapping nom équipe ESPN vers ID BallDontLie (officiel NBA 1-30)
 const TEAM_NAME_TO_BDL_ID = {
   'Atlanta Hawks':           '1',
   'Boston Celtics':          '2',
@@ -93,14 +103,14 @@ const ABV_TO_ESPN_NAME = {
 export class DataOrchestrator {
 
   /**
-   * Point d'entree unique. Charge toutes les donnees puis analyse.
+   * Point d'entrée unique. Charge toutes les données puis analyse.
    * @param {string} date - YYYY-MM-DD
    * @param {Store} store
    * @returns {Promise<{ matches: Array, analyses: object }|null>}
    */
   static async loadAndAnalyze(date, store) {
     try {
-      // ETAPE 1 : ESPN matches (obligatoire)
+      // ÉTAPE 1 : ESPN matches (obligatoire)
       LoadingUI.update('ESPN matches...', 0);
       const espnData = await ProviderNBA.getMatchesToday(date);
 
@@ -122,19 +132,19 @@ export class DataOrchestrator {
         return null;
       }
 
-      // Vider les analyses precedentes si on change de date
+      // Vider les analyses précédentes si on change de date
       const prevDate = store.get('dashboardFilters') && store.get('dashboardFilters').selectedDate;
       if (prevDate && prevDate !== date) {
         store.set({ matches: {}, analyses: {} });
       }
 
-      // Stocker les matchs dans le store immediatement
+      // Stocker les matchs dans le store immédiatement
       matches.forEach(function(match) {
         store.upsert('matches', match.id, Object.assign({}, match, { sport: 'NBA' }));
       });
 
-      // ETAPE 2 : Injuries + BDL + Odds + Stats avancees en parallele
-      LoadingUI.update('Blessures + forme recente + cotes + Net Rating...', 20);
+      // ÉTAPE 2 : Injuries + BDL + Odds + Stats avancées en parallèle
+      LoadingUI.update('Blessures + forme récente + cotes + Net Rating...', 20);
 
       const season  = _getCurrentNBASeason();
       const teamIds = _extractTeamIds(matches);
@@ -146,7 +156,7 @@ export class DataOrchestrator {
         _loadAdvancedStats(),
       ]);
 
-      // ETAPE 3 : Analyser tous les matchs
+      // ÉTAPE 3 : Analyser tous les matchs
       LoadingUI.update('Analyse en cours...', 70);
 
       const analyses = await _analyzeMatches(
@@ -159,7 +169,7 @@ export class DataOrchestrator {
         store
       );
 
-      LoadingUI.update('Pret', 100);
+      LoadingUI.update('Prêt', 100);
       LoadingUI.hide();
 
       return { matches, analyses };
@@ -172,7 +182,7 @@ export class DataOrchestrator {
   }
 
   /**
-   * Construit les donnees brutes pour le moteur NBA.
+   * Construit les données brutes pour le moteur NBA.
    * @param {object} match
    * @param {object} recentForms - { [bdlId]: NBARecentForm }
    * @param {object|null} injuryReport
@@ -219,7 +229,7 @@ export class DataOrchestrator {
   }
 }
 
-// ── FONCTIONS PRIVEES ─────────────────────────────────────────────────────────
+// ── FONCTIONS PRIVÉES ─────────────────────────────────────────────────────────
 
 function _getBDLId(teamName) {
   return teamName ? (TEAM_NAME_TO_BDL_ID[teamName] || null) : null;
@@ -236,8 +246,71 @@ function _extractTeamIds(matches) {
   return Array.from(ids);
 }
 
+/**
+ * v3.2 : Charge les blessures depuis /nba/injuries/impact (ESPN + Tank01 pondéré ppg).
+ * Le format retourné est compatible avec ProviderInjuries.getForTeam() :
+ *   { by_team: { [teamName]: [{ name, status, impact_weight, ppg, source }] } }
+ *
+ * Fallback automatique sur ESPN brut (ProviderInjuries.getReport) si la route échoue.
+ */
 async function _loadInjuries(date) {
   try {
+    const controller = new AbortController();
+    const timer = setTimeout(function() { controller.abort(); }, 10000);
+
+    const response = await fetch(
+      API_CONFIG.WORKER_BASE_URL + '/nba/injuries/impact',
+      { signal: controller.signal, headers: { 'Accept': 'application/json' } }
+    );
+    clearTimeout(timer);
+
+    if (response.ok) {
+      const data = await response.json();
+
+      if (data && data.available && data.by_team && Object.keys(data.by_team).length > 0) {
+        Logger.info('INJURIES_IMPACT_LOADED', {
+          teams:  Object.keys(data.by_team).length,
+          source: 'espn+tank01',
+        });
+
+        // Adapter le format pour ProviderInjuries.getForTeam()
+        // getForTeam() attend : { by_team: { [teamName]: [...players] } }
+        // players_weighted contient déjà impact_weight pondéré par ppg (Tank01)
+        return {
+          source:  'espn_injuries_weighted',
+          by_team: Object.fromEntries(
+            Object.entries(data.by_team).map(function([teamName, teamData]) {
+              return [
+                teamName,
+                teamData.players_weighted.map(function(p) {
+                  return {
+                    name:           p.name,
+                    status:         p.status,
+                    impact_weight:  p.player_impact,  // ← poids réel pondéré par ppg
+                    ppg:            p.ppg,
+                    importance_pct: p.importance_pct,
+                    source:         p.source,         // 'tank01' | 'fallback'
+                  };
+                }),
+              ];
+            })
+          ),
+          // Pré-score par équipe exposé pour usage futur (calibration, debug)
+          impact_by_team: Object.fromEntries(
+            Object.entries(data.by_team).map(function([teamName, teamData]) {
+              return [teamName, teamData.impact_score];
+            })
+          ),
+        };
+      }
+    }
+  } catch (err) {
+    Logger.warn('INJURIES_IMPACT_FAILED', { message: err.message });
+  }
+
+  // Fallback : ESPN injuries brut (comportement v3.1)
+  try {
+    Logger.warn('INJURIES_FALLBACK_ESPN', {});
     return await ProviderInjuries.getReport(date);
   } catch (err) {
     Logger.warn('ORCHESTRATOR_INJURIES_FAILED', { message: err.message });
@@ -254,7 +327,7 @@ async function _loadRecentForms(teamIds, season) {
     const batch = teamIds.slice(i, i + BATCH_SIZE);
 
     LoadingUI.update(
-      'Forme recente (' + Math.min(i + BATCH_SIZE, teamIds.length) + '/' + teamIds.length + ')...',
+      'Forme récente (' + Math.min(i + BATCH_SIZE, teamIds.length) + '/' + teamIds.length + ')...',
       20 + Math.round((i / teamIds.length) * 40)
     );
 
@@ -285,7 +358,7 @@ async function _loadOddsComparison() {
 }
 
 /**
- * Charge les stats avancees depuis Tank01 (/nba/teams/stats).
+ * Charge les stats avancées depuis Tank01 (/nba/teams/stats).
  * net_rating_approx = ppg - oppg (approximation sans possessions).
  * Retourne { [nomESPN]: { net_rating, pace } } ou null si indisponible.
  * Non bloquant — le moteur fonctionne sans (quality=MISSING).
