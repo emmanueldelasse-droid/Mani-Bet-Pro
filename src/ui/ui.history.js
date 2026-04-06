@@ -81,13 +81,13 @@ function _renderBankrollCard(state, pendingStake, trueCapital) {
     '<div style="font-size:16px;font-weight:600">' + state.initial_bankroll.toFixed(0) + ' \u20ac</div>',
     '</div>',
 
-    // Actuelle = disponible + engage
+    // Disponible (current_bankroll = déjà déduit des mises PENDING au placement)
     '<div>',
-    '<div style="font-size:10px;color:var(--color-muted);margin-bottom:2px">Actuelle</div>',
-    '<div style="font-size:16px;font-weight:600">' + trueCapital.toFixed(2) + ' \u20ac</div>',
+    '<div style="font-size:10px;color:var(--color-muted);margin-bottom:2px">Disponible</div>',
+    '<div style="font-size:16px;font-weight:600">' + state.current_bankroll.toFixed(2) + ' \u20ac</div>',
     pendingStake > 0
       ? '<div style="font-size:10px;color:var(--color-warning)">' + pendingStake.toFixed(2) + ' \u20ac engag\u00e9s</div>'
-      : '<div style="font-size:10px;color:var(--color-muted)">' + state.current_bankroll.toFixed(2) + ' \u20ac disponibles</div>',
+      : '<div style="font-size:10px;color:var(--color-muted)">Aucun pari en attente</div>',
     '</div>',
 
     // P&L
