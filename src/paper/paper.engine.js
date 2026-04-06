@@ -1,7 +1,11 @@
 /**
- * MANI BET PRO — paper.engine.js v2
+ * MANI BET PRO — paper.engine.js v2.1
  *
  * Responsabilité unique : logique du paper trading.
+ *
+ * CORRECTIONS v2.1 :
+ *   - Suppression du plafond journalier (checkDailyExposure désactivé).
+ *     Permet de parier sur plusieurs marchés le même jour sans restriction.
  * Stockage : Cloudflare KV via Worker (persistant cross-session).
  * Fallback : localStorage si Worker indisponible.
  */
@@ -90,22 +94,7 @@ export class PaperEngine {
   }
 
   static async placeBet(betData) {
-    // Verifier le plafond d'exposition journaliere (20% bankroll)
-    const exposure = await this.checkDailyExposure(betData.stake);
-    if (!exposure.allowed) {
-      Logger.warn('PAPER_DAILY_LIMIT', {
-        stake:     betData.stake,
-        exposed:   exposure.exposed,
-        limit:     exposure.limit,
-        remaining: exposure.remaining,
-      });
-      return {
-        error:     'DAILY_LIMIT_EXCEEDED',
-        message:   'Plafond journalier atteint (' + exposure.exposed.toFixed(0) + '/' + exposure.limit.toFixed(0) + ' \u20ac). Reste : ' + exposure.remaining.toFixed(0) + ' \u20ac.',
-        exposure,
-      };
-    }
-
+    // Plafond journalier désactivé v2.1 — pas de limite par jour
     try {
       const response = await fetch(WORKER + '/paper/bet', {
         method:  'POST',
