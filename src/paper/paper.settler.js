@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — paper.settler.js v3
+ * MANI BET PRO — paper.settler.js v3.1
  *
  * CORRECTIONS v3 :
  *   - SPREAD sans spread_line : récupère la ligne depuis les cotes ESPN
@@ -53,7 +53,14 @@ export class PaperSettler {
           const outcome = _determineOutcome(bet, result);
           if (!outcome) continue;
 
-          await PaperEngine.settleBet(bet.bet_id, outcome, null);
+          // v3.1 : passer les scores finaux pour affichage dans ui.history.js
+          const homeScore = result.home_team?.score ?? null;
+          const awayScore = result.away_team?.score ?? null;
+          const betHomeIsHome = result.home_team?.name === bet.home;
+          await PaperEngine.settleBet(bet.bet_id, outcome, null, {
+            home_score: betHomeIsHome ? homeScore : awayScore,
+            away_score: betHomeIsHome ? awayScore : homeScore,
+          });
           settled++;
 
           Logger.info('PAPER_AUTO_SETTLED', {

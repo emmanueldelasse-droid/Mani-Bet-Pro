@@ -1,7 +1,11 @@
 /**
- * MANI BET PRO — paper.engine.js v2.1
+ * MANI BET PRO — paper.engine.js v2.2
  *
- * Responsabilité unique : logique du paper trading.
+ * AJOUTS v2.2 :
+ *   - settleBet() accepte un paramètre extraFields (objet) transmis au Worker
+ *     et au fallback localStorage. Utilisé par paper.settler.js v3.1 pour
+ *     stocker home_score et away_score au moment de la clôture automatique.
+ *     Ces scores sont ensuite affichés dans ui.history.js sur chaque pari clôturé.
  *
  * CORRECTIONS v2.1 :
  *   - Suppression du plafond journalier (checkDailyExposure désactivé).
@@ -30,10 +34,6 @@ export class PaperEngine {
 
   // ── CHARGEMENT ────────────────────────────────────────────────────────
 
-  /**
-   * Charge l'état depuis KV (via Worker) avec fallback localStorage.
-   * @returns {Promise<PaperState>}
-   */
   static async loadAsync() {
     try {
       const response = await fetch(`${WORKER}/paper/state`, {
@@ -41,35 +41,19 @@ export class PaperEngine {
       });
       if (response.ok) {
         const state = await response.json();
-        // Sync localStorage comme cache local
         _saveLocal(state);
         return state;
       }
     } catch {}
-    // Fallback localStorage
     return _loadLocal();
   }
 
-  /**
-   * Charge depuis localStorage (synchrone — pour usage immédiat dans l'UI).
-   * @returns {PaperState}
-   */
   static load() {
     return _loadLocal();
   }
 
   // ── PARIS ─────────────────────────────────────────────────────────────
 
-  /**
-   * Enregistre un nouveau pari via KV.
-   * @param {object} betData
-   * @returns {Promise<PaperState>}
-   */
-  /**
-   * Verifie l'exposition journaliere avant de placer un pari.
-   * Plafond : 20% de la bankroll initiale par journee calendaire.
-   * @returns {{ allowed: boolean, exposed: number, limit: number, remaining: number }}
-   */
   static async checkDailyExposure(stake) {
     const state = await this.loadAsync();
     const today = new Date().toISOString().slice(0, 10);
@@ -94,7 +78,7 @@ export class PaperEngine {
   }
 
   static async placeBet(betData) {
-    // Plafond journalier désactivé v2.1 — pas de limite par jour
+    // Plafond journalier désactivé v2.1
     try {
       const response = await fetch(WORKER + '/paper/bet', {
         method:  'POST',
@@ -110,7 +94,6 @@ export class PaperEngine {
     } catch (err) {
       Logger.warn('PAPER_BET_FALLBACK', { message: err.message });
     }
-    // Fallback localStorage
     return _placeBetLocal(betData);
   }
 
@@ -119,14 +102,15 @@ export class PaperEngine {
    * @param {string} betId
    * @param {'WIN'|'LOSS'|'PUSH'} result
    * @param {number|null} closingOdds
+   * @param {object} extraFields — champs supplémentaires à stocker (ex: home_score, away_score)
    * @returns {Promise<PaperState>}
    */
-  static async settleBet(betId, result, closingOdds = null) {
+  static async settleBet(betId, result, closingOdds = null, extraFields = {}) {
     try {
       const response = await fetch(`${WORKER}/paper/bet/${betId}`, {
         method:  'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ result, closing_odds: closingOdds }),
+        body:    JSON.stringify({ result, closing_odds: closingOdds, ...extraFields }),
       });
       if (response.ok) {
         const { state } = await response.json();
@@ -134,14 +118,9 @@ export class PaperEngine {
         return state;
       }
     } catch {}
-    return _settleBetLocal(betId, result, closingOdds);
+    return _settleBetLocal(betId, result, closingOdds, extraFields);
   }
 
-  /**
-   * Réinitialise le paper trading.
-   * @param {number} initialBankroll
-   * @returns {Promise<PaperState>}
-   */
   static async reset(initialBankroll = 1000) {
     try {
       const response = await fetch(`${WORKER}/paper/reset`, {
@@ -230,21 +209,25 @@ function _placeBetLocal(betData) {
   return state;
 }
 
-function _settleBetLocal(betId, result, closingOdds) {
+function _settleBetLocal(betId, result, closingOdds, extraFields = {}) {
   const state = _loadLocal();
   const bet   = state.bets.find(b => b.bet_id === betId);
   if (!bet || bet.result !== 'PENDING') return state;
 
-  bet.result      = result;
-  bet.settled_at  = new Date().toISOString();
+  bet.result       = result;
+  bet.settled_at   = new Date().toISOString();
   bet.closing_odds = closingOdds;
-if (closingOdds !== null && bet.motor_prob !== null) {
-  const decClosing = closingOdds > 0
-    ? closingOdds / 100 + 1
-    : 100 / Math.abs(closingOdds) + 1;
-  const impliedClosing = 1 / decClosing;
-  bet.clv = Math.round((bet.motor_prob / 100 - impliedClosing) * 10000) / 100;
-}
+
+  // Stocker les champs supplémentaires (home_score, away_score, etc.)
+  Object.assign(bet, extraFields);
+
+  if (closingOdds !== null && bet.motor_prob !== null) {
+    const decClosing = closingOdds > 0
+      ? closingOdds / 100 + 1
+      : 100 / Math.abs(closingOdds) + 1;
+    const impliedClosing = 1 / decClosing;
+    bet.clv = Math.round((bet.motor_prob / 100 - impliedClosing) * 10000) / 100;
+  }
 
   if (result === 'WIN') {
     const b = bet.odds_taken > 0 ? bet.odds_taken / 100 + 1 : 100 / Math.abs(bet.odds_taken) + 1;
@@ -332,7 +315,7 @@ function _computeByStrategy(settled) {
   return Object.keys(STRATEGIES).reduce((acc, key) => {
     const s = settled.filter(b => b.strategy === key);
     if (!s.length) { acc[key] = null; return acc; }
-    const won = s.filter(b => b.result === 'WIN').length;
+    const won    = s.filter(b => b.result === 'WIN').length;
     const staked = s.reduce((t, b) => t + b.stake, 0);
     const pnl    = s.reduce((t, b) => t + (b.pnl ?? 0), 0);
     acc[key] = { total: s.length, won, hit_rate: Math.round(won / s.length * 1000) / 10, roi: staked > 0 ? Math.round(pnl / staked * 10000) / 100 : null, pnl: Math.round(pnl * 100) / 100 };
