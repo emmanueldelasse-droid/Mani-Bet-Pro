@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — data.orchestrator.js v3.3
+ * MANI BET PRO — data.orchestrator.js v3.4
  *
  * AJOUTS v3.2 :
  *   - _loadInjuries() appelle /nba/injuries/impact (ESPN + Tank01 pondéré ppg)
@@ -28,6 +28,7 @@
 import { ProviderNBA }      from '../providers/provider.nba.js';
 import { ProviderInjuries } from '../providers/provider.injuries.js';
 import { EngineCore }       from '../engine/engine.core.js';
+import { EngineTennis }    from '../engine/engine.tennis.js';
 import { Logger }           from '../utils/utils.logger.js';
 import { LoadingUI }        from '../ui/ui.loading.js';
 import { API_CONFIG }       from '../config/api.config.js';
@@ -109,6 +110,11 @@ export class DataOrchestrator {
    * @returns {Promise<{ matches: Array, analyses: object }|null>}
    */
   static async loadAndAnalyze(date, store) {
+    // Routing vers le bon orchestrateur selon le sport sélectionné
+    const sport = store.get('selectedSport') ?? 'NBA';
+    if (sport === 'TENNIS') {
+      return DataOrchestrator._loadAndAnalyzeTennis(date, store);
+    }
     try {
       // ÉTAPE 1 : ESPN matches (obligatoire)
       LoadingUI.update('ESPN matches...', 0);
@@ -468,6 +474,91 @@ function _isBackToBack(recentForm, matchDate) {
   var curr = new Date(_normalizeDate(String(matchDate)) + 'T12:00:00');
   return Math.round((curr - last) / 86400000) === 1;
 }
+
+// ── TENNIS ORCHESTRATOR ──────────────────────────────────────────────────
+
+DataOrchestrator._loadAndAnalyzeTennis = async function(date, store) {
+  const WORKER = API_CONFIG.WORKER_BASE_URL;
+  const TOURNAMENTS = [
+    { key: 'monte_carlo', label: 'Monte-Carlo Masters', surface: 'Clay',  start: '2026-04-13', end: '2026-04-20' },
+    { key: 'madrid',      label: 'Madrid Open',         surface: 'Clay',  start: '2026-04-28', end: '2026-05-10' },
+    { key: 'rome',        label: 'Rome Masters',        surface: 'Clay',  start: '2026-05-11', end: '2026-05-18' },
+    { key: 'french_open', label: 'Roland Garros',       surface: 'Clay',  start: '2026-05-25', end: '2026-06-08' },
+    { key: 'wimbledon',   label: 'Wimbledon',           surface: 'Grass', start: '2026-06-29', end: '2026-07-12' },
+    { key: 'us_open',     label: 'US Open',             surface: 'Hard',  start: '2026-08-31', end: '2026-09-13' },
+  ];
+
+  const d          = date ?? new Date().toISOString().slice(0, 10);
+  const tournament = TOURNAMENTS.find(t => d >= t.start && d <= t.end) ?? null;
+
+  if (!tournament) {
+    Logger.info('TENNIS_NO_ACTIVE_TOURNAMENT', { date: d });
+    return { matches: [], analyses: {} };
+  }
+
+  try {
+    LoadingUI.update('Tennis odds...', 0);
+    const oddsResp = await fetch(`${WORKER}/tennis/odds?tournament=${tournament.key}`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!oddsResp.ok) return { matches: [], analyses: {} };
+    const oddsData = await oddsResp.json();
+    if (!oddsData.available || !oddsData.matches?.length) {
+      return { matches: [], analyses: {} };
+    }
+
+    const matchesMap = {};
+    const analyses   = {};
+
+    for (const m of oddsData.matches) {
+      const p1 = m.home_player;
+      const p2 = m.away_player;
+      if (!p1 || !p2) continue;
+
+      const matchObj = {
+        id:         m.id,
+        sport:      'TENNIS',
+        datetime:   m.commence_time,
+        tournament: tournament.label,
+        surface:    tournament.surface,
+        status:     'STATUS_SCHEDULED',
+        home_team:  { name: p1, abbreviation: p1.split(' ').pop() ?? p1, score: null },
+        away_team:  { name: p2, abbreviation: p2.split(' ').pop() ?? p2, score: null },
+        odds:       m.odds?.h2h ? { home_ml: m.odds.h2h.p1, away_ml: m.odds.h2h.p2 } : null,
+      };
+      matchesMap[m.id] = matchObj;
+
+      try {
+        LoadingUI.update(`Stats ${p1} vs ${p2}...`, 50);
+        const statsResp = await fetch(
+          `${WORKER}/tennis/stats?players=${encodeURIComponent(p1)},${encodeURIComponent(p2)}&surface=${tournament.surface}`,
+          { headers: { Accept: 'application/json' } }
+        );
+        const statsData = statsResp.ok ? await statsResp.json() : null;
+        const csvStats  = statsData?.available ? (statsData.stats ?? {}) : {};
+
+        const engineResult = EngineTennis.analyze(
+          { ...m, surface: tournament.surface },
+          csvStats
+        );
+
+        const analysis      = EngineCore.analyze('TENNIS', engineResult, matchObj, matchObj);
+        analysis.match_id   = m.id;
+        analyses[m.id]      = analysis;
+
+      } catch (err) {
+        Logger.warn('TENNIS_MATCH_ERROR', { match: `${p1} vs ${p2}`, message: err.message });
+      }
+    }
+
+    store.set({ matches: matchesMap, analyses });
+    return { matches: Object.values(matchesMap), analyses };
+
+  } catch (err) {
+    Logger.error('TENNIS_ORCHESTRATOR_ERROR', { message: err.message });
+    return { matches: [], analyses: {} };
+  }
+};
 
 function _computeRestDays(recentForm, matchDate) {
   if (!recentForm || !recentForm.matches || !recentForm.matches.length || !matchDate) return null;
