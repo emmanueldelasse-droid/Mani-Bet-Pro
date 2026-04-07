@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — ui.match-detail.js v3.3
+ * MANI BET PRO — ui.match-detail.js v3.4
  *
  * AJOUTS v3.1 :
  *   - top_signal sauvegardé dans le payload PaperEngine.placeBet()
@@ -41,6 +41,7 @@ const SIGNAL_LABELS = {
   'absences_impact':   'Blessures',
   'ts_diff':           'Efficacité offensive',
   'avg_pts_diff':      'Points marqués',
+  'defensive_diff':    'Défense adverse',
   'back_to_back':      'Matchs consécutifs',
   'rest_days_diff':    'Jours de repos',
 };
