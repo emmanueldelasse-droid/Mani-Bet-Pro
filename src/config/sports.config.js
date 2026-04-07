@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — sports.config.js v6.2
+ * MANI BET PRO — sports.config.js v6.3
  *
  * CHANGEMENTS v6 — défense adverse :
  *   - defensive_diff : 0 → 0.05 (NOUVEAU — oppg Tank01, 0 appel supplémentaire)
@@ -150,12 +150,12 @@ export const SPORTS_CONFIG = {
 
     // Tournois couverts — sport_key The Odds API
     tournaments: {
-      monte_carlo:  { key: 'tennis_atp_monte_carlo',  surface: 'Clay',  label: 'Monte-Carlo Masters' },
-      madrid:       { key: 'tennis_atp_madrid_open',  surface: 'Clay',  label: 'Madrid Open' },
-      rome:         { key: 'tennis_atp_rome',         surface: 'Clay',  label: 'Rome Masters' },
-      french_open:  { key: 'tennis_atp_french_open',  surface: 'Clay',  label: 'Roland Garros' },
-      wimbledon:    { key: 'tennis_atp_wimbledon',    surface: 'Grass', label: 'Wimbledon' },
-      us_open:      { key: 'tennis_atp_us_open',      surface: 'Hard',  label: 'US Open' },
+      monte_carlo:  { key: 'tennis_atp_monte_carlo_masters', surface: 'Clay',  label: 'Monte-Carlo Masters' },
+      madrid:       { key: 'tennis_atp_madrid_open',          surface: 'Clay',  label: 'Madrid Open' },
+      rome:         { key: 'tennis_atp_italian_open',          surface: 'Clay',  label: 'Rome Masters' },
+      french_open:  { key: 'tennis_atp_french_open',           surface: 'Clay',  label: 'Roland Garros' },
+      wimbledon:    { key: 'tennis_atp_wimbledon',             surface: 'Grass', label: 'Wimbledon' },
+      us_open:      { key: 'tennis_atp_us_open',               surface: 'Hard',  label: 'US Open' },
     },
 
     simulator_defaults: {
