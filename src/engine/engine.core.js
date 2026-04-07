@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — engine.core.js v2.2
+ * MANI BET PRO — engine.core.js v2.3
  *
  * AJOUTS v2.2 :
  *   - Plafonnement du predictive_score via sportConfig.score_cap.
@@ -107,11 +107,15 @@ export class EngineCore {
       dataQuality.score
     );
 
+    const noOdds  = !rawData?.odds && !rawData?.market_odds;
     const decision = this._computeDecision(
       confidenceLevel,
       engineResult.betting_recommendations,
       dataQuality.score
     );
+    const insuffisantReason = decision === 'INSUFFISANT'
+      ? this._computeInsuffisantReason(engineResult.betting_recommendations, noOdds)
+      : null;
 
     const analysis = {
       analysis_id:          crypto.randomUUID(),
@@ -132,6 +136,7 @@ export class EngineCore {
       confidence_level:     confidenceLevel,
       decision,
       rejection_reason:     null,
+      insuffisant_reason:   insuffisantReason,
 
       key_signals:  engineResult.signals.filter(s => Math.abs(s.contribution) > 0.02),
       weak_signals: engineResult.signals.filter(s => Math.abs(s.contribution) <= 0.02),
@@ -146,6 +151,8 @@ export class EngineCore {
 
       variables_used:          engineResult.variables_used ?? {},
       betting_recommendations: engineResult.betting_recommendations ?? null,
+      // v2.3 : distingue "pas d'edge" de "pas de cotes disponibles"
+      no_odds_available: !rawData?.odds && !rawData?.market_odds,
 
       explanation_context: this._buildExplanationContext(
         sport, engineResult, robustness, dataQuality, confidenceLevel, cappedScore
@@ -180,6 +187,15 @@ export class EngineCore {
     if (!best || edge < 5)                  return 'INSUFFISANT';
     if (edge >= 7 && quality >= 0.75 && confidenceLevel === 'HIGH') return 'ANALYSER';
     return 'EXPLORER';
+  }
+
+  // Raison lisible pour le statut INSUFFISANT — utilisée par l'UI
+  static _computeInsuffisantReason(bettingRecs, noOdds) {
+    if (noOdds) return 'Cotes non disponibles pour ce match';
+    const best = bettingRecs?.best;
+    if (!best)       return 'Aucune recommandation de pari détectée';
+    if (best.edge < 5) return `Edge insuffisant (${best.edge}% < 5% minimum)`;
+    return 'Conditions non remplies';
   }
 
   // ── VÉRIFICATIONS DE REJET ────────────────────────────────────────────

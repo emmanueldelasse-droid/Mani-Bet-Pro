@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — engine.nba.js v5.5
+ * MANI BET PRO — engine.nba.js v5.6
  *
  * AJOUTS v5.4 :
  *   - _computeAbsencesImpact() exploite le champ impact_weight pondéré par ppg
@@ -566,6 +566,9 @@ export class EngineNBA {
         const realEdge    = motorProb - bestImplied;
         const kelly       = this._computeKelly(motorProb, bestOdds);
 
+        // is_contrarian : vrai quand on parie sur l'équipe défavorisée par le moteur
+        // Ex: score=0.56 (Boston favori) mais edge sur Charlotte → is_contrarian=true
+        const isContrarian = (side === 'HOME' && score <= 0.5) || (side === 'AWAY' && score > 0.5);
         recs.push({
           type: 'MONEYLINE', label: 'Vainqueur du match', side,
           odds_line: bestOdds, odds_source: bestBook?.bookmaker ?? 'DraftKings', odds_dk: dkOdds,
@@ -573,6 +576,7 @@ export class EngineNBA {
           edge: Math.round(Math.abs(realEdge) * 100),
           confidence: this._edgeToConfidence(Math.abs(realEdge)),
           has_value: true, kelly_stake: kelly,
+          is_contrarian: isContrarian,
         });
       }
     }
@@ -618,6 +622,7 @@ export class EngineNBA {
             motor_prob: Math.round(motorProb * 100), implied_prob: Math.round(impliedProb * 100),
             edge: Math.round(edge * 100), confidence: this._edgeToConfidence(edge),
             has_value: true, kelly_stake: this._computeKelly(motorProb, bestBook.odds),
+            is_contrarian: false,
           });
         }
       };
