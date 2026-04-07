@@ -1,5 +1,9 @@
 /**
- * MANI BET PRO — sports.config.js v5
+ * MANI BET PRO — sports.config.js v6.1
+ *
+ * CHANGEMENTS v6 — défense adverse :
+ *   - defensive_diff : 0 → 0.05 (NOUVEAU — oppg Tank01, 0 appel supplémentaire)
+ *   - net_rating_diff : 0.30 → 0.28, efg_diff : 0.22 → 0.20, recent_form : 0.20 → 0.18
  *
  * CHANGEMENTS v5 — audit complet pondérations :
  *   - net_rating_diff : 0 -> 0.30  (ACTIVE — etait extrait mais ignore depuis v3 !)
@@ -43,6 +47,7 @@ export const SPORTS_CONFIG = {
       { id: 'home_away_split', label: 'Split Domicile/Exterieur',           critical: false },
       { id: 'absences_impact', label: 'Impact absences (ESPN + Tank01)',    critical: false },
       { id: 'win_pct_diff',    label: 'Win% differentiel (saison)',         critical: false },
+      { id: 'defensive_diff',  label: 'Défense adverse (Tank01)',            critical: false },
       { id: 'back_to_back',    label: 'Back-to-back',                       critical: false },
       { id: 'rest_days_diff',  label: 'Jours de repos',                     critical: false },
     ],
@@ -63,9 +68,12 @@ export const SPORTS_CONFIG = {
       recent_form_ema:  0.20,
       home_away_split:  0.12,
       absences_impact:  0.10,
+      defensive_diff:   0.00,  // désactivé — corrélé à net_rating_diff (ppg-oppg)
+                                // sera activé quand opponent_efg% disponible (Sprint 6)
       win_pct_diff:     0.04,
       back_to_back:     0.01,
       rest_days_diff:   0.01,
+      // Somme = 0.30+0.22+0.20+0.12+0.10+0.04+0.01+0.01 = 1.00
     },
 
     ema_lambda: 0.85,
