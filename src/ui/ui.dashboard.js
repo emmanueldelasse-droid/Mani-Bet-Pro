@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — ui.dashboard.js v4.2
+ * MANI BET PRO — ui.dashboard.js v4.4
  *
  * AMÉLIORATIONS v3 :
  *   - Labels recommandations plus clairs : 'Vainqueur du match', 'Handicap (points)', 'Total de points'
@@ -119,13 +119,15 @@ async function _loadAndDisplay(container, storeInstance, date) {
       const matchList     = Object.values(cachedMatches).filter(m => m.sport === 'NBA');
       const analysisIndex = _buildAnalysisIndex(cachedAnalyses);
 
+      // Charger l'état paper trading une seule fois pour tout le rendu
+      const ptState = _loadPaperState();
       _renderMatchCards(list, matchList, storeInstance);
 
       let analyser = 0, explorer = 0, insuffisant = 0, rejete = 0;
       matchList.forEach(match => {
         const analysis = analysisIndex[match.id];
         if (!analysis) return;
-        _updateMatchCard(list, match.id, analysis, match);
+        _updateMatchCard(list, match.id, analysis, match, ptState);
         switch (analysis.decision ?? _legacyDecision(analysis)) {
           case 'ANALYSER':    analyser++;    break;
           case 'EXPLORER':    explorer++;    break;
@@ -153,6 +155,7 @@ async function _loadAndDisplay(container, storeInstance, date) {
 
     const analysisIndex = _buildAnalysisIndex(result.analyses);
 
+    const ptState = _loadPaperState();
     _renderMatchCards(list, result.matches, storeInstance);
 
     let analyser = 0, explorer = 0, insuffisant = 0, rejete = 0;
@@ -160,7 +163,7 @@ async function _loadAndDisplay(container, storeInstance, date) {
     result.matches.forEach(match => {
       const analysis = analysisIndex[match.id];
       if (!analysis) return;
-      _updateMatchCard(list, match.id, analysis, match);
+      _updateMatchCard(list, match.id, analysis, match, ptState);
 
       switch (analysis.decision ?? _legacyDecision(analysis)) {
         case 'ANALYSER':    analyser++;    break;
@@ -254,6 +257,7 @@ function _renderShell(selectedDate) {
           <div class="filter-chips" id="filter-sports">
             <button class="chip chip--active" data-sport="ALL">Tous</button>
             <button class="chip" data-sport="NBA">NBA</button>
+            <button class="chip" data-sport="TENNIS">Tennis</button>
           </div>
         </div>
         <div class="filter-row">
@@ -317,8 +321,9 @@ function _createMatchCard(match) {
     : '—';
   const countdownHtml = match.datetime ? _renderCountdown(match.datetime) : '';
 
-  const homeRecord = match.home_team?.record ?? '—';
-  const awayRecord = match.away_team?.record ?? '—';
+  const isTennis   = match.sport === 'TENNIS';
+  const homeRecord = isTennis ? (match.surface ?? '') : (match.home_team?.record ?? '—');
+  const awayRecord = isTennis ? (match.tournament ?? '') : (match.away_team?.record ?? '—');
   const isFinal    = match.status === 'STATUS_FINAL' || match.status === 'STATUS_FINAL_OT';
   const homeScore  = match.home_team?.score;
   const awayScore  = match.away_team?.score;
@@ -329,7 +334,7 @@ function _createMatchCard(match) {
 
   card.innerHTML = `
     <div class="match-card__header">
-      <span class="sport-tag sport-tag--nba">NBA</span>
+      <span class="sport-tag ${match.sport === 'TENNIS' ? 'sport-tag--tennis' : 'sport-tag--nba'}">${match.sport === 'TENNIS' ? 'Tennis' : 'NBA'}</span>
       <span class="match-card__time text-muted">${isFinal ? 'Terminé' : time + ' (heure locale)'}</span>
       ${!isFinal ? countdownHtml : ''}
       <span class="match-card__status-badge badge badge--inconclusive" id="badge-${match.id}">
@@ -400,7 +405,7 @@ function _createMatchCard(match) {
   return card;
 }
 
-function _updateMatchCard(list, matchId, analysis, match) {
+function _updateMatchCard(list, matchId, analysis, match, ptState) {
   const decision = analysis.decision ?? _legacyDecision(analysis);
 
   // Badge décision
@@ -595,20 +600,40 @@ function _updateMatchCard(list, matchId, analysis, match) {
     recsContainer.style.display = '';
   }
 
-  // Point bleu si pari en cours sur ce match
-  if (card) {
-    try {
-      const ptState = JSON.parse(localStorage.getItem('mbp_paper_trading') ?? '{}');
-      const hasPending = (ptState.bets ?? []).some(b => b.match_id === matchId && b.result === 'PENDING');
-      if (hasPending && !card.querySelector('.mbp-open-bet-indicator')) {
-        const dot = document.createElement('div');
-        dot.className = 'mbp-open-bet-indicator';
-        dot.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:10px;color:var(--color-signal);margin-top:4px;font-weight:600';
-        dot.innerHTML = '<span class="mbp-bet-dot"></span>Pari en cours';
-        const cta = card.querySelector('.match-card__cta');
-        if (cta) cta.before(dot);
-      }
-    } catch {}
+  // Indicateur paris en cours — enrichi v4.3
+  if (card && ptState && !card.querySelector('.mbp-open-bet-indicator')) {
+    const pendingIndex = _buildPendingIndex(ptState);
+    const pendingBets  = pendingIndex[matchId] ?? [];
+    if (pendingBets.length > 0) {
+      const totalStake = pendingBets.reduce(function(s, b) { return s + (b.stake || 0); }, 0);
+      const markets    = pendingBets.map(function(b) {
+        const mLabel = b.market === 'MONEYLINE' ? 'ML'
+                     : b.market === 'SPREAD'    ? 'Hcap'
+                     : 'O/U';
+        return mLabel;
+      }).join(' · ');
+
+      const dot = document.createElement('div');
+      dot.className = 'mbp-open-bet-indicator';
+      dot.style.cssText = [
+        'display:flex;align-items:center;gap:6px',
+        'font-size:10px;font-weight:600',
+        'color:var(--color-signal)',
+        'margin-top:4px',
+        'padding:3px 6px',
+        'background:rgba(var(--color-signal-rgb,99,179,237),0.08)',
+        'border-radius:4px',
+        'border:1px solid rgba(var(--color-signal-rgb,99,179,237),0.20)',
+      ].join(';');
+      dot.innerHTML = [
+        '<span class="mbp-bet-dot"></span>',
+        pendingBets.length + ' pari' + (pendingBets.length > 1 ? 's' : '') + ' en cours',
+        '<span style="opacity:0.6;font-weight:400">(' + markets + ' · ' + totalStake.toFixed(0) + '€)</span>',
+      ].join('');
+
+      const cta = card.querySelector('.match-card__cta');
+      if (cta) cta.before(dot);
+    }
   }
 
   // Motif de rejet, insuffisance ou absence de cotes
@@ -740,7 +765,13 @@ function _bindFilterEvents(container, storeInstance) {
     const analyses = storeInstance.get('analyses') ?? {};
     const analysisIndex = _buildAnalysisIndex(analyses);
 
-    if (chip.dataset.sport !== undefined)    _applyFilter(container, storeInstance, 'sport',    chip.dataset.sport,    analysisIndex);
+    if (chip.dataset.sport !== undefined) {
+      _applyFilter(container, storeInstance, 'sport', chip.dataset.sport, analysisIndex);
+      // Changer le sport actif dans le store pour router vers le bon orchestrateur
+      if (chip.dataset.sport !== 'ALL') {
+        storeInstance.set({ selectedSport: chip.dataset.sport });
+      }
+    }
     if (chip.dataset.decision !== undefined) _applyFilter(container, storeInstance, 'decision', chip.dataset.decision, analysisIndex);
     if (chip.dataset.edge !== undefined)     _applyFilter(container, storeInstance, 'edge',     chip.dataset.edge,     analysisIndex);
     if (chip.dataset.bets !== undefined)     _applyFilter(container, storeInstance, 'bets',     chip.dataset.bets,     analysisIndex);
@@ -773,13 +804,12 @@ function _applyFilter(container, storeInstance, filterType, value, analysisIndex
     }
 
     if (filterType === 'bets' && value === 'OPEN') {
-      // Lire les paris en cours depuis localStorage
       try {
-        const ptState = JSON.parse(localStorage.getItem('mbp_paper_trading') ?? '{}');
+        const pts = _loadPaperState();
         const pendingMatchIds = new Set(
-          (ptState.bets ?? [])
-            .filter(b => b.result === 'PENDING')
-            .map(b => b.match_id)
+          (pts.bets ?? [])
+            .filter(function(b) { return b.result === 'PENDING'; })
+            .map(function(b) { return b.match_id; })
         );
         visible = pendingMatchIds.has(matchId);
       } catch { visible = false; }
@@ -816,6 +846,30 @@ function _renderError(container) {
 }
 
 // ── HELPERS ───────────────────────────────────────────────────────────────
+
+// Charger l'état paper trading depuis localStorage (cache local du KV)
+function _loadPaperState() {
+  try {
+    return JSON.parse(localStorage.getItem('mbp_paper_trading') ?? '{}');
+  } catch { return {}; }
+}
+
+// Indexer les paris PENDING par match_id pour accès O(1)
+function _buildPendingIndex(ptState) {
+  const index = {}; // { matchId: [{ market, side, side_label, stake, edge }] }
+  (ptState.bets ?? []).forEach(function(b) {
+    if (b.result !== 'PENDING' || !b.match_id) return;
+    if (!index[b.match_id]) index[b.match_id] = [];
+    index[b.match_id].push({
+      market:     b.market,
+      side:       b.side,
+      side_label: b.side_label,
+      stake:      b.stake,
+      edge:       b.edge,
+    });
+  });
+  return index;
+}
 
 // Countdown jusqu'au tip-off
 function _renderCountdown(datetime) {
