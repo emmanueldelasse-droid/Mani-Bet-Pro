@@ -1,5 +1,9 @@
 /**
- * MANI BET PRO — ui.match-detail.js v3.4
+ * MANI BET PRO — ui.match-detail.js v3.5
+ *
+ * AJOUTS v3.5 :
+ *   - renderBlocPourquoi : détails précis par signal en français simple.
+ *     Noms des joueurs blessés, chiffres nets, pourcentages lisibles.
  *
  * AJOUTS v3.1 :
  *   - top_signal sauvegardé dans le payload PaperEngine.placeBet()
@@ -279,9 +283,15 @@ function renderBlocParis(analysis, match) {
 
 // ── BLOC POURQUOI ─────────────────────────────────────────────────────────
 
+/**
+ * v3.5 : Détails précis par signal en français simple.
+ * Chaque signal affiche une explication concrète avec chiffres.
+ */
 function renderBlocPourquoi(analysis, match) {
   const signals  = (analysis?.key_signals ?? []).slice(0, 3);
   const homeName = match?.home_team?.name ?? 'Domicile';
+  const awayName = match?.away_team?.name ?? 'Extérieur';
+  const vars     = analysis?.variables_used ?? {};
 
   return `
     <div class="card match-detail__bloc">
@@ -291,22 +301,121 @@ function renderBlocPourquoi(analysis, match) {
       ${!signals.length ? `<div class="text-muted" style="font-size:12px">Aucun signal significatif.</div>` : `
         <div style="display:grid;gap:10px">
           ${signals.map(s => {
-            const label    = _simplifyLabel(s.label, s.variable);
             const isHome   = s.direction === 'POSITIVE';
-            const teamName = isHome ? homeName : (match?.away_team?.name ?? 'Extérieur');
+            const teamName = isHome ? homeName : awayName;
             const icon     = isHome ? '▲' : '▼';
             const color    = isHome ? 'var(--color-success)' : 'var(--color-danger)';
+            const detail   = _getSignalDetail(s, vars, match, isHome, homeName, awayName);
             return `
-              <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--color-bg);border-radius:8px">
-                <span style="font-size:16px;color:${color};font-weight:700;width:16px">${icon}</span>
-                <div style="flex:1">
-                  <div style="font-size:13px;font-weight:600">${label}</div>
-                  <div style="font-size:11px;color:var(--color-muted)">Avantage pour ${teamName}</div>
+              <div style="padding:10px 12px;background:var(--color-bg);border-radius:8px;border-left:3px solid ${color}">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:${detail ? '5px' : '0'}">
+                  <span style="font-size:15px;color:${color};font-weight:700">${icon}</span>
+                  <div style="font-size:13px;font-weight:600">${_simplifyLabel(s.label, s.variable)}</div>
                 </div>
+                ${detail ? `<div style="font-size:12px;color:var(--color-muted);line-height:1.5;padding-left:23px">${detail}</div>` : ''}
               </div>`;
           }).join('')}
         </div>`}
     </div>`;
+}
+
+/**
+ * Génère un texte explicatif précis et en français simple pour chaque signal.
+ */
+function _getSignalDetail(signal, vars, match, isHome, homeName, awayName) {
+  const favTeam = isHome ? homeName : awayName;
+  const othTeam = isHome ? awayName : homeName;
+  const v       = vars[signal.variable];
+  const val     = v?.value ?? null;
+
+  switch (signal.variable) {
+
+    case 'net_rating_diff': {
+      // Ex : "CLE marque en moyenne 4 pts de plus qu'elle n'en encaisse. ATL seulement 2 pts."
+      if (val === null) return null;
+      const favRating = Math.abs(val) > 0 ? (isHome ? val : -val) : val;
+      const othRating = -favRating + val * 0;
+      // Approximation : val = home - away, donc home = away + val
+      // On affiche juste l'écart
+      const ecart = Math.abs(val).toFixed(1);
+      if (Math.abs(val) < 1) return `Les deux équipes sont au même niveau cette saison.`;
+      return `${favTeam} est meilleure de <strong>${ecart} points</strong> par match en moyenne que ${othTeam} cette saison.`;
+    }
+
+    case 'efg_diff': {
+      if (val === null) return null;
+      const pct = Math.abs(val * 100).toFixed(1);
+      return `${favTeam} tire plus efficacement que ${othTeam} — un écart de <strong>${pct}%</strong> d'efficacité au tir.`;
+    }
+
+    case 'recent_form_ema': {
+      if (val === null) return null;
+      const absVal = Math.abs(val);
+      if (absVal > 0.5) return `${favTeam} est en très grande forme en ce moment — série de victoires récentes.`;
+      if (absVal > 0.2) return `${favTeam} est en bonne forme sur ses derniers matchs.`;
+      return `${favTeam} a un léger avantage de forme récente sur ${othTeam}.`;
+    }
+
+    case 'home_away_split': {
+      const raw = v?.raw;
+      if (!raw) return `${favTeam} performe mieux dans son contexte (dom./ext.) que ${othTeam}.`;
+      const homeWin = raw.home_home_win_pct != null ? Math.round(raw.home_home_win_pct * 100) : null;
+      const awayWin = raw.away_away_win_pct != null ? Math.round(raw.away_away_win_pct * 100) : null;
+      if (homeWin !== null && awayWin !== null) {
+        return `${homeName} gagne <strong>${homeWin}%</strong> de ses matchs à domicile. ${awayName} seulement <strong>${awayWin}%</strong> à l'extérieur.`;
+      }
+      return `${favTeam} performe mieux dans son contexte (dom./ext.) que ${othTeam}.`;
+    }
+
+    case 'absences_impact': {
+      const raw = v?.raw;
+      if (!raw) return null;
+      // Récupérer les joueurs absents depuis les injuries du match
+      const homeInj = match?.home_injuries ?? [];
+      const awayInj = match?.away_injuries ?? [];
+      const affectedInj = isHome ? awayInj : homeInj; // l'équipe défavorisée
+      const stars = affectedInj
+        .filter(p => p.status === 'Out' || p.status === 'Doubtful')
+        .filter(p => p.ppg != null && p.ppg > 10 || p.source === 'espn_confirmed_by_ai' || p.source === 'ai_only' || p.source === 'tank01_via_ai')
+        .slice(0, 3)
+        .map(p => {
+          const statut = p.status === 'Out' ? 'absent' : 'incertain';
+          return p.ppg ? `${p.name} (${statut}, ${p.ppg} pts/match)` : `${p.name} (${statut})`;
+        });
+      if (stars.length > 0) {
+        return `${othTeam} est affaibli — <strong>${stars.join(', ')}</strong>.`;
+      }
+      const homeOut = raw.home_out ?? 0;
+      const awayOut = raw.away_out ?? 0;
+      const moreOut = isHome ? awayOut : homeOut;
+      if (moreOut > 0) return `${othTeam} a <strong>${moreOut} joueur${moreOut > 1 ? 's' : ''} absent${moreOut > 1 ? 's' : ''}</strong> ce soir.`;
+      return `${favTeam} a moins de joueurs absents que ${othTeam}.`;
+    }
+
+    case 'win_pct_diff': {
+      if (val === null) return null;
+      const pct = Math.abs(val * 100).toFixed(0);
+      return `${favTeam} a un meilleur bilan victoires/défaites que ${othTeam} — <strong>${pct}%</strong> d'écart.`;
+    }
+
+    case 'back_to_back': {
+      return `${othTeam} joue son deuxième match en deux jours — fatigue accumulée.`;
+    }
+
+    case 'rest_days_diff': {
+      if (val === null) return null;
+      const jours = Math.abs(Math.round(val));
+      return `${favTeam} a eu <strong>${jours} jour${jours > 1 ? 's' : ''} de repos</strong> de plus que ${othTeam}.`;
+    }
+
+    case 'defensive_diff': {
+      if (val === null) return null;
+      return `${favTeam} encaisse moins de points par match que ${othTeam} — meilleure défense.`;
+    }
+
+    default:
+      return null;
+  }
 }
 
 // ── BLOC FIABILITÉ ────────────────────────────────────────────────────────
