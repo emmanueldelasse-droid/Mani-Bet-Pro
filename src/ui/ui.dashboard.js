@@ -1,5 +1,12 @@
 /**
- * MANI BET PRO — ui.dashboard.js v4.6
+ * MANI BET PRO — ui.dashboard.js v4.7
+ *
+ * AJOUTS v4.7 :
+ *   - Auto-refresh à 23h30 et 07h00 heure de Paris.
+ *     23h30 : rapports blessures définitifs publiés, statuts Questionable confirmés.
+ *     07h00 : blessures post-match captées pour les paris du lendemain.
+ *     Le refresh invalide le cache dashboard (dashboardCacheAt = 0) puis relance _loadAndDisplay.
+ *   - Bouton "Actualiser" dans le header pour forcer un refresh manuel.
  *
  * AJOUTS v4.6 :
  *   - TTL cache dashboard : 5 minutes. Si les données ont moins de 5 min,
@@ -102,6 +109,53 @@ function _injectStyles() {
   document.head.appendChild(s);
 }
 
+// ── AUTO-REFRESH ──────────────────────────────────────────────────────────
+
+/**
+ * v4.7 : Planifie un refresh automatique à 23h30 et 07h00 heure de Paris.
+ * Compare l'heure actuelle à la prochaine fenêtre de refresh.
+ * Utilise un setTimeout unique — pas de setInterval qui accumulerait les appels.
+ *
+ * @returns {number} timeoutId — pour nettoyage via clearTimeout
+ */
+function _scheduleNextRefresh(container, storeInstance) {
+  const REFRESH_HOURS_PARIS = [23 * 60 + 30, 7 * 60]; // 23h30 et 07h00 en minutes
+
+  const now       = new Date();
+  // Convertir en heure de Paris (UTC+2 en été, UTC+1 en hiver)
+  const utcOffset = now.getTimezoneOffset(); // en minutes, négatif pour Paris
+  const parisOffset = -120; // UTC+2 (CEST) — à ajuster si UTC+1 en hiver
+  const parisMinutes = (now.getUTCHours() * 60 + now.getUTCMinutes()) + (-parisOffset);
+  const currentMinutes = parisMinutes % (24 * 60);
+
+  // Trouver le prochain créneau
+  let minDelay = Infinity;
+  for (const targetMinutes of REFRESH_HOURS_PARIS) {
+    let delay = targetMinutes - currentMinutes;
+    if (delay <= 0) delay += 24 * 60; // demain
+    if (delay < minDelay) minDelay = delay;
+  }
+
+  const delayMs = minDelay * 60 * 1000;
+  Logger.info('AUTO_REFRESH_SCHEDULED', {
+    next_in_min: minDelay,
+    next_at_paris: (() => {
+      const d = new Date(Date.now() + delayMs);
+      return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' });
+    })(),
+  });
+
+  return setTimeout(async function() {
+    Logger.info('AUTO_REFRESH_TRIGGERED', {});
+    // Invalider le cache pour forcer un rechargement complet
+    storeInstance.set({ dashboardCacheAt: 0 });
+    const date = storeInstance.get('dashboardFilters')?.selectedDate ?? _getTodayDate();
+    await _loadAndDisplay(container, storeInstance, date);
+    // Planifier le prochain refresh
+    _scheduleNextRefresh(container, storeInstance);
+  }, delayMs);
+}
+
 // ── POINT D'ENTRÉE ────────────────────────────────────────────────────────
 
 export async function render(container, storeInstance) {
@@ -116,7 +170,24 @@ export async function render(container, storeInstance) {
     await _loadAndDisplay(container, storeInstance, newDate);
   });
 
+  // v4.7 : Bouton actualiser manuel
+  const refreshBtn = container.querySelector('#refresh-btn');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', async function() {
+      refreshBtn.textContent = '⟳ Actualisation...';
+      refreshBtn.disabled = true;
+      storeInstance.set({ dashboardCacheAt: 0 });
+      await _loadAndDisplay(container, storeInstance, selectedDate);
+      refreshBtn.textContent = '⟳ Actualiser';
+      refreshBtn.disabled = false;
+    });
+  }
+
   await _loadAndDisplay(container, storeInstance, selectedDate);
+
+  // v4.7 : Planifier l'auto-refresh
+  _scheduleNextRefresh(container, storeInstance);
+
   return { destroy() {} };
 }
 
@@ -253,10 +324,13 @@ function _renderShell(selectedDate) {
   return `
     <div class="dashboard">
 
-      <div class="page-header">
-        <div class="page-header__eyebrow">Mani Bet Pro</div>
-        <div class="page-header__title">Dashboard</div>
-        <div class="page-header__sub">${displayDate}</div>
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <div class="page-header__eyebrow">Mani Bet Pro</div>
+          <div class="page-header__title">Dashboard</div>
+          <div class="page-header__sub">${displayDate}</div>
+        </div>
+        <button id="refresh-btn" style="font-size:11px;padding:5px 10px;border-radius:6px;border:1px solid var(--color-border);background:var(--color-bg);color:var(--color-muted);cursor:pointer;margin-top:4px;flex-shrink:0">⟳ Actualiser</button>
       </div>
 
       <div class="date-selector filter-chips" id="date-selector">
