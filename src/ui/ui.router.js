@@ -47,6 +47,9 @@ class Router {
     this._navLinks    = null;
     this._currentView = null;
     this._store       = null;
+    // v1.1 : cache DOM — navigation dashboard + history instantanée
+    this._viewCache     = {};
+    this._CACHED_ROUTES = new Set(['dashboard', 'history']);
   }
 
   /**
