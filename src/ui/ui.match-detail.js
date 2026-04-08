@@ -1,5 +1,8 @@
 /**
- * MANI BET PRO — ui.match-detail.js v3.5
+ * MANI BET PRO — ui.match-detail.js v3.6
+ *
+ * AJOUTS v3.6 :
+ *   - renderBlocPourquoi : affiche team_context (forme récente, enjeu) et market_signal (mouvement ligne) depuis données IA.
  *
  * AJOUTS v3.5 :
  *   - renderBlocPourquoi : détails précis par signal en français simple.
@@ -66,7 +69,7 @@ export async function render(container, storeInstance) {
   const analyses = storeInstance.get('analyses') ?? {};
   const analysis = Object.values(analyses).find(a => a.match_id === matchId) ?? null;
 
-  container.innerHTML = renderShell(match, analysis);
+  container.innerHTML = renderShell(match, analysis, storeInstance);
   bindEvents(container, storeInstance, match, analysis);
   _loadAndRenderMultiBookOdds(container, match, analysis);
 
@@ -75,7 +78,7 @@ export async function render(container, storeInstance) {
 
 // ── SHELL ─────────────────────────────────────────────────────────────────
 
-function renderShell(match, analysis) {
+function renderShell(match, analysis, storeInstance) {
   return `
     <div class="match-detail">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-3)">
@@ -110,7 +113,7 @@ function renderShell(match, analysis) {
 
       ${renderBlocProbas(analysis, match)}
       ${renderBlocParis(analysis, match)}
-      ${renderBlocPourquoi(analysis, match)}
+      ${renderBlocPourquoi(analysis, match, storeInstance)}
       ${renderBlocFiabilite(analysis)}
       ${renderBlocSources(analysis)}
       ${renderBlocIA(analysis, match)}
@@ -287,11 +290,17 @@ function renderBlocParis(analysis, match) {
  * v3.5 : Détails précis par signal en français simple.
  * Chaque signal affiche une explication concrète avec chiffres.
  */
-function renderBlocPourquoi(analysis, match) {
-  const signals  = (analysis?.key_signals ?? []).slice(0, 3);
-  const homeName = match?.home_team?.name ?? 'Domicile';
-  const awayName = match?.away_team?.name ?? 'Extérieur';
-  const vars     = analysis?.variables_used ?? {};
+function renderBlocPourquoi(analysis, match, storeInstance) {
+  const signals     = (analysis?.key_signals ?? []).slice(0, 3);
+  const homeName    = match?.home_team?.name ?? 'Domicile';
+  const awayName    = match?.away_team?.name ?? 'Extérieur';
+  const vars        = analysis?.variables_used ?? {};
+  // team_context et market_signal depuis le rapport injuries enrichi IA (stocké dans le store)
+  const injReport   = storeInstance?.get('injuryReport') ?? null;
+  const teamCtx     = injReport?.team_context ?? null;
+  const marketSig   = injReport?.market_signal ?? null;
+  const homeCtx     = teamCtx?.[homeName] ?? null;
+  const awayCtx     = teamCtx?.[awayName] ?? null;
 
   return `
     <div class="card match-detail__bloc">
@@ -316,6 +325,19 @@ function renderBlocPourquoi(analysis, match) {
               </div>`;
           }).join('')}
         </div>`}
+      ${homeCtx || awayCtx ? `
+        <div style="margin-top:10px;display:grid;gap:8px">
+          ${homeCtx ? `<div style="font-size:12px;padding:8px 12px;background:rgba(255,165,0,0.06);border-left:3px solid var(--color-warning);border-radius:6px;color:var(--color-muted)">
+            <strong style="color:var(--color-text)">${homeName}</strong> — ${homeCtx}
+          </div>` : ''}
+          ${awayCtx ? `<div style="font-size:12px;padding:8px 12px;background:rgba(255,165,0,0.06);border-left:3px solid var(--color-warning);border-radius:6px;color:var(--color-muted)">
+            <strong style="color:var(--color-text)">${awayName}</strong> — ${awayCtx}
+          </div>` : ''}
+        </div>` : ''}
+      ${marketSig?.movement ? `
+        <div style="margin-top:8px;font-size:12px;padding:8px 12px;background:rgba(99,179,237,0.06);border-left:3px solid var(--color-signal);border-radius:6px;color:var(--color-muted)">
+          📈 <strong style="color:var(--color-signal)">Mouvement de ligne</strong> — ${marketSig.detail ?? ''}
+        </div>` : ''}
     </div>`;
 }
 
