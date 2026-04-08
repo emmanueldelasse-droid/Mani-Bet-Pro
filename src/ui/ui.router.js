@@ -1,5 +1,9 @@
 /**
- * MANI BET PRO — ui.router.js
+ * MANI BET PRO — ui.router.js v1.2
+ *
+ * CORRECTIONS v1.2 :
+ *   - Écran noir au retour dashboard : nettoyage vues non-cachées avant affichage cache DOM.
+ *   - Bouton retour navigateur : ne plus faire innerHTML="" qui détruisait les vues cachées.
  *
  * Router SPA vanilla JS.
  * Gère la navigation entre les vues principales.
@@ -47,9 +51,6 @@ class Router {
     this._navLinks    = null;
     this._currentView = null;
     this._store       = null;
-    // v1.1 : cache DOM — navigation dashboard + history instantanée
-    this._viewCache     = {};
-    this._CACHED_ROUTES = new Set(['dashboard', 'history']);
   }
 
   /**
@@ -138,9 +139,19 @@ class Router {
       } else if (this._currentView?.destroy) {
         this._currentView.destroy();
       }
+      // Note : ne jamais faire innerHTML='' ici — détruirait les vues cachées en DOM
 
       // v1.1 : si la route cible est en cache DOM → afficher instantanément
       if (this._CACHED_ROUTES.has(route) && this._viewCache[route]) {
+        // Cacher toutes les autres vues cachées avant d'afficher celle-ci
+        Object.entries(this._viewCache).forEach(([r, cached]) => {
+          if (r !== route) cached.el.style.display = 'none';
+        });
+        // Vider le container des vues non-cachées (ex: match-detail)
+        Array.from(this._container.children).forEach(child => {
+          const isCached = Object.values(this._viewCache).some(c => c.el === child);
+          if (!isCached) child.remove();
+        });
         this._viewCache[route].el.style.display = '';
         this._currentView = this._viewCache[route].view;
         this._hideLoader();
@@ -148,7 +159,14 @@ class Router {
       }
 
       // Sinon : créer la vue normalement
-      this._container.innerHTML = '';
+      // Cacher les vues cachées, supprimer les non-cachées
+      Object.values(this._viewCache).forEach(cached => {
+        cached.el.style.display = 'none';
+      });
+      Array.from(this._container.children).forEach(child => {
+        const isCached = Object.values(this._viewCache).some(c => c.el === child);
+        if (!isCached) child.remove();
+      });
       const viewEl = document.createElement('div');
       viewEl.style.cssText = 'width:100%;height:100%';
       this._container.appendChild(viewEl);
