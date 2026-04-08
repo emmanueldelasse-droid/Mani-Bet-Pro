@@ -1,5 +1,15 @@
 /**
- * MANI BET PRO — ui.dashboard.js v4.4
+ * MANI BET PRO — ui.dashboard.js v4.6
+ *
+ * AJOUTS v4.6 :
+ *   - TTL cache dashboard : 5 minutes. Si les données ont moins de 5 min,
+ *     la navigation retour/dashboard est instantanée — zéro appel API.
+ *     Le timestamp est stocké dans le store via 'dashboardCacheAt'.
+ *
+ * AJOUTS v4.5 :
+ *   - Badge warning "Données partielles" quand weight_coverage < 0.75.
+ *     Indique que des signaux importants manquent dans le calcul du score.
+ *     Ex : forme récente absente = 20% des poids non couverts.
  *
  * AMÉLIORATIONS v3 :
  *   - Labels recommandations plus clairs : 'Vainqueur du match', 'Handicap (points)', 'Total de points'
@@ -75,6 +85,19 @@ function _injectStyles() {
       border-radius: 4px;
       margin-top: 4px;
     }
+    .mbp-weight-warning {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--color-warning);
+      background: rgba(255,165,0,0.08);
+      border: 1px solid rgba(255,165,0,0.20);
+      padding: 2px 7px;
+      border-radius: 4px;
+      margin-top: 4px;
+    }
   `;
   document.head.appendChild(s);
 }
@@ -111,10 +134,15 @@ async function _loadAndDisplay(container, storeInstance, date) {
     const cachedMatches  = storeInstance.get('matches')  ?? {};
     const cachedDate     = storeInstance.get('dashboardFilters')?.selectedDate;
 
+    const cachedAt  = storeInstance.get('dashboardCacheAt') ?? 0;
+    const cacheAge  = Date.now() - cachedAt;
+    const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
     if (
       cachedDate === date &&
       Object.keys(cachedAnalyses).length > 0 &&
-      Object.keys(cachedMatches).length > 0
+      Object.keys(cachedMatches).length > 0 &&
+      cacheAge < CACHE_TTL
     ) {
       const matchList     = Object.values(cachedMatches).filter(m => m.sport === 'NBA');
       const analysisIndex = _buildAnalysisIndex(cachedAnalyses);
@@ -152,6 +180,9 @@ async function _loadAndDisplay(container, storeInstance, date) {
       _updateSummary(container, 0, 0, 0);
       return;
     }
+
+    // Stocker le timestamp de chargement pour le TTL cache
+    storeInstance.set({ dashboardCacheAt: Date.now() });
 
     const analysisIndex = _buildAnalysisIndex(result.analyses);
 
@@ -498,6 +529,38 @@ function _updateMatchCard(list, matchId, analysis, match, ptState) {
         : q >= 60
         ? 'var(--color-warning)'
         : 'var(--color-danger)';
+    }
+  }
+
+  // Badge warning weight_coverage — v4.5
+  // Affiché quand < 75% des poids sont couverts par des données disponibles.
+  // Ex : forme récente manquante = signal à 0.20 de poids non calculé.
+  if (card && !card.querySelector('.mbp-weight-warning')) {
+    const coverage = analysis.weight_coverage;
+    if (coverage !== null && coverage !== undefined && coverage < 0.75) {
+      const missing = analysis.missing_variables ?? [];
+      const LABELS = {
+        recent_form_ema:  'forme récente',
+        net_rating_diff:  'net rating',
+        absences_impact:  'blessures',
+        home_away_split:  'split dom/ext',
+        efg_diff:         'efficacité tir',
+        back_to_back:     'back-to-back',
+        rest_days_diff:   'repos',
+        win_pct_diff:     'bilan saison',
+        defensive_diff:   'défense',
+      };
+      const missingLabels = missing
+        .map(id => LABELS[id] ?? id)
+        .slice(0, 3)
+        .join(', ');
+      const pct = Math.round(coverage * 100);
+      const warn = document.createElement('div');
+      warn.className = 'mbp-weight-warning';
+      warn.title = `Données manquantes : ${missingLabels || 'inconnues'}`;
+      warn.innerHTML = `⚠ Données partielles (${pct}%) — ${missingLabels || 'signaux manquants'}`;
+      const edgeEl = list.querySelector(`#edge-${matchId}`);
+      if (edgeEl) edgeEl.after(warn);
     }
   }
 

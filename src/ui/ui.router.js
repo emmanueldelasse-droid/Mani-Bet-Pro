@@ -128,13 +128,35 @@ class Router {
         throw new Error(`La vue "${route}" n'exporte pas de fonction render()`);
       }
 
-      // Nettoyer la vue précédente
-      if (this._currentView?.destroy) {
+      // v1.1 : si la vue précédente est cacheable, on cache son DOM au lieu de le détruire
+      const prevRoute = this._store.get('previousRoute');
+      if (prevRoute && this._CACHED_ROUTES.has(prevRoute) && this._viewCache[prevRoute]) {
+        this._viewCache[prevRoute].el.style.display = 'none';
+      } else if (this._currentView?.destroy) {
         this._currentView.destroy();
       }
 
+      // v1.1 : si la route cible est en cache DOM → afficher instantanément
+      if (this._CACHED_ROUTES.has(route) && this._viewCache[route]) {
+        this._viewCache[route].el.style.display = '';
+        this._currentView = this._viewCache[route].view;
+        this._hideLoader();
+        return;
+      }
+
+      // Sinon : créer la vue normalement
       this._container.innerHTML = '';
-      this._currentView = await module.render(this._container, this._store);
+      const viewEl = document.createElement('div');
+      viewEl.style.cssText = 'width:100%;height:100%';
+      this._container.appendChild(viewEl);
+
+      const view = await module.render(viewEl, this._store);
+      this._currentView = view;
+
+      // Mettre en cache si la route est cacheable
+      if (this._CACHED_ROUTES.has(route)) {
+        this._viewCache[route] = { el: viewEl, view };
+      }
 
     } catch (err) {
       // Vue non encore créée — afficher un placeholder
