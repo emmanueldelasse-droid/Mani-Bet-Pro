@@ -1,5 +1,14 @@
 /**
- * MANI BET PRO — data.orchestrator.js v3.8
+ * MANI BET PRO — data.orchestrator.js v3.9
+ *
+ * AJOUTS v3.9 :
+ *   - _loadAIInjuries() : refactorisé pour le pipeline v6.27.
+ *     Appelle /nba/roster-injuries (Tank01 roster complet, cache 3h) au lieu
+ *     de N appels /nba/ai-injuries individuels par match.
+ *     Appelle /nba/ai-context une seule fois pour tous les matchs du soir (cache 12h).
+ *     0 appel Claude par match — budget réduit de ~7 appels/soir à ~1 appel/soir.
+ *   - _mergeInjuryReports() : adapté pour le format roster Tank01 v6.27.
+ *     Source 'tank01_roster' reconnue et fusionnée correctement.
  *
  * AJOUTS v3.8 :
  *   - _mergeInjuryReports : intègre players_limited (status_weight 0.4)
@@ -550,114 +559,184 @@ function _getTeamAbv(espnName) {
 
 
 /**
- * v3.7 : Charge les données blessures enrichies via IA (Claude web_search).
- * Appel en parallèle avec _loadInjuries dans le Promise.all principal.
- * Timeout 25s — non bloquant si IA indisponible (retourne null).
+ * v3.9 : Pipeline injuries v6.27 — Tank01 roster + Claude contexte global.
+ *
+ * Avant v3.9 : N appels /nba/ai-injuries par match (1 Claude/match).
+ * Après v3.9 :
+ *   1. /nba/roster-injuries → roster complet NBA avec ppg + designation (cache 3h).
+ *   2. /nba/ai-context → contexte motivationnel global pour tous les matchs (cache 12h, 1 Claude/soir).
+ *   3. Fusionne en format { by_team, team_context, market_signal } identique à v3.8.
+ *
+ * Retourne null si aucune donnée disponible (fallback transparent).
  *
  * @param {Array}  matches - matchs du jour
  * @param {string} date    - YYYY-MM-DD
- * @returns {Promise<object|null>} { [espnTeamName]: [aiPlayers] } ou null
+ * @returns {Promise<object|null>} { by_team, team_context, market_signal } ou null
  */
 async function _loadAIInjuries(matches, date) {
   if (!matches || !matches.length) return null;
 
-  // Normaliser la date en YYYYMMDD pour le worker
   const dateForWorker = date ? date.replace(/-/g, '') : '';
   if (!dateForWorker || dateForWorker.length !== 8) return null;
 
-  try {
-    const results = await Promise.allSettled(
-      matches.map(async function(match) {
-        const homeAbv = _getTeamAbv(match.home_team && match.home_team.name);
-        const awayAbv = _getTeamAbv(match.away_team && match.away_team.name);
-        if (!homeAbv || !awayAbv) return null;
+  // Construire la liste des matchs pour /nba/ai-context : AWAY@HOME
+  const gamesParam = matches.map(function(m) {
+    const homeAbv = _getTeamAbv(m.home_team && m.home_team.name);
+    const awayAbv = _getTeamAbv(m.away_team && m.away_team.name);
+    return (homeAbv && awayAbv) ? awayAbv + '@' + homeAbv : null;
+  }).filter(Boolean).join(',');
 
-        try {
-          const controller = new AbortController();
-          const timer = setTimeout(function() { controller.abort(); }, 25000);
-          const response = await fetch(
-            API_CONFIG.WORKER_BASE_URL + '/nba/ai-injuries' +
-            '?home=' + encodeURIComponent(homeAbv) +
-            '&away=' + encodeURIComponent(awayAbv) +
-            '&date=' + dateForWorker,
-            { signal: controller.signal, headers: { 'Accept': 'application/json' } }
-          );
-          clearTimeout(timer);
-          if (!response.ok) return null;
-          const data = await response.json();
-          if (!data.available || !data.data) return null;
-          return {
-            home:    match.home_team && match.home_team.name,
-            away:    match.away_team && match.away_team.name,
-            homeAbv: homeAbv,
-            awayAbv: awayAbv,
-            aiData:  data.data,
-          };
-        } catch (err) {
-          Logger.warn('AI_INJURIES_MATCH_FAILED', { message: err.message });
-          return null;
-        }
-      })
-    );
+  // Lancer les deux appels en parallèle
+  const [rosterResult, contextResult] = await Promise.allSettled([
+    _fetchRosterInjuries(),
+    _fetchAIContext(dateForWorker, gamesParam),
+  ]);
 
-    // Construire index par nom ESPN + collecter team_context et market_signal
-    const aiByTeam      = {};
-    const aiTeamContext = {}; // { [espnName]: note }
-    const aiMarketSignals = []; // liste des signaux marché détectés
+  const rosterData  = rosterResult.status === 'fulfilled' ? rosterResult.value : null;
+  const contextData = contextResult.status === 'fulfilled' ? contextResult.value : null;
 
-    results.forEach(function(result) {
-      if (result.status !== 'fulfilled' || !result.value) return;
-      var aiData  = result.value.aiData;
-      var homeAbv = result.value.homeAbv;
-      var awayAbv = result.value.awayAbv;
+  // ── 1. Construire aiByTeam depuis le roster Tank01 ──────────────────────
+  const aiByTeam = {};
 
-      var allPlayers = []
-        .concat(aiData.players_out || [])
-        .concat(aiData.players_doubtful || [])
-        .concat(aiData.players_dtd_confirmed_out || [])
-        .concat(aiData.players_limited || []);
+  if (rosterData && rosterData.data) {
+    const HIGH_IMPACT = new Set(['Out', 'Doubtful', 'Day-To-Day']);
 
-      allPlayers.forEach(function(p) {
-        var teamAbv  = (p.team || '').toUpperCase();
-        var espnName = ABV_TO_ESPN_NAME[teamAbv] || null;
-        if (!espnName) return;
-        if (!aiByTeam[espnName]) aiByTeam[espnName] = [];
-        aiByTeam[espnName].push(p);
+    Object.values(rosterData.data).forEach(function(player) {
+      const designation = player.injury && player.injury.designation;
+      if (!designation || !HIGH_IMPACT.has(designation)) return;
+
+      const teamAbv  = (player.team || '').toUpperCase();
+      const espnName = ABV_TO_ESPN_NAME[teamAbv] || null;
+      if (!espnName) return;
+
+      if (!aiByTeam[espnName]) aiByTeam[espnName] = [];
+      aiByTeam[espnName].push({
+        name:   player.longName || '',
+        team:   teamAbv,
+        status: designation === 'Out' ? 'OUT' : designation === 'Doubtful' ? 'DOUBTFUL' : 'DTD',
+        ppg:    player.ppg || null,
+        source: 'tank01_roster',
+        note:   player.injury && player.injury.description || null,
       });
+    });
+  }
 
-      // Collecter team_context
-      if (aiData.team_context) {
-        var homeEspn = ABV_TO_ESPN_NAME[homeAbv] || null;
-        var awayEspn = ABV_TO_ESPN_NAME[awayAbv] || null;
-        if (homeEspn && aiData.team_context.home_note) aiTeamContext[homeEspn] = aiData.team_context.home_note;
-        if (awayEspn && aiData.team_context.away_note) aiTeamContext[awayEspn] = aiData.team_context.away_note;
-      }
+  // ── 2. Construire aiTeamContext et aiMarketSignals depuis ai-context ─────
+  const aiTeamContext   = {}; // { [espnName]: note }
+  const aiMarketSignals = [];
 
-      // Collecter market_signal
-      if (aiData.market_signal && aiData.market_signal.movement) {
-        aiMarketSignals.push(aiData.market_signal);
+  if (contextData && contextData.data) {
+    Object.values(contextData.data).forEach(function(ctx) {
+      if (!ctx || !ctx.game) return; // skip _raw / _parse_error
+
+      // Décoder AWAY@HOME
+      const parts   = ctx.game.split('@');
+      const awayAbv = parts[0] && parts[0].toUpperCase();
+      const homeAbv = parts[1] && parts[1].toUpperCase();
+
+      const homeEspn = ABV_TO_ESPN_NAME[homeAbv] || null;
+      const awayEspn = ABV_TO_ESPN_NAME[awayAbv] || null;
+
+      if (homeEspn && ctx.motivation_home) aiTeamContext[homeEspn] = ctx.motivation_home;
+      if (awayEspn && ctx.motivation_away) aiTeamContext[awayEspn] = ctx.motivation_away;
+
+      if (ctx.line_movement) {
+        aiMarketSignals.push({
+          movement: null,
+          detail:   ctx.line_movement,
+          source:   'claude_web_search_cache',
+        });
       }
     });
+  }
 
-    var totalPlayers = Object.values(aiByTeam).reduce(function(s, p) { return s + p.length; }, 0);
-    if (totalPlayers > 0) {
-      Logger.info('AI_INJURIES_LOADED', {
-        teams:    Object.keys(aiByTeam).length,
-        players:  totalPlayers,
-        contexts: Object.keys(aiTeamContext).length,
-      });
+  const totalPlayers = Object.values(aiByTeam).reduce(function(s, p) { return s + p.length; }, 0);
+  if (totalPlayers > 0 || Object.keys(aiTeamContext).length > 0) {
+    Logger.info('AI_INJURIES_LOADED', {
+      teams:    Object.keys(aiByTeam).length,
+      players:  totalPlayers,
+      contexts: Object.keys(aiTeamContext).length,
+      source:   'tank01_roster+ai_context',
+    });
+  }
+
+  const hasData = totalPlayers > 0 || Object.keys(aiTeamContext).length > 0;
+  return hasData ? {
+    by_team:       aiByTeam,
+    team_context:  aiTeamContext,
+    market_signal: aiMarketSignals[0] || null,
+  } : null;
+}
+
+/**
+ * Appelle /nba/roster-injuries — roster Tank01 complet (cache 3h worker-side).
+ * Timeout 15s. Non bloquant si Tank01 indisponible.
+ */
+async function _fetchRosterInjuries() {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(function() { controller.abort(); }, 15000);
+    const response = await fetch(
+      API_CONFIG.WORKER_BASE_URL + '/nba/roster-injuries',
+      { signal: controller.signal, headers: { 'Accept': 'application/json' } }
+    );
+    clearTimeout(timer);
+    if (!response.ok) {
+      Logger.warn('ROSTER_INJURIES_HTTP_ERROR', { status: response.status });
+      return null;
     }
-
-    // Retourner un objet enrichi si données disponibles
-    var hasData = Object.keys(aiByTeam).length > 0 || Object.keys(aiTeamContext).length > 0;
-    return hasData ? {
-      by_team:       aiByTeam,
-      team_context:  aiTeamContext,
-      market_signal: aiMarketSignals[0] || null,
-    } : null;
-
+    const data = await response.json();
+    if (!data.available) {
+      Logger.warn('ROSTER_INJURIES_UNAVAILABLE', { note: data.note });
+      return null;
+    }
+    Logger.info('ROSTER_INJURIES_LOADED', {
+      source:  data.source,
+      players: data.players_indexed || Object.keys(data.data || {}).length,
+    });
+    return data;
   } catch (err) {
-    Logger.warn('AI_INJURIES_LOAD_FAILED', { message: err.message });
+    Logger.warn('ROSTER_INJURIES_FAILED', { message: err.message });
+    return null;
+  }
+}
+
+/**
+ * Appelle /nba/ai-context — 1 seul appel Claude/soir pour tous les matchs (cache 12h worker-side).
+ * Timeout 30s. Non bloquant si Claude indisponible.
+ *
+ * @param {string} dateForWorker - YYYYMMDD
+ * @param {string} gamesParam    - "CLE@ATL,DEN@MEM,..."
+ */
+async function _fetchAIContext(dateForWorker, gamesParam) {
+  if (!gamesParam) return null;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(function() { controller.abort(); }, 30000);
+    const response = await fetch(
+      API_CONFIG.WORKER_BASE_URL + '/nba/ai-context' +
+      '?date=' + dateForWorker +
+      '&games=' + encodeURIComponent(gamesParam),
+      { signal: controller.signal, headers: { 'Accept': 'application/json' } }
+    );
+    clearTimeout(timer);
+    if (!response.ok) {
+      Logger.warn('AI_CONTEXT_HTTP_ERROR', { status: response.status });
+      return null;
+    }
+    const data = await response.json();
+    if (!data.available || !data.data) {
+      Logger.info('AI_CONTEXT_UNAVAILABLE', { source: data.source, note: data.note });
+      return null;
+    }
+    Logger.info('AI_CONTEXT_LOADED', {
+      source:  data.source,
+      date:    data.date,
+      games:   data.games_count || '?',
+    });
+    return data;
+  } catch (err) {
+    Logger.warn('AI_CONTEXT_FAILED', { message: err.message });
     return null;
   }
 }
