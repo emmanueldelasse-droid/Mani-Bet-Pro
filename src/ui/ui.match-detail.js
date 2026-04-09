@@ -1,5 +1,15 @@
 /**
- * MANI BET PRO — ui.match-detail.js v3.6
+ * MANI BET PRO — ui.match-detail.js v3.7
+ *
+ * AJOUTS v3.7 :
+ *   - renderBlocTousLesParis : tableau complet de tous les marchés avec pastille
+ *     de probabilité colorée (4 niveaux), cote, edge coloré, mise Kelly.
+ *     Remplace renderBlocParis pour une vue exhaustive.
+ *   - renderBlocStats : stats équipes côte à côte + 10 derniers matchs W/L
+ *     + tendance Over/Under + forme domicile/extérieur récente.
+ *   - renderBlocAbsences : liste consolidée des joueurs absents avec ppg,
+ *     statut et contexte IA (team_context, market_signal).
+ *   - renderBlocPourquoi remplacé par analyse décision chiffrée.
  *
  * AJOUTS v3.6 :
  *   - renderBlocPourquoi : affiche team_context (forme récente, enjeu) et market_signal (mouvement ligne) depuis données IA.
@@ -112,8 +122,9 @@ function renderShell(match, analysis, storeInstance) {
       </div>
 
       ${renderBlocProbas(analysis, match)}
-      ${renderBlocParis(analysis, match)}
-      ${renderBlocPourquoi(analysis, match, storeInstance)}
+      ${renderBlocTousLesParis(analysis, match)}
+      ${renderBlocStats(analysis, match, storeInstance)}
+      ${renderBlocAbsences(analysis, match, storeInstance)}
       ${renderBlocFiabilite(analysis)}
       ${renderBlocSources(analysis)}
       ${renderBlocIA(analysis, match)}
@@ -438,6 +449,358 @@ function _getSignalDetail(signal, vars, match, isHome, homeName, awayName) {
     default:
       return null;
   }
+}
+
+
+// ── BLOC TOUS LES PARIS ───────────────────────────────────────────────────
+
+/**
+ * v3.7 : Tableau exhaustif de tous les marchés disponibles.
+ * Pastille ronde colorée par niveau de probabilité moteur :
+ *   < 50% → rouge, 50-60% → orange, 60-75% → vert clair, > 75% → vert foncé
+ * Edge coloré : > 8% vert, 4-8% orange, < 4% ou négatif rouge/gris.
+ */
+function renderBlocTousLesParis(analysis, match) {
+  const homeProb   = analysis?.predictive_score != null ? Math.round(analysis.predictive_score * 100) : null;
+  const awayProb   = homeProb != null ? 100 - homeProb : null;
+  const homeName   = match?.home_team?.name ?? 'DOM';
+  const awayName   = match?.away_team?.name ?? 'EXT';
+  const homeAbbr   = match?.home_team?.abbreviation ?? 'DOM';
+  const awayAbbr   = match?.away_team?.abbreviation ?? 'EXT';
+  const odds       = match?.odds;
+  const marketOdds = match?.market_odds;
+  const betting    = analysis?.betting_recommendations;
+  const paperState = PaperEngine.load();
+  const bankroll   = paperState.current_bankroll ?? 500;
+
+  // Fonction pastille couleur
+  function _probPill(prob) {
+    if (prob === null) return '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--color-border);flex-shrink:0"></span>';
+    let bg;
+    if (prob < 50)      bg = '#ef4444';
+    else if (prob < 60) bg = '#f97316';
+    else if (prob < 75) bg = '#22c55e';
+    else                bg = '#16a34a';
+    return `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${bg};flex-shrink:0;box-shadow:0 0 4px ${bg}44"></span>`;
+  }
+
+  // Fonction couleur edge
+  function _edgeColor(edge) {
+    if (edge >= 8)  return '#22c55e';
+    if (edge >= 4)  return '#f97316';
+    if (edge > 0)   return 'var(--color-muted)';
+    return '#ef4444';
+  }
+
+  // Construire les lignes du tableau
+  const rows = [];
+
+  // Récupérer les cotes depuis market_odds (Pinnacle/Betclic) ou ESPN
+  const getOdds = (type, side) => {
+    if (marketOdds) {
+      if (type === 'ML')   return side === 'HOME' ? marketOdds.home_ml_decimal   : marketOdds.away_ml_decimal;
+      if (type === 'SPRD') return side === 'HOME' ? marketOdds.home_spread_decimal : marketOdds.away_spread_decimal;
+      if (type === 'OVER') return marketOdds.over_decimal;
+      if (type === 'UNDR') return marketOdds.under_decimal;
+    }
+    if (odds) {
+      if (type === 'ML')   return side === 'HOME' ? _americanToDecimal(odds.home_ml) : _americanToDecimal(odds.away_ml);
+    }
+    return null;
+  };
+
+  const getOddsSource = () => {
+    if (marketOdds?.best_book) return marketOdds.best_book;
+    if (marketOdds)            return 'Pinnacle';
+    return 'DraftKings';
+  };
+
+  // Trouver les recommandations existantes pour les mises Kelly
+  const findRec = (type, side) => betting?.recommendations?.find(r => r.type === type && r.side === side) ?? null;
+
+  // Ligne helper
+  const buildRow = (label, type, side, prob, oddsDec, rec, spreadLine, ouLine) => {
+    if (!oddsDec) return null;
+    const impliedProb = Math.round((1 / oddsDec) * 100);
+    const edge = prob !== null ? prob - impliedProb : null;
+    const kellyEuros = rec?.kelly_stake > 0 ? Math.round(rec.kelly_stake * bankroll * 100) / 100 : null;
+    const isBest = betting?.best?.type === type && betting?.best?.side === side;
+
+    let betData = `data-market="${type}" data-side="${side}" data-side-label="${label}" data-odds="${_decimalToAmerican(oddsDec) ?? 0}" data-edge="${edge ?? 0}" data-motor-prob="${prob ?? 0}" data-implied-prob="${impliedProb}" data-kelly="${rec?.kelly_stake ?? 0}" data-spread-line="${spreadLine ?? ''}" data-ou-line="${ouLine ?? ''}"`;
+
+    return `
+      <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:8px;align-items:center;padding:9px 10px;background:${isBest ? 'rgba(34,197,94,0.06)' : 'var(--color-bg)'};border-radius:8px;border:1px solid ${isBest ? 'rgba(34,197,94,0.3)' : 'transparent'};margin-bottom:6px">
+        <div style="display:flex;align-items:center;gap:7px;min-width:0">
+          ${_probPill(prob)}
+          <div style="min-width:0">
+            <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${label}</div>
+            <div style="font-size:10px;color:var(--color-muted)">${prob !== null ? prob + '% moteur' : '—'} · impl. ${impliedProb}%</div>
+          </div>
+        </div>
+        <div style="text-align:center;min-width:42px">
+          <div style="font-size:14px;font-weight:700;color:var(--color-signal)">${oddsDec}</div>
+          <div style="font-size:9px;color:var(--color-muted)">${getOddsSource()}</div>
+        </div>
+        <div style="text-align:center;min-width:40px">
+          ${edge !== null ? `<div style="font-size:13px;font-weight:700;color:${_edgeColor(edge)}">${edge > 0 ? '+' : ''}${edge}%</div>` : '<div style="color:var(--color-muted);font-size:11px">—</div>'}
+          ${kellyEuros ? `<div style="font-size:9px;color:var(--color-muted)">${kellyEuros}€</div>` : ''}
+        </div>
+        <div>
+          <button class="paper-bet-btn" ${betData} style="font-size:10px;padding:4px 8px;border-radius:6px;border:1px solid var(--color-border);background:var(--color-card);color:var(--color-text);cursor:pointer;white-space:nowrap">📋</button>
+        </div>
+      </div>`;
+  };
+
+  // ML
+  const homeMLOdds = getOdds('ML', 'HOME');
+  const awayMLOdds = getOdds('ML', 'AWAY');
+  if (homeMLOdds) rows.push(buildRow(`${homeAbbr} vainqueur`, 'MONEYLINE', 'HOME', homeProb, homeMLOdds, findRec('MONEYLINE', 'HOME'), null, null));
+  if (awayMLOdds) rows.push(buildRow(`${awayAbbr} vainqueur`, 'MONEYLINE', 'AWAY', awayProb, awayMLOdds, findRec('MONEYLINE', 'AWAY'), null, null));
+
+  // Spread
+  const spread = odds?.spread ?? marketOdds?.spread_line;
+  if (spread != null) {
+    const homeSpreadOdds = getOdds('SPRD', 'HOME');
+    const awaySpreadOdds = getOdds('SPRD', 'AWAY');
+    const spreadDisp = spread > 0 ? `+${spread}` : String(spread);
+    if (homeSpreadOdds) rows.push(buildRow(`${homeAbbr} ${spreadDisp} pts`, 'SPREAD', 'HOME', homeProb, homeSpreadOdds, findRec('SPREAD', 'HOME'), spread, null));
+    if (awaySpreadOdds) rows.push(buildRow(`${awayAbbr} ${spread > 0 ? '-' : '+'}${Math.abs(spread)} pts`, 'SPREAD', 'AWAY', awayProb, awaySpreadOdds, findRec('SPREAD', 'AWAY'), -spread, null));
+  }
+
+  // Over/Under
+  const ou = odds?.over_under ?? marketOdds?.ou_line;
+  if (ou != null) {
+    const overOdds  = getOdds('OVER', 'OVER');
+    const underOdds = getOdds('UNDR', 'UNDER');
+    // Prob Over/Under approximée depuis le score prévu
+    const projTotal = homeProb != null ? Math.round((analysis.predictive_score * 100 + (100 - analysis.predictive_score * 100)) / 100 * (ou * 1.05)) : null;
+    const overProb  = overOdds  ? Math.round((1 / overOdds)  * 100) : null; // utiliser implied si pas de prob moteur
+    const underProb = underOdds ? Math.round((1 / underOdds) * 100) : null;
+    if (overOdds)  rows.push(buildRow(`Plus de ${ou} pts`,  'OVER_UNDER', 'OVER',  null, overOdds,  findRec('OVER_UNDER', 'OVER'),  null, ou));
+    if (underOdds) rows.push(buildRow(`Moins de ${ou} pts`, 'OVER_UNDER', 'UNDER', null, underOdds, findRec('OVER_UNDER', 'UNDER'), null, ou));
+  }
+
+  const validRows = rows.filter(Boolean);
+  if (!validRows.length) return '';
+
+  return `
+    <div class="card match-detail__bloc">
+      <div class="bloc-header" style="margin-bottom:var(--space-2)">
+        <span class="bloc-header__title">Tous les marchés</span>
+        <span class="text-muted" style="font-size:10px">● prob. moteur · impl. = prob. implicite book</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:4px;padding:6px 10px;margin-bottom:4px">
+        <div style="font-size:10px;color:var(--color-muted)">Pari</div>
+        <div style="font-size:10px;color:var(--color-muted);text-align:center">Cote</div>
+        <div style="font-size:10px;color:var(--color-muted);text-align:center">Edge</div>
+        <div></div>
+      </div>
+      ${validRows.join('')}
+    </div>`;
+}
+
+// ── BLOC STATS & FORME ────────────────────────────────────────────────────
+
+/**
+ * v3.7 : Stats équipes côte à côte + 10 derniers matchs + tendances.
+ * Données issues de variables_used (moteur) et recentForms (store).
+ */
+function renderBlocStats(analysis, match, storeInstance) {
+  const homeName  = match?.home_team?.name ?? 'DOM';
+  const awayName  = match?.away_team?.name ?? 'EXT';
+  const homeAbbr  = match?.home_team?.abbreviation ?? 'DOM';
+  const awayAbbr  = match?.away_team?.abbreviation ?? 'EXT';
+  const vars      = analysis?.variables_used ?? {};
+
+  // Stats saison depuis advanced_stats
+  const advStats  = storeInstance?.get('advancedStats') ?? {};
+  const homeStats = advStats?.[homeName] ?? {};
+  const awayStats = advStats?.[awayName] ?? {};
+
+  // Forme récente depuis le store
+  const recentForms = storeInstance?.get('recentForms') ?? {};
+  const homeFormKey = Object.keys(recentForms).find(k => recentForms[k]?.matches?.length > 0 && k === String(match?.home_team?.bdl_id ?? ''));
+  const awayFormKey = Object.keys(recentForms).find(k => recentForms[k]?.matches?.length > 0 && k === String(match?.away_team?.bdl_id ?? ''));
+  const homeForm  = homeFormKey ? recentForms[homeFormKey] : null;
+  const awayForm  = awayFormKey ? recentForms[awayFormKey] : null;
+
+  // Net rating depuis variables_used
+  const netDiff   = vars.net_rating_diff?.value ?? null;
+  const homeNet   = homeStats.net_rating ?? null;
+  const awayNet   = awayStats.net_rating ?? null;
+
+  // PPG depuis home/away season stats
+  const homePPG   = match?.home_season_stats?.points_per_game ?? homeStats?.ppg ?? null;
+  const awayPPG   = match?.away_season_stats?.points_per_game ?? awayStats?.ppg ?? null;
+  const homeOPPG  = homeStats?.defensive_rating ?? null;
+  const awayOPPG  = awayStats?.defensive_rating ?? null;
+
+  // Win% depuis match record
+  const parseRecord = (rec) => {
+    if (!rec) return null;
+    const parts = rec.split('-');
+    if (parts.length < 2) return null;
+    const w = parseInt(parts[0]), l = parseInt(parts[1]);
+    return w + l > 0 ? Math.round(w / (w + l) * 100) : null;
+  };
+  const homeWinPct = parseRecord(match?.home_team?.record);
+  const awayWinPct = parseRecord(match?.away_team?.record);
+
+  // Stats des 10 derniers matchs
+  const buildFormSummary = (form) => {
+    if (!form?.matches?.length) return null;
+    const matches = form.matches.slice(0, 10);
+    const wins    = matches.filter(m => m.won).length;
+    const margins = matches.map(m => m.margin).filter(m => m != null);
+    const avgMargin = margins.length ? (margins.reduce((s,m) => s+m, 0) / margins.length).toFixed(1) : null;
+    const ou_line   = match?.odds?.over_under ?? null;
+    let overCount = 0;
+    if (ou_line) {
+      matches.forEach(m => {
+        if (m.team_score != null && m.opp_score != null) {
+          if (m.team_score + m.opp_score > ou_line) overCount++;
+        }
+      });
+    }
+    return { wins, total: matches.length, avgMargin, overCount, ouTotal: ou_line ? matches.filter(m => m.team_score != null).length : 0, matches };
+  };
+
+  const homeFormSum = buildFormSummary(homeForm);
+  const awayFormSum = buildFormSummary(awayForm);
+
+  // Affichage W/L des 10 derniers
+  const renderWL = (form, abbr) => {
+    if (!form?.matches?.length) return `<div style="font-size:11px;color:var(--color-muted)">Données indisponibles</div>`;
+    return `<div style="display:flex;gap:3px;flex-wrap:wrap">
+      ${form.matches.slice(0, 10).map(m => {
+        const color = m.won ? '#22c55e' : '#ef4444';
+        const score = m.team_score != null ? `${m.team_score}-${m.opp_score}` : '';
+        return `<span style="width:22px;height:22px;border-radius:4px;background:${color}22;border:1px solid ${color}44;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:${color}" title="${score}">${m.won ? 'V' : 'D'}</span>`;
+      }).join('')}
+    </div>`;
+  };
+
+  const statRow = (label, homeVal, awayVal, higherIsBetter = true) => {
+    if (homeVal === null && awayVal === null) return '';
+    const homeNum = parseFloat(homeVal);
+    const awayNum = parseFloat(awayVal);
+    const homeWins = !isNaN(homeNum) && !isNaN(awayNum) && (higherIsBetter ? homeNum > awayNum : homeNum < awayNum);
+    const awayWins = !isNaN(homeNum) && !isNaN(awayNum) && (higherIsBetter ? awayNum > homeNum : awayNum < homeNum);
+    return `
+      <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:6px;align-items:center;padding:5px 0;border-bottom:1px solid var(--color-border)">
+        <div style="font-size:12px;font-weight:${homeWins ? '700' : '400'};color:${homeWins ? 'var(--color-text)' : 'var(--color-muted)'}">${homeVal ?? '—'}</div>
+        <div style="font-size:10px;color:var(--color-muted);text-align:center;white-space:nowrap">${label}</div>
+        <div style="font-size:12px;font-weight:${awayWins ? '700' : '400'};color:${awayWins ? 'var(--color-text)' : 'var(--color-muted)'};text-align:right">${awayVal ?? '—'}</div>
+      </div>`;
+  };
+
+  return `
+    <div class="card match-detail__bloc">
+      <div class="bloc-header" style="margin-bottom:var(--space-3)">
+        <span class="bloc-header__title">Stats & Forme</span>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:4px;align-items:center;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:700;color:var(--color-signal)">${homeAbbr}</div>
+        <div style="font-size:10px;color:var(--color-muted);text-align:center">Saison</div>
+        <div style="font-size:12px;font-weight:700;color:var(--color-signal);text-align:right">${awayAbbr}</div>
+      </div>
+
+      ${statRow('Pts marqués/match', homePPG ? homePPG.toFixed(1) : null, awayPPG ? awayPPG.toFixed(1) : null)}
+      ${statRow('Pts encaissés/match', homeOPPG ? homeOPPG.toFixed(1) : null, awayOPPG ? awayOPPG.toFixed(1) : null, false)}
+      ${statRow('Net Rating', homeNet ? (homeNet > 0 ? '+'+homeNet.toFixed(1) : homeNet.toFixed(1)) : null, awayNet ? (awayNet > 0 ? '+'+awayNet.toFixed(1) : awayNet.toFixed(1)) : null)}
+      ${statRow('Win %', homeWinPct ? homeWinPct+'%' : null, awayWinPct ? awayWinPct+'%' : null)}
+      ${homeFormSum ? statRow('Moy. écart (10j)', homeFormSum.avgMargin ? (homeFormSum.avgMargin > 0 ? '+'+homeFormSum.avgMargin : homeFormSum.avgMargin)+'pts' : null, awayFormSum?.avgMargin ? (awayFormSum.avgMargin > 0 ? '+'+awayFormSum.avgMargin : awayFormSum.avgMargin)+'pts' : null) : ''}
+
+      <div style="margin-top:12px">
+        <div style="font-size:11px;color:var(--color-muted);margin-bottom:6px">10 derniers matchs</div>
+        <div style="margin-bottom:8px">
+          <div style="font-size:10px;color:var(--color-muted);margin-bottom:4px">${homeAbbr} — ${homeFormSum ? homeFormSum.wins+'V/'+( homeFormSum.total - homeFormSum.wins)+'D' : '—'}</div>
+          ${renderWL(homeForm, homeAbbr)}
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--color-muted);margin-bottom:4px">${awayAbbr} — ${awayFormSum ? awayFormSum.wins+'V/'+(awayFormSum.total - awayFormSum.wins)+'D' : '—'}</div>
+          ${renderWL(awayForm, awayAbbr)}
+        </div>
+      </div>
+
+      ${match?.odds?.over_under && (homeFormSum?.ouTotal > 0 || awayFormSum?.ouTotal > 0) ? `
+        <div style="margin-top:10px;padding:8px 10px;background:var(--color-bg);border-radius:8px">
+          <div style="font-size:11px;color:var(--color-muted);margin-bottom:4px">Tendance Over/Under (ligne : ${match.odds.over_under} pts)</div>
+          <div style="display:flex;gap:12px;font-size:12px">
+            ${homeFormSum?.ouTotal > 0 ? `<span>${homeAbbr} : <strong>${homeFormSum.overCount}/${homeFormSum.ouTotal}</strong> Over</span>` : ''}
+            ${awayFormSum?.ouTotal > 0 ? `<span>${awayAbbr} : <strong>${awayFormSum.overCount}/${awayFormSum.ouTotal}</strong> Over</span>` : ''}
+          </div>
+        </div>` : ''}
+    </div>`;
+}
+
+// ── BLOC ABSENCES & CONTEXTE ──────────────────────────────────────────────
+
+/**
+ * v3.7 : Joueurs absents consolidés + contexte IA.
+ */
+function renderBlocAbsences(analysis, match, storeInstance) {
+  const homeInj   = match?.home_injuries ?? [];
+  const awayInj   = match?.away_injuries ?? [];
+  const homeName  = match?.home_team?.name ?? 'DOM';
+  const awayName  = match?.away_team?.name ?? 'EXT';
+  const injReport = storeInstance?.get('injuryReport') ?? null;
+  const teamCtx   = injReport?.team_context ?? {};
+  const marketSig = injReport?.market_signal ?? null;
+  const homeCtx   = teamCtx?.[homeName] ?? null;
+  const awayCtx   = teamCtx?.[awayName] ?? null;
+
+  const STATUS_LABELS = { 'Out': 'Absent', 'Doubtful': 'Incertain', 'Day-To-Day': 'DTD', 'Questionable': 'Douteux', 'Limited': 'Limité' };
+  const STATUS_COLORS = { 'Out': '#ef4444', 'Doubtful': '#f97316', 'Day-To-Day': '#f59e0b', 'Questionable': '#f59e0b', 'Limited': '#3b82f6' };
+
+  const renderPlayerList = (injuries, teamName) => {
+    const relevant = injuries.filter(p => ['Out', 'Doubtful', 'Questionable', 'Day-To-Day', 'Limited'].includes(p.status));
+    if (!relevant.length) return `<div style="font-size:11px;color:var(--color-muted)">Aucune absence signalée</div>`;
+    return relevant.map(p => {
+      const color  = STATUS_COLORS[p.status] ?? 'var(--color-muted)';
+      const label  = STATUS_LABELS[p.status] ?? p.status;
+      const isStar = p.ppg != null && p.ppg >= 20;
+      return `
+        <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--color-border)">
+          <span style="width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0"></span>
+          <div style="flex:1;min-width:0">
+            <span style="font-size:12px;font-weight:${isStar ? '700' : '500'}">${p.name}</span>
+            ${p.ppg ? `<span style="font-size:10px;color:var(--color-muted);margin-left:4px">${p.ppg} pts/m</span>` : ''}
+            ${isStar ? '<span style="font-size:9px;color:#f97316;margin-left:4px">★ STAR</span>' : ''}
+          </div>
+          <span style="font-size:10px;font-weight:600;color:${color};flex-shrink:0">${label}</span>
+        </div>`;
+    }).join('');
+  };
+
+  const hasInjuries = homeInj.length > 0 || awayInj.length > 0;
+  const hasContext  = homeCtx || awayCtx || marketSig;
+
+  if (!hasInjuries && !hasContext) return '';
+
+  return `
+    <div class="card match-detail__bloc">
+      <div class="bloc-header" style="margin-bottom:var(--space-3)">
+        <span class="bloc-header__title">Absences & Contexte</span>
+      </div>
+
+      ${hasInjuries ? `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:${hasContext ? '12px' : '0'}">
+          <div>
+            <div style="font-size:11px;font-weight:600;color:var(--color-muted);margin-bottom:6px">${match?.home_team?.abbreviation ?? 'DOM'}</div>
+            ${renderPlayerList(homeInj, homeName)}
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:600;color:var(--color-muted);margin-bottom:6px">${match?.away_team?.abbreviation ?? 'EXT'}</div>
+            ${renderPlayerList(awayInj, awayName)}
+          </div>
+        </div>` : ''}
+
+      ${homeCtx ? `<div style="font-size:12px;padding:8px 12px;background:rgba(255,165,0,0.06);border-left:3px solid var(--color-warning);border-radius:6px;margin-bottom:6px;color:var(--color-muted)"><strong style="color:var(--color-text)">${homeName}</strong> — ${homeCtx}</div>` : ''}
+      ${awayCtx ? `<div style="font-size:12px;padding:8px 12px;background:rgba(255,165,0,0.06);border-left:3px solid var(--color-warning);border-radius:6px;margin-bottom:6px;color:var(--color-muted)"><strong style="color:var(--color-text)">${awayName}</strong> — ${awayCtx}</div>` : ''}
+      ${marketSig?.movement ? `<div style="font-size:12px;padding:8px 12px;background:rgba(99,179,237,0.06);border-left:3px solid var(--color-signal);border-radius:6px;color:var(--color-muted)">📈 <strong style="color:var(--color-signal)">Mouvement de ligne</strong> — ${marketSig.detail ?? ''}</div>` : ''}
+    </div>`;
 }
 
 // ── BLOC FIABILITÉ ────────────────────────────────────────────────────────
