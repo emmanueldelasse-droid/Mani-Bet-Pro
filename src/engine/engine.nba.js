@@ -1,5 +1,14 @@
 /**
- * MANI BET PRO — engine.nba.js v5.10
+ * MANI BET PRO — engine.nba.js v5.11
+ *
+ * AJOUTS v5.11 :
+ *   - MONEYLINE edge minimum : 7% → 5% (aligné SPREAD/O/U).
+ *     En NBA les books sont efficients — 7% bloquait quasi tous les Moneylines.
+ *   - pace_diff : approximation depuis avg_pts si Tank01 ne fournit pas pace.
+ *     proxy = (homeAvgPts + awayAvgPts) / 2 centré sur 225 (moyenne NBA).
+ *     Améliore la projection O/U même sans Tank01 pace réel.
+ *   - _computeAbsencesImpact : source 'tank01_roster' reconnue comme pondérée.
+ *     Pipeline v6.27 — impact_weight calculé depuis roster Tank01 côté worker.
  *
  * AJOUTS v5.10 :
  *   - _computeStarAbsenceModifier : statut Limited ajouté (status_weight 0.4).
@@ -50,9 +59,9 @@ import { Logger }                         from '../utils/utils.logger.js';
 const CONFIG   = SPORTS_CONFIG.NBA;
 const MIN_GAMES = CONFIG.rejection_thresholds.min_games_sample ?? 10;
 
-// Seuils edge minimum
+// Seuils edge minimum — v5.11 : MONEYLINE 7% → 5%
 const EDGE_THRESHOLDS = {
-  MONEYLINE:  0.07,
+  MONEYLINE:  0.05,  // v5.11 : était 0.07, trop restrictif en NBA
   SPREAD:     0.03,
   OVER_UNDER: 0.03,
 };
@@ -235,9 +244,24 @@ export class EngineNBA {
       // ── Pace différentiel ─────────────────────────────────────────────
       // Utilisé pour l'O/U. Non inclus dans les pondérations du score
       // principal — contextuel uniquement.
-      pace_diff: this._safeAdvancedDiff(
-        advancedStats, homeStats, awayStats, 'pace'
-      ),
+      // v5.11 : si Tank01 ne fournit pas pace (null), approximation depuis avg_pts.
+      // proxy pace = (homeAvgPts + awayAvgPts) / 2 centré sur 225 (moyenne NBA).
+      // Positif = matchs à rythme élevé → tendance OVER.
+      pace_diff: (() => {
+        const fromTank01 = this._safeAdvancedDiff(advancedStats, homeStats, awayStats, 'pace');
+        if (fromTank01.value !== null) return fromTank01;
+        // Approximation avg_pts comme proxy pace
+        const hPts = homeStats?.avg_pts ?? null;
+        const aPts = awayStats?.avg_pts ?? null;
+        if (hPts === null || aPts === null) return { value: null, source: 'espn_scoreboard', quality: 'MISSING' };
+        const avgTotal = hPts + aPts;
+        const NBA_AVG_TOTAL = 225;
+        return {
+          value:   Math.round((avgTotal - NBA_AVG_TOTAL) * 10) / 10,
+          source:  'espn_scoreboard_proxy',
+          quality: 'ESTIMATED',
+        };
+      })(),
 
       // ── Back-to-back ──────────────────────────────────────────────────
       back_to_back: this._computeBackToBack(data),
@@ -506,8 +530,9 @@ export class EngineNBA {
       }, 0);
     };
 
-    // Détecter si au moins un joueur provient de Tank01
-    const isWeighted = homeInj.some(p => p.source === 'tank01') || awayInj.some(p => p.source === 'tank01');
+    // Détecter si au moins un joueur provient de Tank01 (roster v6.27 ou player v6.26)
+    const isWeighted = homeInj.some(p => p.source === 'tank01' || p.source === 'tank01_roster')
+                    || awayInj.some(p => p.source === 'tank01' || p.source === 'tank01_roster');
 
     const hs = score(homeInj);
     const as = score(awayInj);
