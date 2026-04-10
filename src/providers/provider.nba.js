@@ -115,14 +115,67 @@ export class ProviderNBA {
   }
 
   /**
-   * Trouve les cotes pour un match par nom d'équipe.
+   * Trouve les cotes pour un match et retourne un objet APLATI
+   * avec les meilleures cotes disponibles — format attendu par l'UI.
+   *
+   * Priorité bookmakers : Pinnacle > Betclic > Bet365 > Unibet > premier dispo
+   * Champs retournés :
+   *   home_ml_decimal, away_ml_decimal   — moneyline décimal
+   *   home_spread_decimal, away_spread_decimal — spread décimal
+   *   spread_line                         — ligne du spread (ex: -4.5)
+   *   over_decimal, under_decimal         — total décimal
+   *   total_line                          — ligne du total (ex: 224.5)
+   *   best_book                           — nom du bookmaker source
    */
   static findMatchOdds(comparison, homeTeam, awayTeam) {
     if (!comparison?.matches) return null;
-    return comparison.matches.find(m =>
+
+    const game = comparison.matches.find(m =>
       (m.home_team === homeTeam && m.away_team === awayTeam) ||
       (m.home_team === awayTeam && m.away_team === homeTeam)
     ) ?? null;
+
+    if (!game || !game.bookmakers || !game.bookmakers.length) return null;
+
+    const isSwapped = game.home_team !== homeTeam;
+
+    // Priorité bookmakers : Pinnacle en premier (sharp), puis les autres
+    const PRIORITY = ['pinnacle', 'betclic', 'bet365', 'unibet_eu', 'betsson', 'winamax'];
+    const sorted = game.bookmakers.slice().sort((a, b) => {
+      const ia = PRIORITY.indexOf(a.key);
+      const ib = PRIORITY.indexOf(b.key);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+
+    // Sélectionner le meilleur bookmaker pour chaque marché
+    const mlBook     = sorted.find(b => b.home_ml !== null);
+    const spreadBook = sorted.find(b => b.home_spread !== null && b.spread_line !== null);
+    const totalBook  = sorted.find(b => b.over_total !== null && b.total_line !== null);
+
+    // Si les équipes sont inversées dans la réponse Odds API, swapper home/away
+    const homeML     = isSwapped ? mlBook?.away_ml         : mlBook?.home_ml;
+    const awayML     = isSwapped ? mlBook?.home_ml         : mlBook?.away_ml;
+    const homeSpread = isSwapped ? spreadBook?.away_spread : spreadBook?.home_spread;
+    const awaySpread = isSwapped ? spreadBook?.home_spread : spreadBook?.away_spread;
+    const spreadLine = isSwapped
+      ? (spreadBook?.spread_line != null ? -spreadBook.spread_line : null)
+      : spreadBook?.spread_line;
+
+    return {
+      // Champs aplatis — format attendu par l'UI (getOdds dans renderBlocTousLesParis)
+      home_ml_decimal:      homeML     ?? null,
+      away_ml_decimal:      awayML     ?? null,
+      home_spread_decimal:  homeSpread ?? null,
+      away_spread_decimal:  awaySpread ?? null,
+      spread_line:          spreadLine ?? null,
+      over_decimal:         totalBook?.over_total  ?? null,
+      under_decimal:        totalBook?.under_total ?? null,
+      total_line:           totalBook?.total_line  ?? null,
+      best_book:            mlBook?.title ?? spreadBook?.title ?? totalBook?.title ?? null,
+      // Données brutes conservées pour debug et moteur
+      bookmakers:           game.bookmakers,
+      odds_api_id:          game.odds_api_id,
+    };
   }
 
   // ── NORMALISATION ─────────────────────────────────────────────────────
