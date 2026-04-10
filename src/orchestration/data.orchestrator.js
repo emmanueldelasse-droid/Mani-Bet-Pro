@@ -202,25 +202,31 @@ export class DataOrchestrator {
       // Extraire les abréviations Tank01 pour team-detail (1 appel par match)
       // On ne charge que le premier match pour les splits/top10 — chaque match-detail
       // appelle _loadTeamDetail individuellement via le store
-      const [injuryReport, aiInjuries, recentForms, oddsComparison, advancedStats] = await Promise.all([
-        _loadInjuries(date),              // ESPN + Tank01 (sans enrichissement IA)
-        _loadAIInjuries(matches, date),   // IA web_search en parallèle
+      // Étape 2a : ESPN + Tank01 + Odds + Stats — bloquant (données critiques moteur)
+      const [injuryReport, recentForms, oddsComparison, advancedStats] = await Promise.all([
+        _loadInjuries(date),              // ESPN + Tank01 pondéré ppg
         _loadRecentForms(teamIds, season),
         _loadOddsComparison(),
         _loadAdvancedStats(),
       ]);
 
-      // Merger les deux rapports de blessures
-      const mergedInjuryReport = _mergeInjuryReports(injuryReport, aiInjuries);
+      // Stocker ESPN injuries de base immédiatement
+      store.set({ injuryReport });
 
-      // Stocker le rapport enrichi dans le store pour ui.match-detail
-      store.set({ injuryReport: mergedInjuryReport });
+      // Étape 2b : Claude IA — NON BLOQUANT (peut prendre 15-25s)
+      // Le dashboard charge sans attendre Claude. Quand Claude répond,
+      // le rapport est mis à jour dans le store et l'UI se rafraîchit.
+      _loadAIInjuries(matches, date).then(function(aiInjuries) {
+        if (!aiInjuries) return;
+        const merged = _mergeInjuryReports(injuryReport, aiInjuries);
+        store.set({ injuryReport: merged });
+        Logger.info('AI_INJURIES_LATE_MERGE', { teams: Object.keys(aiInjuries.by_team || {}).length });
+      }).catch(function() {});  // silencieux — non bloquant
 
-      // Pré-charger teamDetail pour tous les matchs en parallèle (cache KV 6h côté worker)
-      // Stocké par matchId pour accès rapide depuis ui.match-detail
+      // Pré-charger teamDetail pour tous les matchs (non bloquant)
       _preloadTeamDetails(matches).then(function(teamDetails) {
         store.set({ teamDetails });
-      }).catch(function() {});  // silencieux — non bloquant
+      }).catch(function() {});
 
       // ÉTAPE 3 : Analyser tous les matchs
       LoadingUI.update('Analyse en cours...', 70);
@@ -228,7 +234,7 @@ export class DataOrchestrator {
       const analyses = await _analyzeMatches(
         matches,
         recentForms,
-        mergedInjuryReport,
+        injuryReport,   // rapport ESPN de base — Claude enrichit en arrière-plan
         oddsComparison,
         advancedStats,
         date,
