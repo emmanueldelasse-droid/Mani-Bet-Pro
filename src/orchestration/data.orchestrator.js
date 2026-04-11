@@ -284,7 +284,6 @@ export class DataOrchestrator {
       absences_confirmed: injuryReport !== null,
       advanced_stats:     advancedStats || null,
       market_odds:        null,
-      odds_markets:       null,
       home_back_to_back:  _isBackToBack(homeRecent, match.date || match.datetime),
       away_back_to_back:  _isBackToBack(awayRecent, match.date || match.datetime),
       home_rest_days:     _computeRestDays(homeRecent, match.date || match.datetime),
@@ -445,54 +444,63 @@ async function _loadAIInjuries(matches, date) {
   const aiMarketSignals = [];
 
   if (contextData && contextData.data) {
-    Object.values(contextData.data).forEach(function(ctx) {
-      if (!ctx || !ctx.game) return;
+    Object.entries(contextData.data).forEach(function(entry) {
+      const gameKey = entry[0];
+      const ctx     = entry[1];
+      if (!ctx) return;
 
-      // Décoder AWAY@HOME
-      const parts   = ctx.game.split('@');
+      // FIX : le worker indexe déjà les données par clé AWAY@HOME.
+      // L'ancien code lisait Object.values(...)+ctx.game, donc ignorait tout.
+      const gameRef = (ctx.game || gameKey || '').toUpperCase();
+      if (!gameRef || gameRef.indexOf('@') === -1) return;
+
+      const parts   = gameRef.split('@');
       const awayAbv = parts[0] && parts[0].toUpperCase();
       const homeAbv = parts[1] && parts[1].toUpperCase();
 
       const homeEspn = ABV_TO_ESPN_NAME[homeAbv] || null;
       const awayEspn = ABV_TO_ESPN_NAME[awayAbv] || null;
 
-      // ── Injuries HOME depuis Claude ──────────────────────────────────
       if (homeEspn && Array.isArray(ctx.injuries_home)) {
         ctx.injuries_home.forEach(function(p) {
           if (!p || !p.name) return;
           if (!aiByTeam[homeEspn]) aiByTeam[homeEspn] = [];
           aiByTeam[homeEspn].push({
-            name:          p.name,
-            team:          homeAbv,
-            status:        p.status || 'Out',
-            ppg:           p.ppg    || null,
-            source:        'claude_web_search',
-            note:          p.reason || null,
+            name:   p.name,
+            team:   homeAbv,
+            status: p.status || 'Out',
+            ppg:    p.ppg || null,
+            source: p.source === 'nba.com' || p.source === 'espn.com' ? p.source : 'claude_web_search',
+            note:   p.reason || null,
           });
         });
       }
 
-      // ── Injuries AWAY depuis Claude ──────────────────────────────────
       if (awayEspn && Array.isArray(ctx.injuries_away)) {
         ctx.injuries_away.forEach(function(p) {
           if (!p || !p.name) return;
           if (!aiByTeam[awayEspn]) aiByTeam[awayEspn] = [];
           aiByTeam[awayEspn].push({
-            name:          p.name,
-            team:          awayAbv,
-            status:        p.status || 'Out',
-            ppg:           p.ppg    || null,
-            source:        'claude_web_search',
-            note:          p.reason || null,
+            name:   p.name,
+            team:   awayAbv,
+            status: p.status || 'Out',
+            ppg:    p.ppg || null,
+            source: p.source === 'nba.com' || p.source === 'espn.com' ? p.source : 'claude_web_search',
+            note:   p.reason || null,
           });
         });
       }
 
-      // ── Contexte motivationnel ────────────────────────────────────────
-      if (homeEspn && ctx.motivation_home) aiTeamContext[homeEspn] = ctx.motivation_home;
-      if (awayEspn && ctx.motivation_away) aiTeamContext[awayEspn] = ctx.motivation_away;
+      // Contexte visible dans la fiche : supporter home_situation/away_situation
+      const homeContext = ctx.home_situation || ctx.motivation_home || null;
+      const awayContext = ctx.away_situation || ctx.motivation_away || null;
+      if (homeEspn && homeContext) aiTeamContext[homeEspn] = homeContext;
+      if (awayEspn && awayContext) aiTeamContext[awayEspn] = awayContext;
+      if (ctx.urgency) aiTeamContext.urgency = ctx.urgency;
+      if (ctx.key_info || ctx.key_context) aiTeamContext.key_info = ctx.key_info || ctx.key_context;
+      if (homeContext) aiTeamContext.home_note = homeContext;
+      if (awayContext) aiTeamContext.away_note = awayContext;
 
-      // ── Line movement ─────────────────────────────────────────────────
       if (ctx.line_movement) {
         aiMarketSignals.push({
           movement: null,
@@ -511,7 +519,7 @@ async function _loadAIInjuries(matches, date) {
     source:   'claude_web_search',
   });
 
-  const hasData = totalPlayers > 0 || Object.keys(aiTeamContext).length > 0;
+  const hasData = totalPlayers > 0 || Object.keys(aiTeamContext).length > 0 || aiMarketSignals.length > 0;
   return hasData ? {
     by_team:       aiByTeam,
     team_context:  aiTeamContext,
@@ -866,10 +874,7 @@ async function _analyzeMatches(matches, recentForms, injuryReport, oddsCompariso
           match.home_team && match.home_team.name,
           match.away_team && match.away_team.name
         );
-        if (matchOdds) {
-          rawData.market_odds = matchOdds;
-          rawData.odds_markets = matchOdds.odds_markets ?? null;
-        }
+        if (matchOdds) rawData.market_odds = matchOdds;
       }
 
       const analysis = EngineCore.compute('NBA', rawData);
