@@ -45,7 +45,6 @@ import { EngineCore }  from '../engine/engine.core.js';
 import { PaperEngine } from '../paper/paper.engine.js';
 import { ProviderNBA } from '../providers/provider.nba.js';
 import { Logger }      from '../utils/utils.logger.js';
-import { AIClient }    from '../ai/ai.client.js';
 
 function _americanToDecimal(american) {
   if (!american) return null;
@@ -60,6 +59,7 @@ function _decimalToAmerican(decimal) {
   return Math.round(-100 / (decimal - 1));
 }
 
+const WORKER_URL = 'https://manibetpro.emmanueldelasse.workers.dev';
 
 const SIGNAL_LABELS = {
   'recent_form_ema':   'Forme récente',
@@ -149,14 +149,29 @@ function renderShell(match, analysis, storeInstance) {
 // ── COTES ESPN ────────────────────────────────────────────────────────────
 
 function renderOddsBar(odds) {
-  const spread = odds.spread != null ? (odds.spread > 0 ? `+${odds.spread}` : String(odds.spread)) : '—';
-  const ou     = odds.over_under ?? '—';
+  const ou = odds.over_under ?? '—';
   const homeML = odds.home_ml != null ? (odds.home_ml > 0 ? `+${odds.home_ml}` : String(odds.home_ml)) : '—';
   const awayML = odds.away_ml != null ? (odds.away_ml > 0 ? `+${odds.away_ml}` : String(odds.away_ml)) : '—';
+
+  let spreadText = '—';
+  if (odds.spread != null) {
+    const spreadAbs = Math.abs(Number(odds.spread));
+    if (Number.isFinite(spreadAbs)) {
+      if (odds.home_favorite === true) {
+        spreadText = `DOM -${spreadAbs} · EXT +${spreadAbs}`;
+      } else if (odds.away_favorite === true) {
+        spreadText = `DOM +${spreadAbs} · EXT -${spreadAbs}`;
+      } else {
+        const raw = Number(odds.spread);
+        spreadText = raw > 0 ? `DOM +${raw}` : `DOM ${raw}`;
+      }
+    }
+  }
+
   return `
     <div style="margin-top:var(--space-3);display:flex;gap:16px;flex-wrap:wrap">
       <span class="text-muted" style="font-size:11px">📊 DraftKings</span>
-      <span class="mono" style="font-size:11px">Spread <strong>${spread}</strong></span>
+      <span class="mono" style="font-size:11px">Spread <strong>${spreadText}</strong></span>
       <span class="mono" style="font-size:11px">O/U <strong>${ou}</strong></span>
       <span class="mono" style="font-size:11px">DOM <strong>${homeML}</strong></span>
       <span class="mono" style="font-size:11px">EXT <strong>${awayML}</strong></span>
@@ -1032,8 +1047,9 @@ const _aiSessionCache = new Map();
 
 async function triggerAIExplanation(container, analysis, match, task) {
   const responseEl = container.querySelector('#ai-response');
-  if (!responseEl || !analysis) return;
+  if (!responseEl) return;
 
+  // Vérifier le cache session — évite appel Claude si déjà demandé ce soir
   const _cacheKey = `${match?.id ?? 'unknown'}_${task}`;
   if (_aiSessionCache.has(_cacheKey)) {
     responseEl.innerHTML = _aiSessionCache.get(_cacheKey);
@@ -1042,32 +1058,37 @@ async function triggerAIExplanation(container, analysis, match, task) {
 
   responseEl.innerHTML = '<span class="text-muted">Analyse en cours…</span>';
 
+  const TASK_PROMPTS = {
+    EXPLAIN: `Tu es un analyste sportif NBA. Réponds en 3-4 phrases courtes, sans titres, sans gras, sans listes. N'invente aucun chiffre. Utilise uniquement les valeurs du contexte. Phrase 1 : quelle équipe est favorisée et pourquoi. Phrase 2 : le signal principal en termes simples. Phrase 3 : si un pari recommandé est fourni, confirme ou nuance-le — sinon dis explicitement qu'aucune valeur n'a été détectée et qu'il vaut mieux passer. Phrase 4 : une limite courte. Max 80 mots.`,
+    AUDIT: `Tu es un analyste sportif NBA. En 2-3 phrases simples sans titres ni listes : dis si les signaux sont cohérents entre eux. Si contradiction, explique laquelle. Uniquement les données fournies. Max 60 mots.`,
+    DETECT_INCONSISTENCY: `Tu es un analyste sportif NBA. En 2 phrases simples sans titres ni listes : dis s'il y a une anomalie dans les données. Si aucune anomalie, dis-le clairement. Max 50 mots.`,
+  };
+
+  const home   = match.home_team?.name ?? '—';
+  const away   = match.away_team?.name ?? '—';
+  const score  = analysis.predictive_score !== null ? Math.round(analysis.predictive_score * 100) : null;
+  const favori = score !== null ? (score > 50 ? `${home} (${score}%)` : score < 50 ? `${away} (${100 - score}%)` : 'Équilibré (50%)') : 'Non déterminé';
+  const best   = analysis.betting_recommendations?.best;
+  const parisInfo = best ? `Pari recommandé : ${best.side} à cote ${best.odds_decimal ?? '—'}, edge +${best.edge}%` : 'Aucun pari recommandé — aucune valeur détectée sur ce match.';
+
+  const userMessage = `N'INVENTE AUCUN CHIFFRE. Utilise uniquement les valeurs ci-dessous.\nMatch : ${home} vs ${away}\nFavori : ${favori}\nScore prédictif : ${score ?? 'non calculé'}%\nRobustesse : ${analysis.robustness_score !== null ? Math.round(analysis.robustness_score * 100) + '%' : 'non calculée'}\nQualité données : ${analysis.data_quality_score !== null ? Math.round(analysis.data_quality_score * 100) + '%' : 'non calculée'}\n${parisInfo}\nSignaux :\n${(analysis.key_signals ?? []).slice(0, 3).map(s => `- ${_simplifyLabel(s.label, s.variable)} : ${s.direction === 'POSITIVE' ? 'avantage domicile' : 'avantage extérieur'}`).join('\n')}\nVariables manquantes : ${(analysis.missing_critical ?? []).join(', ') || 'aucune'}`.trim();
+
   try {
-    const explanation = await AIClient.explain(analysis, task, {
-      home: match.home_team?.name ?? '—',
-      away: match.away_team?.name ?? '—',
-      date: match.datetime ?? match.date ?? '',
-      sport: 'NBA',
+    const response = await fetch(`${WORKER_URL}/ai/messages`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 600, system: TASK_PROMPTS[task] ?? TASK_PROMPTS.EXPLAIN, messages: [{ role: 'user', content: userMessage }] }),
     });
-
-    if (!explanation?.response_text) throw new Error('Réponse vide');
-
-    const clean = explanation.response_text
-      .replace(/^#{1,4}\s.+$/gm, '')
-      .replace(/\*\*(.+?)\*\*/gs, '$1')
-      .replace(/\*(.+?)\*/gs, '$1')
-      .replace(/^[-•]\s/gm, '')
-      .trim();
-
-    const flagsHtml = explanation.has_flags && explanation.hallucination_flags?.length
-      ? `<div class="text-muted" style="font-size:10px;margin-top:var(--space-2)">Validation IA : ${escapeHtml(explanation.hallucination_flags.map(f => f.reason).join(' · '))}</div>`
-      : '';
-
-    const htmlResult = `<div style="line-height:1.8;font-size:13px">${escapeHtml(clean)}</div><div class="text-muted" style="font-size:10px;margin-top:var(--space-2)">Source : Claude Sonnet · Basé uniquement sur les données du moteur</div>${flagsHtml}`;
+    if (!response.ok) throw new Error(`Worker HTTP ${response.status}`);
+    const data = await response.json();
+    const text = data.content?.map(b => b.type === 'text' ? b.text : '').join('\n').trim();
+    if (!text) throw new Error('Réponse vide');
+    const clean = text.replace(/^#{1,4}\s.+$/gm, '').replace(/\*\*(.+?)\*\*/gs, '$1').replace(/\*(.+?)\*/gs, '$1').replace(/^[-•]\s/gm, '').trim();
+    const htmlResult = `<div style="line-height:1.8;font-size:13px">${escapeHtml(clean)}</div><div class="text-muted" style="font-size:10px;margin-top:var(--space-2)">Source : Claude Sonnet · Basé uniquement sur les données du moteur</div>`;
     responseEl.innerHTML = htmlResult;
+    // Stocker en cache session — même clic = 0 appel Claude
     _aiSessionCache.set(_cacheKey, htmlResult);
   } catch (err) {
-    Logger.error('AI_EXPLANATION_ERROR', { message: err.message, task });
+    Logger.error('AI_EXPLANATION_ERROR', { message: err.message });
     responseEl.innerHTML = `<div class="text-muted" style="font-size:12px">Erreur : ${escapeHtml(err.message)}</div>`;
   }
 }
@@ -1402,12 +1423,27 @@ function _renderTDTop10(match, teamDetail, injReport) {
   const awayAbv = match?.away_team?.abbreviation ?? 'EXT';
   const uid = 'top10_' + (match?.id ?? Date.now());
 
-  const absentNames = new Set();
+  const absentByName = new Map();
   if (injReport?.by_team) {
     Object.values(injReport.by_team).forEach(players =>
-      players.forEach(p => { if (p?.name) absentNames.add(p.name.toLowerCase()); })
+      players.forEach(p => {
+        if (!p?.name) return;
+        absentByName.set(p.name.toLowerCase(), {
+          status: p.status ?? 'Out',
+          ppg: p.ppg ?? null,
+        });
+      })
     );
   }
+
+  const STATUS_BADGE = {
+    'Out':         { label: 'OUT', color: '#ef4444' },
+    'Doubtful':    { label: 'DOUBT', color: '#f97316' },
+    'Day-To-Day':  { label: 'DTD', color: '#eab308' },
+    'Questionable':{ label: 'Q', color: '#eab308' },
+    'Limited':     { label: 'LIMIT', color: '#a78bfa' },
+    'Probable':    { label: 'PROB', color: '#60a5fa' },
+  };
 
   const renderTable = (players) => {
     if (!players?.length) return `<div style="font-size:12px;color:var(--color-muted);padding:8px">Données indisponibles</div>`;
@@ -1426,13 +1462,15 @@ function _renderTDTop10(match, teamDetail, injReport) {
         </thead>
         <tbody>
           ${players.map((p, i) => {
-            const absent = absentNames.has((p.name ?? '').toLowerCase());
+            const absentMeta = absentByName.get((p.name ?? '').toLowerCase()) ?? null;
+            const absent = Boolean(absentMeta);
+            const badge = absent ? (STATUS_BADGE[absentMeta.status] ?? STATUS_BADGE['Out']) : null;
             const star   = p.pts >= 20;
             const bg     = absent ? 'rgba(239,68,68,0.06)' : i % 2 === 0 ? '' : 'var(--color-bg)';
             return `
-              <tr style="background:${bg};border-bottom:1px solid var(--color-border);${absent ? 'opacity:0.65' : ''}">
-                <td style="padding:6px 6px;color:${absent ? '#ef4444' : 'var(--color-text)'};white-space:nowrap;overflow:hidden;max-width:110px;text-overflow:ellipsis">
-                  ${star ? '⭐ ' : ''}${p.name ?? '—'}${absent ? ' <span style="font-size:9px;color:#ef4444;font-weight:700">OUT</span>' : ''}
+              <tr style="background:${bg};border-bottom:1px solid var(--color-border);${absent ? 'opacity:0.72' : ''}">
+                <td style="padding:6px 6px;color:${absent ? (badge?.color ?? '#ef4444') : 'var(--color-text)'};white-space:nowrap;overflow:hidden;max-width:110px;text-overflow:ellipsis">
+                  ${star ? '⭐ ' : ''}${p.name ?? '—'}${absent ? ` <span style="font-size:9px;color:${badge?.color ?? '#ef4444'};font-weight:700">${badge?.label ?? 'OUT'}</span>` : ''}
                 </td>
                 <td style="padding:6px 4px;text-align:center;font-weight:600">${p.pts?.toFixed(1) ?? '—'}</td>
                 <td style="padding:6px 4px;text-align:center">${p.last5pts !== null && p.last5pts !== undefined ? p.last5pts.toFixed(1) + ' ' + _trendArrow(p.pts, p.last5pts) : '—'}</td>
