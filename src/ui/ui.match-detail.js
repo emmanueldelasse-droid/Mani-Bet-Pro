@@ -137,14 +137,11 @@ function renderShell(match, analysis, storeInstance) {
       </div>
 
       ${renderBlocProbas(analysis, match)}
-      ${renderBlocContexteMatch(match, storeInstance)}
       ${renderBlocTousLesParis(analysis, match)}
-      ${renderBlocMarketAudit(analysis, match)}
-      ${renderBlocPourquoi(analysis, match, storeInstance)}
       <div id="team-detail-container">${renderBlocTeamDetailSkeleton()}</div>
       ${renderBlocFiabilite(analysis)}
       ${renderBlocSources(analysis)}
-      ${renderBlocIA(analysis, match, storeInstance)}
+      ${renderBlocIA(analysis, match)}
     </div>
   `;
 }
@@ -190,19 +187,6 @@ function renderBlocProbas(analysis, match) {
   else if (edge >= 7)                          { decisionLabel = 'Pari intéressant'; decisionColor = 'var(--color-warning)'; }
   else                                         { decisionLabel = 'Passer';           decisionColor = 'var(--color-muted)'; }
 
-  const homeOddsDec = match?.market_odds?.home_ml_decimal ?? _americanToDecimal(match?.odds?.home_ml);
-  const awayOddsDec = match?.market_odds?.away_ml_decimal ?? _americanToDecimal(match?.odds?.away_ml);
-  const marketHomeProb = homeOddsDec ? Math.round((1 / homeOddsDec) * 100) : null;
-  const marketAwayProb = awayOddsDec ? Math.round((1 / awayOddsDec) * 100) : null;
-  const engineFav = homeProb === awayProb ? null : (homeProb > awayProb ? 'HOME' : 'AWAY');
-  const marketFav = marketHomeProb !== null && marketAwayProb !== null && marketHomeProb !== marketAwayProb
-    ? (marketHomeProb > marketAwayProb ? 'HOME' : 'AWAY')
-    : null;
-  const divergence = engineFav && marketFav && engineFav !== marketFav;
-  const divergenceGap = divergence
-    ? Math.abs((engineFav === 'HOME' ? homeProb : awayProb) - (engineFav === 'HOME' ? marketHomeProb : marketAwayProb))
-    : 0;
-
   return `
     <div class="card match-detail__bloc">
       <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-bottom:12px">
@@ -227,11 +211,6 @@ function renderBlocProbas(analysis, match) {
           <span style="color:var(--color-muted);margin-left:8px">Avantage estimé +${edge}%</span>
         </div>
       ` : `<div style="font-size:12px;color:var(--color-muted)">Aucun avantage suffisant détecté sur ce match.</div>`}
-      ${divergence ? `
-        <div style="margin-top:10px;padding:8px 12px;border-left:3px solid var(--color-warning);border-radius:6px;background:rgba(249,115,22,0.08);font-size:12px;color:var(--color-muted)">
-          <strong style="color:var(--color-warning)">Divergence moteur / marché</strong> — Le moteur favorise ${engineFav === 'HOME' ? homeName : awayName}, alors que le marché favorise ${marketFav === 'HOME' ? homeName : awayName}${divergenceGap ? ` · écart ~${divergenceGap} pts de probabilité` : ''}.
-        </div>
-      ` : ''}
     </div>`;
 }
 
@@ -330,65 +309,6 @@ function renderBlocParis(analysis, match) {
     </div>`;
 }
 
-
-// ── BLOC CONTEXTE MATCH ──────────────────────────────────────────────────
-
-function renderBlocContexteMatch(match, storeInstance) {
-  const injReport = storeInstance?.get('injuryReport') ?? null;
-  const teamCtx   = injReport?.team_context ?? {};
-  const marketSig = injReport?.market_signal ?? null;
-  const homeName  = match?.home_team?.name ?? 'Domicile';
-  const awayName  = match?.away_team?.name ?? 'Extérieur';
-  const homeAbv   = match?.home_team?.abbreviation ?? null;
-  const awayAbv   = match?.away_team?.abbreviation ?? null;
-
-  const homeCtx = teamCtx?.[homeName] ?? teamCtx?.[homeAbv] ?? teamCtx?.home_note ?? null;
-  const awayCtx = teamCtx?.[awayName] ?? teamCtx?.[awayAbv] ?? teamCtx?.away_note ?? null;
-  const urgency = teamCtx?.urgency ?? null;
-  const keyInfo = teamCtx?.key_info ?? null;
-  const marketDetail = marketSig?.detail ?? null;
-
-  if (!homeCtx && !awayCtx && !urgency && !keyInfo && !marketDetail) return '';
-
-  const urgencyLabel = urgency === 'high'
-    ? 'Enjeu élevé'
-    : urgency === 'medium'
-      ? 'Enjeu modéré'
-      : urgency === 'low'
-        ? 'Enjeu faible'
-        : null;
-
-  return `
-    <div class="card match-detail__bloc">
-      <div class="bloc-header" style="margin-bottom:var(--space-3)">
-        <span class="bloc-header__title">Contexte du match</span>
-      </div>
-      <div style="display:grid;gap:10px;font-size:13px;line-height:1.65">
-        ${homeCtx ? `
-          <div style="padding:10px 12px;background:var(--color-bg);border-radius:8px;border-left:3px solid var(--color-signal)">
-            <div style="font-weight:600;margin-bottom:4px">${homeName} — contexte</div>
-            <div style="color:var(--color-muted)">${homeCtx}</div>
-          </div>` : ''}
-        ${awayCtx ? `
-          <div style="padding:10px 12px;background:var(--color-bg);border-radius:8px;border-left:3px solid var(--color-signal)">
-            <div style="font-weight:600;margin-bottom:4px">${awayName} — contexte</div>
-            <div style="color:var(--color-muted)">${awayCtx}</div>
-          </div>` : ''}
-        ${marketDetail ? `
-          <div style="padding:10px 12px;background:var(--color-bg);border-radius:8px;border-left:3px solid var(--color-warning)">
-            <div style="font-weight:600;margin-bottom:4px">Marché</div>
-            <div style="color:var(--color-muted)">${marketDetail}</div>
-          </div>` : ''}
-      </div>
-      ${(urgencyLabel || keyInfo) ? `
-        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          ${urgencyLabel ? `<span class="badge badge--inconclusive">${urgencyLabel}</span>` : ''}
-          ${keyInfo ? `<span style="font-size:12px;color:var(--color-muted)">• ${keyInfo}</span>` : ''}
-        </div>` : ''}
-      <div style="margin-top:10px;font-size:11px;color:var(--color-muted)">Données enrichies du contexte · sans impact sur le score moteur</div>
-    </div>`;
-}
-
 // ── BLOC POURQUOI ─────────────────────────────────────────────────────────
 
 /**
@@ -439,7 +359,7 @@ function renderBlocPourquoi(analysis, match, storeInstance) {
             <strong style="color:var(--color-text)">${awayName}</strong> — ${awayCtx}
           </div>` : ''}
         </div>` : ''}
-      ${marketSig?.movement ? `
+      ${marketSig?.detail ? `
         <div style="margin-top:8px;font-size:12px;padding:8px 12px;background:rgba(99,179,237,0.06);border-left:3px solid var(--color-signal);border-radius:6px;color:var(--color-muted)">
           📈 <strong style="color:var(--color-signal)">Mouvement de ligne</strong> — ${marketSig.detail ?? ''}
         </div>` : ''}
@@ -791,7 +711,7 @@ function renderBlocStats(analysis, match, storeInstance) {
   return `
     <div class="card match-detail__bloc">
       <div class="bloc-header" style="margin-bottom:var(--space-3)">
-        <span class="bloc-header__title">Stats équipes</span>
+        <span class="bloc-header__title">Stats & Forme</span>
       </div>
 
       <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:4px;align-items:center;margin-bottom:10px">
@@ -893,7 +813,7 @@ function renderBlocAbsences(analysis, match, storeInstance) {
 
       ${homeCtx ? `<div style="font-size:12px;padding:8px 12px;background:rgba(255,165,0,0.06);border-left:3px solid var(--color-warning);border-radius:6px;margin-bottom:6px;color:var(--color-muted)"><strong style="color:var(--color-text)">${homeName}</strong> — ${homeCtx}</div>` : ''}
       ${awayCtx ? `<div style="font-size:12px;padding:8px 12px;background:rgba(255,165,0,0.06);border-left:3px solid var(--color-warning);border-radius:6px;margin-bottom:6px;color:var(--color-muted)"><strong style="color:var(--color-text)">${awayName}</strong> — ${awayCtx}</div>` : ''}
-      ${marketSig?.movement ? `<div style="font-size:12px;padding:8px 12px;background:rgba(99,179,237,0.06);border-left:3px solid var(--color-signal);border-radius:6px;color:var(--color-muted)">📈 <strong style="color:var(--color-signal)">Mouvement de ligne</strong> — ${marketSig.detail ?? ''}</div>` : ''}
+      ${marketSig?.detail ? `<div style="font-size:12px;padding:8px 12px;background:rgba(99,179,237,0.06);border-left:3px solid var(--color-signal);border-radius:6px;color:var(--color-muted)">📈 <strong style="color:var(--color-signal)">Mouvement de ligne</strong> — ${marketSig.detail ?? ''}</div>` : ''}
     </div>`;
 }
 
@@ -967,94 +887,24 @@ function renderBlocSources(analysis) {
 
 // ── BLOC IA ───────────────────────────────────────────────────────────────
 
-function renderBlocIA(analysis, match, storeInstance) {
-  const homeName = match?.home_team?.name ?? 'Domicile';
-  const awayName = match?.away_team?.name ?? 'Extérieur';
-  const score = analysis?.predictive_score;
-  const best = analysis?.betting_recommendations?.best ?? null;
-  const signals = (analysis?.key_signals ?? []).slice(0, 3);
-  const topSignal = signals[0] ?? null;
-  const dataScore = analysis?.data_quality_score ?? 0;
-  const missing = Array.isArray(analysis?.missing_variables) ? analysis.missing_variables : [];
-  const injReport = storeInstance?.get('injuryReport') ?? null;
-  const homeCtx = injReport?.team_context?.[homeName] ?? null;
-  const awayCtx = injReport?.team_context?.[awayName] ?? null;
-  const marketSig = injReport?.market_signal ?? null;
-
-  const homeProb = score != null ? Math.round(score * 100) : null;
-  const awayProb = homeProb != null ? 100 - homeProb : null;
-  const favName = homeProb == null ? null : (homeProb >= awayProb ? homeName : awayName);
-  const riskText = missing.length ? `Points de vigilance : ${missing.slice(0, 2).join(' · ')}.` : 'Pas de manque critique détecté dans les données affichées.';
-
-  let signalText = 'Lecture neutre : aucun signal moteur dominant clairement exploitable.';
-  if (topSignal) {
-    const dirHome = topSignal.direction === 'POSITIVE';
-    const leanTeam = dirHome ? homeName : awayName;
-    signalText = `Signal principal : ${_simplifyLabel(topSignal.label, topSignal.variable)} en faveur de ${leanTeam}.`;
-  } else if (favName) {
-    signalText = `Signal principal : avantage global du moteur pour ${favName}.`;
-  }
-
-  let prudenceText = 'Prudence standard.';
-  if (!best) prudenceText = 'Prudence élevée : aucun marché ne présente un avantage suffisant.';
-  else if ((best.edge ?? 0) >= 10 && dataScore >= 0.8) prudenceText = 'Confiance correcte : avantage chiffré détecté avec données solides.';
-  else if ((best.edge ?? 0) >= 5) prudenceText = 'Avantage théorique présent, mais marge de sécurité limitée.';
-
-  const contextBits = [homeCtx, awayCtx, marketSig?.detail].filter(Boolean).slice(0, 2);
-  const contextHtml = contextBits.length
-    ? `<div style="margin-top:10px;font-size:12px;color:var(--color-muted)">${contextBits.map(c => `<div style="margin-top:4px">• ${c}</div>`).join('')}</div>`
-    : '';
+function renderBlocIA(analysis, match) {
+  const canCallAI = analysis && analysis.confidence_level !== null && analysis.explanation_context;
 
   return `
     <div class="card match-detail__bloc">
       <div class="bloc-header" style="margin-bottom:var(--space-3)">
-        <span class="bloc-header__title">Lecture rapide</span>
+        <span class="bloc-header__title">Analyse IA</span>
       </div>
-      <div style="display:grid;gap:8px;font-size:13px;line-height:1.7">
-        <div><strong>À retenir</strong> — ${signalText}</div>
-        <div><strong>Risque principal</strong> — ${riskText}</div>
-        <div><strong>Niveau de prudence</strong> — ${prudenceText}</div>
-      </div>
-      ${contextHtml}
-      <div style="margin-top:10px;font-size:11px;color:var(--color-muted)">Bloc déterministe · sans appel IA</div>
-    </div>`;
-}
-
-function renderBlocMarketAudit(analysis, match) {
-  const best = analysis?.betting_recommendations?.best ?? null;
-  if (!best) return '';
-
-  const typeLabel = best.type === 'MONEYLINE' ? 'Vainqueur' : best.type === 'SPREAD' ? 'Handicap' : 'Total points';
-  const selection = best.side === 'HOME'
-    ? (match?.home_team?.abbreviation ?? 'DOM')
-    : best.side === 'AWAY'
-      ? (match?.away_team?.abbreviation ?? 'EXT')
-      : best.side === 'OVER' ? 'Over' : 'Under';
-  const lineText = best.type === 'SPREAD'
-    ? (best.spread_line != null ? `${selection} ${best.spread_line > 0 ? '+' : ''}${best.spread_line}` : '—')
-    : best.type === 'OVER_UNDER'
-      ? (best.ou_line != null ? `${selection} ${best.ou_line}` : '—')
-      : '—';
-  const oddsDec = best.odds_decimal ?? _americanToDecimal(best.odds_line);
-  const implied = best.implied_prob != null ? `${best.implied_prob}%` : '—';
-  const motor = best.motor_prob != null ? `${best.motor_prob}%` : '—';
-  const edge = best.edge != null ? `${best.edge > 0 ? '+' : ''}${best.edge}%` : '—';
-  const source = best.odds_source ?? match?.market_odds?.best_book ?? match?.odds?.source ?? 'Book';
-
-  return `
-    <div class="card match-detail__bloc">
-      <div class="bloc-header" style="margin-bottom:var(--space-3)">
-        <span class="bloc-header__title">Audit marché</span>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;font-size:12px;line-height:1.6">
-        <div><span style="color:var(--color-muted)">Marché</span><br><strong>${typeLabel}</strong></div>
-        <div><span style="color:var(--color-muted)">Sélection</span><br><strong>${selection}</strong></div>
-        <div><span style="color:var(--color-muted)">Book utilisé</span><br><strong>${source}</strong></div>
-        <div><span style="color:var(--color-muted)">Ligne utilisée</span><br><strong>${lineText}</strong></div>
-        <div><span style="color:var(--color-muted)">Cote utilisée</span><br><strong>${oddsDec ?? '—'}</strong></div>
-        <div><span style="color:var(--color-muted)">Edge final</span><br><strong style="color:${best.edge >= 0 ? 'var(--color-success)' : 'var(--color-danger)'}">${edge}</strong></div>
-        <div><span style="color:var(--color-muted)">Prob. marché</span><br><strong>${implied}</strong></div>
-        <div><span style="color:var(--color-muted)">Prob. moteur</span><br><strong>${motor}</strong></div>
+      <div id="ai-content">
+        ${!canCallAI ? `<div class="text-muted" style="font-size:12px">Analyse non disponible.</div>` : `
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:var(--space-3)">
+            <button class="btn btn--primary" data-ai-task="EXPLAIN" id="btn-ai-explain">💬 Expliquer ce match</button>
+            <button class="btn btn--ghost btn--sm" data-ai-task="AUDIT">🔍 Vérifier la cohérence</button>
+            <button class="btn btn--ghost btn--sm" data-ai-task="DETECT_INCONSISTENCY">⚡ Anomalies</button>
+          </div>
+          <div id="ai-response" class="text-muted" style="font-size:13px;line-height:1.8;min-height:40px">
+            Clique sur "Expliquer ce match" pour une analyse en langage simple.
+          </div>`}
       </div>
     </div>`;
 }
