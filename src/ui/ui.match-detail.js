@@ -138,10 +138,12 @@ function renderShell(match, analysis, storeInstance) {
 
       ${renderBlocProbas(analysis, match)}
       ${renderBlocTousLesParis(analysis, match)}
+      ${renderBlocMarketAudit(analysis, match)}
+      ${renderBlocPourquoi(analysis, match, storeInstance)}
       <div id="team-detail-container">${renderBlocTeamDetailSkeleton()}</div>
       ${renderBlocFiabilite(analysis)}
       ${renderBlocSources(analysis)}
-      ${renderBlocIA(analysis, match)}
+      ${renderBlocIA(analysis, match, storeInstance)}
     </div>
   `;
 }
@@ -149,29 +151,14 @@ function renderShell(match, analysis, storeInstance) {
 // ── COTES ESPN ────────────────────────────────────────────────────────────
 
 function renderOddsBar(odds) {
-  const ou = odds.over_under ?? '—';
+  const spread = odds.spread != null ? (odds.spread > 0 ? `+${odds.spread}` : String(odds.spread)) : '—';
+  const ou     = odds.over_under ?? '—';
   const homeML = odds.home_ml != null ? (odds.home_ml > 0 ? `+${odds.home_ml}` : String(odds.home_ml)) : '—';
   const awayML = odds.away_ml != null ? (odds.away_ml > 0 ? `+${odds.away_ml}` : String(odds.away_ml)) : '—';
-
-  let spreadText = '—';
-  if (odds.spread != null) {
-    const spreadAbs = Math.abs(Number(odds.spread));
-    if (Number.isFinite(spreadAbs)) {
-      if (odds.home_favorite === true) {
-        spreadText = `DOM -${spreadAbs} · EXT +${spreadAbs}`;
-      } else if (odds.away_favorite === true) {
-        spreadText = `DOM +${spreadAbs} · EXT -${spreadAbs}`;
-      } else {
-        const raw = Number(odds.spread);
-        spreadText = raw > 0 ? `DOM +${raw}` : `DOM ${raw}`;
-      }
-    }
-  }
-
   return `
     <div style="margin-top:var(--space-3);display:flex;gap:16px;flex-wrap:wrap">
       <span class="text-muted" style="font-size:11px">📊 DraftKings</span>
-      <span class="mono" style="font-size:11px">Spread <strong>${spreadText}</strong></span>
+      <span class="mono" style="font-size:11px">Spread <strong>${spread}</strong></span>
       <span class="mono" style="font-size:11px">O/U <strong>${ou}</strong></span>
       <span class="mono" style="font-size:11px">DOM <strong>${homeML}</strong></span>
       <span class="mono" style="font-size:11px">EXT <strong>${awayML}</strong></span>
@@ -202,6 +189,19 @@ function renderBlocProbas(analysis, match) {
   else if (edge >= 7)                          { decisionLabel = 'Pari intéressant'; decisionColor = 'var(--color-warning)'; }
   else                                         { decisionLabel = 'Passer';           decisionColor = 'var(--color-muted)'; }
 
+  const homeOddsDec = match?.market_odds?.home_ml_decimal ?? _americanToDecimal(match?.odds?.home_ml);
+  const awayOddsDec = match?.market_odds?.away_ml_decimal ?? _americanToDecimal(match?.odds?.away_ml);
+  const marketHomeProb = homeOddsDec ? Math.round((1 / homeOddsDec) * 100) : null;
+  const marketAwayProb = awayOddsDec ? Math.round((1 / awayOddsDec) * 100) : null;
+  const engineFav = homeProb === awayProb ? null : (homeProb > awayProb ? 'HOME' : 'AWAY');
+  const marketFav = marketHomeProb !== null && marketAwayProb !== null && marketHomeProb !== marketAwayProb
+    ? (marketHomeProb > marketAwayProb ? 'HOME' : 'AWAY')
+    : null;
+  const divergence = engineFav && marketFav && engineFav !== marketFav;
+  const divergenceGap = divergence
+    ? Math.abs((engineFav === 'HOME' ? homeProb : awayProb) - (engineFav === 'HOME' ? marketHomeProb : marketAwayProb))
+    : 0;
+
   return `
     <div class="card match-detail__bloc">
       <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-bottom:12px">
@@ -226,6 +226,11 @@ function renderBlocProbas(analysis, match) {
           <span style="color:var(--color-muted);margin-left:8px">Avantage estimé +${edge}%</span>
         </div>
       ` : `<div style="font-size:12px;color:var(--color-muted)">Aucun avantage suffisant détecté sur ce match.</div>`}
+      ${divergence ? `
+        <div style="margin-top:10px;padding:8px 12px;border-left:3px solid var(--color-warning);border-radius:6px;background:rgba(249,115,22,0.08);font-size:12px;color:var(--color-muted)">
+          <strong style="color:var(--color-warning)">Divergence moteur / marché</strong> — Le moteur favorise ${engineFav === 'HOME' ? homeName : awayName}, alors que le marché favorise ${marketFav === 'HOME' ? homeName : awayName}${divergenceGap ? ` · écart ~${divergenceGap} pts de probabilité` : ''}.
+        </div>
+      ` : ''}
     </div>`;
 }
 
@@ -726,7 +731,7 @@ function renderBlocStats(analysis, match, storeInstance) {
   return `
     <div class="card match-detail__bloc">
       <div class="bloc-header" style="margin-bottom:var(--space-3)">
-        <span class="bloc-header__title">Stats & Forme</span>
+        <span class="bloc-header__title">Stats équipes</span>
       </div>
 
       <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:4px;align-items:center;margin-bottom:10px">
@@ -902,24 +907,94 @@ function renderBlocSources(analysis) {
 
 // ── BLOC IA ───────────────────────────────────────────────────────────────
 
-function renderBlocIA(analysis, match) {
-  const canCallAI = analysis && analysis.confidence_level !== null && analysis.explanation_context;
+function renderBlocIA(analysis, match, storeInstance) {
+  const homeName = match?.home_team?.name ?? 'Domicile';
+  const awayName = match?.away_team?.name ?? 'Extérieur';
+  const score = analysis?.predictive_score;
+  const best = analysis?.betting_recommendations?.best ?? null;
+  const signals = (analysis?.key_signals ?? []).slice(0, 3);
+  const topSignal = signals[0] ?? null;
+  const dataScore = analysis?.data_quality_score ?? 0;
+  const missing = Array.isArray(analysis?.missing_variables) ? analysis.missing_variables : [];
+  const injReport = storeInstance?.get('injuryReport') ?? null;
+  const homeCtx = injReport?.team_context?.[homeName] ?? null;
+  const awayCtx = injReport?.team_context?.[awayName] ?? null;
+  const marketSig = injReport?.market_signal ?? null;
+
+  const homeProb = score != null ? Math.round(score * 100) : null;
+  const awayProb = homeProb != null ? 100 - homeProb : null;
+  const favName = homeProb == null ? null : (homeProb >= awayProb ? homeName : awayName);
+  const riskText = missing.length ? `Points de vigilance : ${missing.slice(0, 2).join(' · ')}.` : 'Pas de manque critique détecté dans les données affichées.';
+
+  let signalText = 'Lecture neutre : aucun signal moteur dominant clairement exploitable.';
+  if (topSignal) {
+    const dirHome = topSignal.direction === 'POSITIVE';
+    const leanTeam = dirHome ? homeName : awayName;
+    signalText = `Signal principal : ${_simplifyLabel(topSignal.label, topSignal.variable)} en faveur de ${leanTeam}.`;
+  } else if (favName) {
+    signalText = `Signal principal : avantage global du moteur pour ${favName}.`;
+  }
+
+  let prudenceText = 'Prudence standard.';
+  if (!best) prudenceText = 'Prudence élevée : aucun marché ne présente un avantage suffisant.';
+  else if ((best.edge ?? 0) >= 10 && dataScore >= 0.8) prudenceText = 'Confiance correcte : avantage chiffré détecté avec données solides.';
+  else if ((best.edge ?? 0) >= 5) prudenceText = 'Avantage théorique présent, mais marge de sécurité limitée.';
+
+  const contextBits = [homeCtx, awayCtx, marketSig?.detail].filter(Boolean).slice(0, 2);
+  const contextHtml = contextBits.length
+    ? `<div style="margin-top:10px;font-size:12px;color:var(--color-muted)">${contextBits.map(c => `<div style="margin-top:4px">• ${c}</div>`).join('')}</div>`
+    : '';
 
   return `
     <div class="card match-detail__bloc">
       <div class="bloc-header" style="margin-bottom:var(--space-3)">
-        <span class="bloc-header__title">Analyse IA</span>
+        <span class="bloc-header__title">Lecture rapide</span>
       </div>
-      <div id="ai-content">
-        ${!canCallAI ? `<div class="text-muted" style="font-size:12px">Analyse non disponible.</div>` : `
-          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:var(--space-3)">
-            <button class="btn btn--primary" data-ai-task="EXPLAIN" id="btn-ai-explain">💬 Expliquer ce match</button>
-            <button class="btn btn--ghost btn--sm" data-ai-task="AUDIT">🔍 Vérifier la cohérence</button>
-            <button class="btn btn--ghost btn--sm" data-ai-task="DETECT_INCONSISTENCY">⚡ Anomalies</button>
-          </div>
-          <div id="ai-response" class="text-muted" style="font-size:13px;line-height:1.8;min-height:40px">
-            Clique sur "Expliquer ce match" pour une analyse en langage simple.
-          </div>`}
+      <div style="display:grid;gap:8px;font-size:13px;line-height:1.7">
+        <div><strong>À retenir</strong> — ${signalText}</div>
+        <div><strong>Risque principal</strong> — ${riskText}</div>
+        <div><strong>Niveau de prudence</strong> — ${prudenceText}</div>
+      </div>
+      ${contextHtml}
+      <div style="margin-top:10px;font-size:11px;color:var(--color-muted)">Bloc déterministe · sans appel IA</div>
+    </div>`;
+}
+
+function renderBlocMarketAudit(analysis, match) {
+  const best = analysis?.betting_recommendations?.best ?? null;
+  if (!best) return '';
+
+  const typeLabel = best.type === 'MONEYLINE' ? 'Vainqueur' : best.type === 'SPREAD' ? 'Handicap' : 'Total points';
+  const selection = best.side === 'HOME'
+    ? (match?.home_team?.abbreviation ?? 'DOM')
+    : best.side === 'AWAY'
+      ? (match?.away_team?.abbreviation ?? 'EXT')
+      : best.side === 'OVER' ? 'Over' : 'Under';
+  const lineText = best.type === 'SPREAD'
+    ? (best.spread_line != null ? `${selection} ${best.spread_line > 0 ? '+' : ''}${best.spread_line}` : '—')
+    : best.type === 'OVER_UNDER'
+      ? (best.ou_line != null ? `${selection} ${best.ou_line}` : '—')
+      : '—';
+  const oddsDec = best.odds_decimal ?? _americanToDecimal(best.odds_line);
+  const implied = best.implied_prob != null ? `${best.implied_prob}%` : '—';
+  const motor = best.motor_prob != null ? `${best.motor_prob}%` : '—';
+  const edge = best.edge != null ? `${best.edge > 0 ? '+' : ''}${best.edge}%` : '—';
+  const source = best.odds_source ?? match?.market_odds?.best_book ?? match?.odds?.source ?? 'Book';
+
+  return `
+    <div class="card match-detail__bloc">
+      <div class="bloc-header" style="margin-bottom:var(--space-3)">
+        <span class="bloc-header__title">Audit marché</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;font-size:12px;line-height:1.6">
+        <div><span style="color:var(--color-muted)">Marché</span><br><strong>${typeLabel}</strong></div>
+        <div><span style="color:var(--color-muted)">Sélection</span><br><strong>${selection}</strong></div>
+        <div><span style="color:var(--color-muted)">Book utilisé</span><br><strong>${source}</strong></div>
+        <div><span style="color:var(--color-muted)">Ligne utilisée</span><br><strong>${lineText}</strong></div>
+        <div><span style="color:var(--color-muted)">Cote utilisée</span><br><strong>${oddsDec ?? '—'}</strong></div>
+        <div><span style="color:var(--color-muted)">Edge final</span><br><strong style="color:${best.edge >= 0 ? 'var(--color-success)' : 'var(--color-danger)'}">${edge}</strong></div>
+        <div><span style="color:var(--color-muted)">Prob. marché</span><br><strong>${implied}</strong></div>
+        <div><span style="color:var(--color-muted)">Prob. moteur</span><br><strong>${motor}</strong></div>
       </div>
     </div>`;
 }
@@ -1423,27 +1498,12 @@ function _renderTDTop10(match, teamDetail, injReport) {
   const awayAbv = match?.away_team?.abbreviation ?? 'EXT';
   const uid = 'top10_' + (match?.id ?? Date.now());
 
-  const absentByName = new Map();
+  const absentNames = new Set();
   if (injReport?.by_team) {
     Object.values(injReport.by_team).forEach(players =>
-      players.forEach(p => {
-        if (!p?.name) return;
-        absentByName.set(p.name.toLowerCase(), {
-          status: p.status ?? 'Out',
-          ppg: p.ppg ?? null,
-        });
-      })
+      players.forEach(p => { if (p?.name) absentNames.add(p.name.toLowerCase()); })
     );
   }
-
-  const STATUS_BADGE = {
-    'Out':         { label: 'OUT', color: '#ef4444' },
-    'Doubtful':    { label: 'DOUBT', color: '#f97316' },
-    'Day-To-Day':  { label: 'DTD', color: '#eab308' },
-    'Questionable':{ label: 'Q', color: '#eab308' },
-    'Limited':     { label: 'LIMIT', color: '#a78bfa' },
-    'Probable':    { label: 'PROB', color: '#60a5fa' },
-  };
 
   const renderTable = (players) => {
     if (!players?.length) return `<div style="font-size:12px;color:var(--color-muted);padding:8px">Données indisponibles</div>`;
@@ -1462,15 +1522,13 @@ function _renderTDTop10(match, teamDetail, injReport) {
         </thead>
         <tbody>
           ${players.map((p, i) => {
-            const absentMeta = absentByName.get((p.name ?? '').toLowerCase()) ?? null;
-            const absent = Boolean(absentMeta);
-            const badge = absent ? (STATUS_BADGE[absentMeta.status] ?? STATUS_BADGE['Out']) : null;
+            const absent = absentNames.has((p.name ?? '').toLowerCase());
             const star   = p.pts >= 20;
             const bg     = absent ? 'rgba(239,68,68,0.06)' : i % 2 === 0 ? '' : 'var(--color-bg)';
             return `
-              <tr style="background:${bg};border-bottom:1px solid var(--color-border);${absent ? 'opacity:0.72' : ''}">
-                <td style="padding:6px 6px;color:${absent ? (badge?.color ?? '#ef4444') : 'var(--color-text)'};white-space:nowrap;overflow:hidden;max-width:110px;text-overflow:ellipsis">
-                  ${star ? '⭐ ' : ''}${p.name ?? '—'}${absent ? ` <span style="font-size:9px;color:${badge?.color ?? '#ef4444'};font-weight:700">${badge?.label ?? 'OUT'}</span>` : ''}
+              <tr style="background:${bg};border-bottom:1px solid var(--color-border);${absent ? 'opacity:0.65' : ''}">
+                <td style="padding:6px 6px;color:${absent ? '#ef4444' : 'var(--color-text)'};white-space:nowrap;overflow:hidden;max-width:110px;text-overflow:ellipsis">
+                  ${star ? '⭐ ' : ''}${p.name ?? '—'}${absent ? ' <span style="font-size:9px;color:#ef4444;font-weight:700">OUT</span>' : ''}
                 </td>
                 <td style="padding:6px 4px;text-align:center;font-weight:600">${p.pts?.toFixed(1) ?? '—'}</td>
                 <td style="padding:6px 4px;text-align:center">${p.last5pts !== null && p.last5pts !== undefined ? p.last5pts.toFixed(1) + ' ' + _trendArrow(p.pts, p.last5pts) : '—'}</td>
