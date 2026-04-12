@@ -63,17 +63,16 @@ export const SPORTS_CONFIG = {
      *   pace_diff   : contextuel O/U uniquement
      */
     default_weights: {
-      net_rating_diff:  0.30,
-      efg_diff:         0.22,
-      recent_form_ema:  0.20,
-      home_away_split:  0.12,
-      absences_impact:  0.10,
-      defensive_diff:   0.00,  // désactivé — corrélé à net_rating_diff (ppg-oppg)
-                                // sera activé quand opponent_efg% disponible (Sprint 6)
-      win_pct_diff:     0.04,
-      back_to_back:     0.01,
-      rest_days_diff:   0.01,
-      // Somme = 0.30+0.22+0.20+0.12+0.10+0.04+0.01+0.01 = 1.00
+      net_rating_diff:  0.24,
+      efg_diff:         0.18,
+      recent_form_ema:  0.16,
+      home_away_split:  0.10,
+      absences_impact:  0.20,
+      defensive_diff:   0.02,
+      win_pct_diff:     0.05,
+      back_to_back:     0.03,
+      rest_days_diff:   0.02,
+      // Somme = 0.24+0.18+0.16+0.10+0.20+0.02+0.05+0.03+0.02 = 1.00
     },
 
     ema_lambda: 0.85,
