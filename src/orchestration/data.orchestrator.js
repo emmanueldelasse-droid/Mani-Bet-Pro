@@ -18,7 +18,7 @@
  *   - _loadAIInjuries() : refactorisé pour le pipeline v6.27.
  *     Appelle /nba/roster-injuries (Tank01 roster complet, cache 3h) au lieu
  *     de N appels /nba/ai-injuries individuels par match.
- *     Appelle /nba/ai-context une seule fois pour tous les matchs du soir (cache 6h KV + cache memoire session).
+ *     Appelle /nba/ai-injuries-batch une seule fois pour tous les matchs du soir (cache 6h KV + cache memoire session).
  *     0 appel Claude par match — budget réduit de ~7 appels/soir à ~1 appel/soir.
  *   - _mergeInjuryReports() : adapté pour le format roster Tank01 v6.27.
  *     Source 'tank01_roster' reconnue et fusionnée correctement.
@@ -206,21 +206,17 @@ export class DataOrchestrator {
       // FIX 3 : _loadAIInjuries bloquant — moteur attend Claude avant de calculer
       // Claude retourne injuries+PPG+contexte en 8-12s (cache KV 6h après)
       // Fallback ESPN transparent si Claude timeout ou indisponible
-      const existingRecentForms = store.get('recentForms') ?? {};
       const [injuryReport, aiInjuries, recentForms, oddsComparison, advancedStats] = await Promise.all([
         _loadInjuries(date),              // ESPN fallback (statuts basiques)
         _loadAIInjuries(matches, date, store, options),
-        _loadRecentForms(teamIds, season, existingRecentForms),
+        _loadRecentForms(teamIds, season),
         _loadOddsComparison(),
         _loadAdvancedStats(),
       ]);
 
       // Merger ESPN + Claude → injuryReport enrichi avec vrais PPG
       const mergedInjuryReport = _mergeInjuryReports(injuryReport, aiInjuries);
-      store.set({
-        injuryReport: mergedInjuryReport,
-        recentForms,
-      });
+      store.set({ injuryReport: mergedInjuryReport });
 
       // Pré-charger teamDetail pour tous les matchs (non bloquant)
       _preloadTeamDetails(matches).then(function(teamDetails) {
@@ -415,7 +411,7 @@ function _getTeamAbv(espnName) {
  * Avant v3.9 : N appels /nba/ai-injuries par match (1 Claude/match).
  * Après v3.9 :
  *   1. /nba/roster-injuries → roster complet NBA avec ppg + designation (cache 3h).
- *   2. /nba/ai-context → contexte motivationnel global pour tous les matchs (cache 6h KV, 1 Claude/soir max).
+ *   2. /nba/ai-injuries-batch → contexte motivationnel global pour tous les matchs (cache 6h KV, 1 Claude/soir max).
  *   3. Fusionne en format { by_team, team_context, market_signal } identique à v3.8.
  *
  * Retourne null si aucune donnée disponible (fallback transparent).
@@ -462,9 +458,8 @@ async function _loadAIInjuries(matches, date, store, options = {}) {
 
   if (!eligibleMatches.length) return null;
 
-  const limitedMatches = eligibleMatches.slice(0, 4); // garde-fou coût/quota
-  const uniqueTeams = new Set();
-  limitedMatches.forEach(function(m) { uniqueTeams.add(m.homeAbv); uniqueTeams.add(m.awayAbv); });
+  const batchMatches = eligibleMatches.slice(0, 12);
+  const gamesParam = batchMatches.map(function(item) { return item.game; }).join(',');
 
   store.set({
     'refreshSync.inFlight': true,
@@ -473,22 +468,19 @@ async function _loadAIInjuries(matches, date, store, options = {}) {
   });
 
   try {
-    const aiByTeam = {};
-    for (const item of limitedMatches) {
-      const data = await _fetchAIInjuriesForMatch(dateForWorker, item.homeAbv, item.awayAbv);
-      if (!data) continue;
-      _mergeBatchAiPlayers(aiByTeam, data.players_out, item.homeAbv, item.awayAbv);
-      _mergeBatchAiPlayers(aiByTeam, data.players_doubtful, item.homeAbv, item.awayAbv);
-      _mergeBatchAiPlayers(aiByTeam, data.players_dtd_confirmed_out, item.homeAbv, item.awayAbv);
-      _mergeBatchAiPlayers(aiByTeam, data.players_limited, item.homeAbv, item.awayAbv);
-    }
-
+    const batchPayload = await _fetchAIInjuriesBatch(dateForWorker, gamesParam, manualRefresh);
+    const aiByTeam = batchPayload && batchPayload.by_team ? batchPayload.by_team : {};
     const totalPlayers = Object.values(aiByTeam).reduce(function(sum, arr) { return sum + arr.length; }, 0);
+    const gamesCount = batchPayload && Number.isFinite(batchPayload.games_count)
+      ? batchPayload.games_count
+      : batchMatches.length;
+    const source = batchPayload && batchPayload.source ? batchPayload.source : 'claude_web_search';
+
     store.set({
       'refreshSync.inFlight': false,
       'refreshSync.status': totalPlayers > 0 ? 'ok' : 'muted',
       'refreshSync.detail': totalPlayers > 0
-        ? `Claude injuries synchronisé (${limitedMatches.length} matchs, ${totalPlayers} joueurs)`
+        ? `Claude injuries synchronisé (${gamesCount} matchs, ${totalPlayers} joueurs)`
         : 'Claude injuries : aucun joueur exploitable sur cette fenêtre',
       'refreshSync.lastSuccessAt': new Date().toISOString(),
       'refreshSync.lastWindowKey': manualRefresh ? (windowKey || 'manual') : windowKey,
@@ -498,8 +490,8 @@ async function _loadAIInjuries(matches, date, store, options = {}) {
     Logger.info('AI_INJURIES_LOADED', {
       teams: Object.keys(aiByTeam).length,
       players: totalPlayers,
-      source: 'claude_web_search',
-      games: limitedMatches.length,
+      source,
+      games: gamesCount,
       mode: manualRefresh ? 'manual' : 'auto_window',
     });
 
@@ -534,50 +526,42 @@ function _getClaudeWindowKey(nowParis) {
   return null;
 }
 
-function _mergeBatchAiPlayers(target, players, homeAbv, awayAbv) {
-  if (!Array.isArray(players)) return;
-  players.forEach(function(p) {
-    if (!p || !p.name) return;
-    const teamAbv = String(p.team || '').toUpperCase() || null;
-    const espnTeamName = ABV_TO_ESPN_NAME[teamAbv] || ABV_TO_ESPN_NAME[homeAbv] || ABV_TO_ESPN_NAME[awayAbv];
-    if (!espnTeamName) return;
-    if (!target[espnTeamName]) target[espnTeamName] = [];
-    const exists = target[espnTeamName].some(function(existing) { return existing.name === p.name; });
-    if (exists) return;
-    target[espnTeamName].push({
-      name: p.name,
-      team: teamAbv,
-      status: p.status || 'Out',
-      ppg: p.ppg ?? null,
-      source: p.source || 'claude_web_search',
-      note: p.note || null,
-    });
-  });
-}
-
-async function _fetchAIInjuriesForMatch(dateForWorker, homeAbv, awayAbv) {
+async function _fetchAIInjuriesBatch(dateForWorker, gamesParam, manualRefresh) {
   try {
     const controller = new AbortController();
-    const timer = setTimeout(function() { controller.abort(); }, 30000);
+    const timer = setTimeout(function() { controller.abort(); }, 45000);
     const response = await fetch(
-      API_CONFIG.WORKER_BASE_URL + '/nba/ai-injuries' +
+      API_CONFIG.WORKER_BASE_URL + '/nba/ai-injuries-batch' +
       '?date=' + dateForWorker +
-      '&home=' + encodeURIComponent(homeAbv) +
-      '&away=' + encodeURIComponent(awayAbv),
+      '&mode=' + encodeURIComponent(manualRefresh ? 'manual' : 'auto') +
+      '&games=' + encodeURIComponent(gamesParam),
       { signal: controller.signal, headers: { 'Accept': 'application/json' } }
     );
     clearTimeout(timer);
     if (!response.ok) {
-      Logger.warn('AI_INJURIES_HTTP_ERROR', { game: awayAbv + '@' + homeAbv, status: response.status });
+      Logger.warn('AI_INJURIES_BATCH_HTTP_ERROR', { status: response.status, mode: manualRefresh ? 'manual' : 'auto' });
       return null;
     }
     const payload = await response.json();
-    return payload?.available ? payload.data : null;
+    if (!payload?.available || !payload?.data) {
+      Logger.info('AI_INJURIES_BATCH_SKIPPED', {
+        mode: manualRefresh ? 'manual' : 'auto',
+        source: payload?.source || null,
+        note: payload?.note || null,
+      });
+      return null;
+    }
+    return {
+      by_team: payload.data.by_team || {},
+      games_count: payload.games_count || 0,
+      source: payload.source || 'claude_web_search',
+    };
   } catch (err) {
-    Logger.warn('AI_INJURIES_FAILED', { game: awayAbv + '@' + homeAbv, message: err.message });
+    Logger.warn('AI_INJURIES_BATCH_FAILED', { message: err.message, mode: manualRefresh ? 'manual' : 'auto' });
     return null;
   }
 }
+
 
 /**
  * v3.7 : Fusionne le rapport ESPN+Tank01 avec les données IA.
@@ -733,39 +717,17 @@ function _mergeInjuryReports(espnReport, aiData) {
   });
 }
 
-async function _loadRecentForms(teamIds, season, existingForms = {}) {
+async function _loadRecentForms(teamIds, season) {
   const forms = {};
   const BATCH_SIZE  = 6;
   const BATCH_DELAY = 200;
-  const FRESH_TTL_MS = 2 * 60 * 60 * 1000;
 
-  const idsToFetch = [];
-
-  teamIds.forEach(function(bdlId) {
-    const cached = existingForms[bdlId];
-    const sameSeason = String(cached?.season ?? '') === String(season);
-    const fetchedAt = cached?.fetched_at ? new Date(cached.fetched_at).getTime() : 0;
-    const isFresh = fetchedAt && (Date.now() - fetchedAt) < FRESH_TTL_MS;
-    const hasMatches = Array.isArray(cached?.matches) && cached.matches.length > 0;
-
-    if (sameSeason && isFresh && hasMatches) {
-      forms[bdlId] = cached;
-    } else {
-      idsToFetch.push(bdlId);
-    }
-  });
-
-  if (idsToFetch.length === 0) {
-    Logger.info('RECENT_FORMS_REUSED', { teams: Object.keys(forms).length, fetched: 0 });
-    return forms;
-  }
-
-  for (let i = 0; i < idsToFetch.length; i += BATCH_SIZE) {
-    const batch = idsToFetch.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < teamIds.length; i += BATCH_SIZE) {
+    const batch = teamIds.slice(i, i + BATCH_SIZE);
 
     LoadingUI.update(
-      'Forme récente (' + Math.min(i + BATCH_SIZE, idsToFetch.length) + '/' + idsToFetch.length + ')...',
-      20 + Math.round((i / Math.max(idsToFetch.length, 1)) * 40)
+      'Forme récente (' + Math.min(i + BATCH_SIZE, teamIds.length) + '/' + teamIds.length + ')...',
+      20 + Math.round((i / teamIds.length) * 40)
     );
 
     await Promise.allSettled(
@@ -777,16 +739,10 @@ async function _loadRecentForms(teamIds, season, existingForms = {}) {
       })
     );
 
-    if (i + BATCH_SIZE < idsToFetch.length) {
+    if (i + BATCH_SIZE < teamIds.length) {
       await new Promise(function(r) { setTimeout(r, BATCH_DELAY); });
     }
   }
-
-  Logger.info('RECENT_FORMS_REUSED', {
-    teams: Object.keys(forms).length,
-    reused: teamIds.length - idsToFetch.length,
-    fetched: idsToFetch.length,
-  });
 
   return forms;
 }
