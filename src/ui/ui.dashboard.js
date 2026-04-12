@@ -293,10 +293,13 @@ async function _loadAndDisplay(container, storeInstance, date) {
 function _buildAnalysisIndex(analyses) {
   if (!analyses) return {};
   const index = {};
+  const matchIds = new Set();
   for (const analysis of Object.values(analyses)) {
-    if (analysis?.match_id) {
-      index[analysis.match_id] = analysis;
-    }
+    if (analysis?.match_id) matchIds.add(analysis.match_id);
+  }
+  for (const matchId of matchIds) {
+    const latest = _resolveLatestAnalysisForMatch(analyses, matchId);
+    if (latest) index[matchId] = latest;
   }
   return index;
 }
@@ -497,14 +500,14 @@ function _createMatchCard(match) {
     <!-- Paris recommandés -->
     <div id="recs-${match.id}" class="match-card__recs" style="display:none"></div>
 
-    <button class="btn btn--ghost match-card__cta" data-match-id="${match.id}">
+    <button class="btn btn--ghost match-card__cta" data-match-id="${match.id}" data-analysis-id="">
       → Analyser
     </button>
   `;
 
   card.querySelector('.match-card__cta').addEventListener('click', (e) => {
     e.stopPropagation();
-    router.navigate('match', { matchId: e.currentTarget.dataset.matchId });
+    router.navigate('match', { matchId: e.currentTarget.dataset.matchId, analysisId: e.currentTarget.dataset.analysisId || null });
   });
 
   return card;
@@ -528,6 +531,9 @@ function _updateMatchCard(list, matchId, analysis, match, ptState) {
   // Bordure carte
   const card = list.querySelector(`[data-match-id="${matchId}"]`);
   if (card) {
+    card.dataset.analysisId = analysis.analysis_id ?? '';
+    const cta = card.querySelector('.match-card__cta');
+    if (cta) cta.dataset.analysisId = analysis.analysis_id ?? '';
     const borderColors = {
       ANALYSER:    'var(--color-success)',
       EXPLORER:    'var(--color-warning)',
@@ -649,29 +655,25 @@ function _updateMatchCard(list, matchId, analysis, match, ptState) {
         ? (match?.home_team?.abbreviation ?? 'DOM')
         : (match?.away_team?.abbreviation ?? 'EXT');
 
-      const absImpact = Math.abs(analysis.variables_used?.absences_impact?.value ?? 0);
-      const divergenceFlag = analysis.market_divergence?.flag ?? 'none';
-      const downgrade = (absImpact >= 0.18 || divergenceFlag === 'high' || divergenceFlag === 'critical');
-
       let domLabel, color, bg;
-      if (absVal < 3) {
+      if (absVal < 2) {
         domLabel = 'Niveau équivalent';
         color    = 'var(--color-muted)';
         bg       = 'rgba(255,255,255,0.04)';
-      } else if (absVal < 6) {
+      } else if (absVal < 4) {
         domLabel = `Léger avantage ${domTeam}`;
         color    = 'var(--color-warning)';
         bg       = 'rgba(255,165,0,0.08)';
-      } else if (absVal < 9 || downgrade) {
-        domLabel = downgrade ? `Avantage prudent — ${domTeam}` : `Avantage net — ${domTeam}`;
+      } else if (absVal < 7) {
+        domLabel = `Avantage ${domTeam}`;
         color    = 'var(--color-warning)';
         bg       = 'rgba(255,165,0,0.08)';
-      } else if (absVal < 12 && !downgrade) {
+      } else if (absVal < 10) {
         domLabel = `Domination forte — ${domTeam}`;
         color    = netRating > 0 ? 'var(--color-success)' : 'var(--color-danger)';
         bg       = netRating > 0 ? 'rgba(72,199,142,0.10)' : 'rgba(241,70,104,0.10)';
       } else {
-        domLabel = downgrade ? `Lecture prudente — ${domTeam}` : `Mismatch total — ${domTeam}`;
+        domLabel = `Mismatch total — ${domTeam}`;
         color    = netRating > 0 ? 'var(--color-success)' : 'var(--color-danger)';
         bg       = netRating > 0 ? 'rgba(72,199,142,0.10)' : 'rgba(241,70,104,0.10)';
       }
@@ -864,7 +866,7 @@ function _renderBestOpportunity(container, matches, analysisIndex) {
   `;
 
   el.querySelector('#best-opp-card')?.addEventListener('click', () => {
-    router.navigate('match', { matchId: bestMatch.id });
+    router.navigate('match', { matchId: bestMatch.id, analysisId: analysisIndex[bestMatch.id]?.analysis_id ?? null });
   });
 }
 

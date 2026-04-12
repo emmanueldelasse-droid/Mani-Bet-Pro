@@ -20,11 +20,11 @@
  *   - renderBlocStats : stats équipes côte à côte + 10 derniers matchs W/L
  *     + tendance Over/Under + forme domicile/extérieur récente.
  *   - renderBlocAbsences : liste consolidée des joueurs absents avec ppg,
- *     statut consolidé sans contexte.
+ *     statut et contexte IA (team_context, market_signal).
  *   - renderBlocPourquoi remplacé par analyse décision chiffrée.
  *
  * AJOUTS v3.6 :
- *   - renderBlocPourquoi : aucun contexte affiché.
+ *   - renderBlocPourquoi : affiche team_context (forme récente, enjeu) et market_signal (mouvement ligne) depuis données IA.
  *
  * AJOUTS v3.5 :
  *   - renderBlocPourquoi : détails précis par signal en français simple.
@@ -75,6 +75,34 @@ const SIGNAL_LABELS = {
   'rest_days_diff':    'Jours de repos',
 };
 
+
+function _analysisTimestamp(analysis) {
+  if (!analysis) return 0;
+  const raw = analysis.updated_at ?? analysis.computed_at ?? analysis.saved_at ?? null;
+  const ts = raw ? Date.parse(raw) : NaN;
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function _resolveLatestAnalysisForMatch(analyses, matchId, preferredAnalysisId = null) {
+  if (!analyses || !matchId) return null;
+
+  if (preferredAnalysisId && analyses[preferredAnalysisId]?.match_id === matchId) {
+    return analyses[preferredAnalysisId];
+  }
+
+  let best = null;
+  let bestTs = -1;
+  for (const analysis of Object.values(analyses)) {
+    if (!analysis || analysis.match_id !== matchId) continue;
+    const ts = _analysisTimestamp(analysis);
+    if (!best || ts > bestTs || (ts === bestTs && String(analysis.analysis_id ?? '') > String(best.analysis_id ?? ''))) {
+      best = analysis;
+      bestTs = ts;
+    }
+  }
+  return best;
+}
+
 function _simplifyLabel(label, variable) {
   return SIGNAL_LABELS[variable] ?? label ?? variable;
 }
@@ -89,7 +117,8 @@ export async function render(container, storeInstance) {
   if (!match) { renderNoMatch(container); return { destroy() {} }; }
 
   const analyses = storeInstance.get('analyses') ?? {};
-  const analysis = Object.values(analyses).find(a => a.match_id === matchId) ?? null;
+  const preferredAnalysisId = storeInstance.get('activeAnalysisId');
+  const analysis = _resolveLatestAnalysisForMatch(analyses, matchId, preferredAnalysisId);
 
   container.innerHTML = renderShell(match, analysis, storeInstance);
   bindEvents(container, storeInstance, match, analysis);
@@ -141,6 +170,7 @@ function renderShell(match, analysis, storeInstance) {
       <div id="team-detail-container">${renderBlocTeamDetailSkeleton()}</div>
       ${renderBlocFiabilite(analysis)}
       ${renderBlocSources(analysis)}
+      ${renderBlocIA(analysis, match)}
     </div>
   `;
 }
@@ -319,6 +349,12 @@ function renderBlocPourquoi(analysis, match, storeInstance) {
   const homeName    = match?.home_team?.name ?? 'Domicile';
   const awayName    = match?.away_team?.name ?? 'Extérieur';
   const vars        = analysis?.variables_used ?? {};
+  // team_context et market_signal depuis le rapport injuries enrichi IA (stocké dans le store)
+  const injReport   = storeInstance?.get('injuryReport') ?? null;
+  const teamCtx     = injReport?.team_context ?? null;
+  const marketSig   = injReport?.market_signal ?? null;
+  const homeCtx     = teamCtx?.[homeName] ?? null;
+  const awayCtx     = teamCtx?.[awayName] ?? null;
 
   return `
     <div class="card match-detail__bloc">
@@ -343,6 +379,19 @@ function renderBlocPourquoi(analysis, match, storeInstance) {
               </div>`;
           }).join('')}
         </div>`}
+      ${homeCtx || awayCtx ? `
+        <div style="margin-top:10px;display:grid;gap:8px">
+          ${homeCtx ? `<div style="font-size:12px;padding:8px 12px;background:rgba(255,165,0,0.06);border-left:3px solid var(--color-warning);border-radius:6px;color:var(--color-muted)">
+            <strong style="color:var(--color-text)">${homeName}</strong> — ${homeCtx}
+          </div>` : ''}
+          ${awayCtx ? `<div style="font-size:12px;padding:8px 12px;background:rgba(255,165,0,0.06);border-left:3px solid var(--color-warning);border-radius:6px;color:var(--color-muted)">
+            <strong style="color:var(--color-text)">${awayName}</strong> — ${awayCtx}
+          </div>` : ''}
+        </div>` : ''}
+      ${marketSig?.movement ? `
+        <div style="margin-top:8px;font-size:12px;padding:8px 12px;background:rgba(99,179,237,0.06);border-left:3px solid var(--color-signal);border-radius:6px;color:var(--color-muted)">
+          📈 <strong style="color:var(--color-signal)">Mouvement de ligne</strong> — ${marketSig.detail ?? ''}
+        </div>` : ''}
     </div>`;
 }
 
@@ -732,13 +781,18 @@ function renderBlocStats(analysis, match, storeInstance) {
 // ── BLOC ABSENCES & CONTEXTE ──────────────────────────────────────────────
 
 /**
- * v3.7 : Joueurs absents consolidés + contexte.
+ * v3.7 : Joueurs absents consolidés + contexte IA.
  */
 function renderBlocAbsences(analysis, match, storeInstance) {
   const homeInj   = match?.home_injuries ?? [];
   const awayInj   = match?.away_injuries ?? [];
   const homeName  = match?.home_team?.name ?? 'DOM';
   const awayName  = match?.away_team?.name ?? 'EXT';
+  const injReport = storeInstance?.get('injuryReport') ?? null;
+  const teamCtx   = injReport?.team_context ?? {};
+  const marketSig = injReport?.market_signal ?? null;
+  const homeCtx   = teamCtx?.[homeName] ?? null;
+  const awayCtx   = teamCtx?.[awayName] ?? null;
 
   const STATUS_LABELS = { 'Out': 'Absent', 'Doubtful': 'Incertain', 'Day-To-Day': 'DTD', 'Questionable': 'Douteux', 'Limited': 'Limité' };
   const STATUS_COLORS = { 'Out': '#ef4444', 'Doubtful': '#f97316', 'Day-To-Day': '#f59e0b', 'Questionable': '#f59e0b', 'Limited': '#3b82f6' };
@@ -764,8 +818,9 @@ function renderBlocAbsences(analysis, match, storeInstance) {
   };
 
   const hasInjuries = homeInj.length > 0 || awayInj.length > 0;
+  const hasContext  = homeCtx || awayCtx || marketSig;
 
-  if (!hasInjuries) return '';
+  if (!hasInjuries && !hasContext) return '';
 
   return `
     <div class="card match-detail__bloc">
@@ -785,6 +840,9 @@ function renderBlocAbsences(analysis, match, storeInstance) {
           </div>
         </div>` : ''}
 
+      ${homeCtx ? `<div style="font-size:12px;padding:8px 12px;background:rgba(255,165,0,0.06);border-left:3px solid var(--color-warning);border-radius:6px;margin-bottom:6px;color:var(--color-muted)"><strong style="color:var(--color-text)">${homeName}</strong> — ${homeCtx}</div>` : ''}
+      ${awayCtx ? `<div style="font-size:12px;padding:8px 12px;background:rgba(255,165,0,0.06);border-left:3px solid var(--color-warning);border-radius:6px;margin-bottom:6px;color:var(--color-muted)"><strong style="color:var(--color-text)">${awayName}</strong> — ${awayCtx}</div>` : ''}
+      ${marketSig?.movement ? `<div style="font-size:12px;padding:8px 12px;background:rgba(99,179,237,0.06);border-left:3px solid var(--color-signal);border-radius:6px;color:var(--color-muted)">📈 <strong style="color:var(--color-signal)">Mouvement de ligne</strong> — ${marketSig.detail ?? ''}</div>` : ''}
     </div>`;
 }
 
@@ -852,6 +910,30 @@ function renderBlocSources(analysis) {
               }).join('')}
             </div>`}
         </div>
+      </div>
+    </div>`;
+}
+
+// ── BLOC IA ───────────────────────────────────────────────────────────────
+
+function renderBlocIA(analysis, match) {
+  const canCallAI = analysis && analysis.confidence_level !== null && analysis.explanation_context;
+
+  return `
+    <div class="card match-detail__bloc">
+      <div class="bloc-header" style="margin-bottom:var(--space-3)">
+        <span class="bloc-header__title">Analyse IA</span>
+      </div>
+      <div id="ai-content">
+        ${!canCallAI ? `<div class="text-muted" style="font-size:12px">Analyse non disponible.</div>` : `
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:var(--space-3)">
+            <button class="btn btn--primary" data-ai-task="EXPLAIN" id="btn-ai-explain">💬 Expliquer ce match</button>
+            <button class="btn btn--ghost btn--sm" data-ai-task="AUDIT">🔍 Vérifier la cohérence</button>
+            <button class="btn btn--ghost btn--sm" data-ai-task="DETECT_INCONSISTENCY">⚡ Anomalies</button>
+          </div>
+          <div id="ai-response" class="text-muted" style="font-size:13px;line-height:1.8;min-height:40px">
+            Clique sur "Expliquer ce match" pour une analyse en langage simple.
+          </div>`}
       </div>
     </div>`;
 }
@@ -942,7 +1024,7 @@ function bindEvents(container, storeInstance, match, analysis) {
     const SIDE_MAP  = { HOME: match.home_team?.name, AWAY: match.away_team?.name, OVER: 'Over', UNDER: 'Under' };
     const sideLabel = SIDE_MAP[best.side] ?? best.side;
     const odds      = _americanToDecimal(best.odds_line);
-    const text = `🏀 ${match.home_team?.name} vs ${match.away_team?.name}\n✅ Pari : ${sideLabel} @ ${odds}\n📊 Avantage : +${best.edge}%\nMani Bet Pro`;
+    const text = `🏀 ${match.home_team?.name} vs ${match.away_team?.name}\n✅ Pari : ${sideLabel} @ ${odds}\n📊 Avantage : +${best.edge}%\n🤖 Mani Bet Pro`;
     navigator.clipboard?.writeText(text).then(() => {
       const btn = container.querySelector('#share-btn');
       if (btn) { btn.textContent = '✓ Copié !'; setTimeout(() => btn.textContent = '📤 Partager', 2000); }
@@ -964,6 +1046,65 @@ function bindEvents(container, storeInstance, match, analysis) {
     btn.addEventListener('click', () => _openBetModal(btn, match, analysis, storeInstance));
   });
 
+  if (analysis?.explanation_context) {
+    container.querySelectorAll('[data-ai-task]').forEach(btn => {
+      btn.addEventListener('click', () => triggerAIExplanation(container, analysis, match, btn.dataset.aiTask));
+    });
+  }
+}
+
+// ── APPEL IA ─────────────────────────────────────────────────────────────
+
+// Cache mémoire session pour éviter les appels Claude répétés sur le même match
+// Clé : match.id + task — stable entre clics dans la même session
+const _aiSessionCache = new Map();
+
+async function triggerAIExplanation(container, analysis, match, task) {
+  const responseEl = container.querySelector('#ai-response');
+  if (!responseEl) return;
+
+  // Vérifier le cache session — évite appel Claude si déjà demandé ce soir
+  const _cacheKey = `${match?.id ?? 'unknown'}_${task}`;
+  if (_aiSessionCache.has(_cacheKey)) {
+    responseEl.innerHTML = _aiSessionCache.get(_cacheKey);
+    return;
+  }
+
+  responseEl.innerHTML = '<span class="text-muted">Analyse en cours…</span>';
+
+  const TASK_PROMPTS = {
+    EXPLAIN: `Tu es un analyste sportif NBA. Réponds en 3-4 phrases courtes, sans titres, sans gras, sans listes. N'invente aucun chiffre. Utilise uniquement les valeurs du contexte. Phrase 1 : quelle équipe est favorisée et pourquoi. Phrase 2 : le signal principal en termes simples. Phrase 3 : si un pari recommandé est fourni, confirme ou nuance-le — sinon dis explicitement qu'aucune valeur n'a été détectée et qu'il vaut mieux passer. Phrase 4 : une limite courte. Max 80 mots.`,
+    AUDIT: `Tu es un analyste sportif NBA. En 2-3 phrases simples sans titres ni listes : dis si les signaux sont cohérents entre eux. Si contradiction, explique laquelle. Uniquement les données fournies. Max 60 mots.`,
+    DETECT_INCONSISTENCY: `Tu es un analyste sportif NBA. En 2 phrases simples sans titres ni listes : dis s'il y a une anomalie dans les données. Si aucune anomalie, dis-le clairement. Max 50 mots.`,
+  };
+
+  const home   = match.home_team?.name ?? '—';
+  const away   = match.away_team?.name ?? '—';
+  const score  = analysis.predictive_score !== null ? Math.round(analysis.predictive_score * 100) : null;
+  const favori = score !== null ? (score > 50 ? `${home} (${score}%)` : score < 50 ? `${away} (${100 - score}%)` : 'Équilibré (50%)') : 'Non déterminé';
+  const best   = analysis.betting_recommendations?.best;
+  const parisInfo = best ? `Pari recommandé : ${best.side} à cote ${best.odds_decimal ?? '—'}, edge +${best.edge}%` : 'Aucun pari recommandé — aucune valeur détectée sur ce match.';
+
+  const userMessage = `N'INVENTE AUCUN CHIFFRE. Utilise uniquement les valeurs ci-dessous.\nMatch : ${home} vs ${away}\nFavori : ${favori}\nScore prédictif : ${score ?? 'non calculé'}%\nRobustesse : ${analysis.robustness_score !== null ? Math.round(analysis.robustness_score * 100) + '%' : 'non calculée'}\nQualité données : ${analysis.data_quality_score !== null ? Math.round(analysis.data_quality_score * 100) + '%' : 'non calculée'}\n${parisInfo}\nSignaux :\n${(analysis.key_signals ?? []).slice(0, 3).map(s => `- ${_simplifyLabel(s.label, s.variable)} : ${s.direction === 'POSITIVE' ? 'avantage domicile' : 'avantage extérieur'}`).join('\n')}\nVariables manquantes : ${(analysis.missing_critical ?? []).join(', ') || 'aucune'}`.trim();
+
+  try {
+    const response = await fetch(`${WORKER_URL}/ai/messages`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 600, system: TASK_PROMPTS[task] ?? TASK_PROMPTS.EXPLAIN, messages: [{ role: 'user', content: userMessage }] }),
+    });
+    if (!response.ok) throw new Error(`Worker HTTP ${response.status}`);
+    const data = await response.json();
+    const text = data.content?.map(b => b.type === 'text' ? b.text : '').join('\n').trim();
+    if (!text) throw new Error('Réponse vide');
+    const clean = text.replace(/^#{1,4}\s.+$/gm, '').replace(/\*\*(.+?)\*\*/gs, '$1').replace(/\*(.+?)\*/gs, '$1').replace(/^[-•]\s/gm, '').trim();
+    const htmlResult = `<div style="line-height:1.8;font-size:13px">${escapeHtml(clean)}</div><div class="text-muted" style="font-size:10px;margin-top:var(--space-2)">Source : Claude Sonnet · Basé uniquement sur les données du moteur</div>`;
+    responseEl.innerHTML = htmlResult;
+    // Stocker en cache session — même clic = 0 appel Claude
+    _aiSessionCache.set(_cacheKey, htmlResult);
+  } catch (err) {
+    Logger.error('AI_EXPLANATION_ERROR', { message: err.message });
+    responseEl.innerHTML = `<div class="text-muted" style="font-size:12px">Erreur : ${escapeHtml(err.message)}</div>`;
+  }
 }
 
 // ── MODAL PAPER TRADING ──────────────────────────────────────────────────
@@ -1151,7 +1292,9 @@ async function _loadAndRenderTeamDetail(container, match, storeInstance) {
     Logger.warn('TEAM_DETAIL_RENDER_FAILED', { message: err.message });
     // Fallback sur les blocs v3.7 existants
     const injReport = storeInstance?.get('injuryReport') ?? null;
-    const analysis  = Object.values(storeInstance?.get('analyses') ?? {}).find(a => a.match_id === match.id) ?? null;
+    const analyses = storeInstance?.get('analyses') ?? {};
+    const preferredAnalysisId = storeInstance?.get('activeAnalysisId') ?? null;
+    const analysis  = _resolveLatestAnalysisForMatch(analyses, match.id, preferredAnalysisId);
     detailEl.innerHTML =
       renderBlocStats(analysis, match, storeInstance) +
       renderBlocAbsences(analysis, match, storeInstance);
