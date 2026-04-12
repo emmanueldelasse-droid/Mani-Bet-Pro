@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — data.orchestrator.js v3.10.1
+ * MANI BET PRO — data.orchestrator.js v3.10.2
  *
  * AJOUTS v3.10.1 :
  *   - Suppression _enrichInjuriesWithAI() (zombie v3.6) — élimine risque N appels Claude/soir.
@@ -115,6 +115,20 @@ function _getActiveRefreshWindow(date) {
   }
   const hh = String(Math.floor(active / 60)).padStart(2, '0');
   return { isToday: true, windowKey: date + '@' + hh, timeLabel: nowInfo.timeLabel };
+}
+
+
+function _hasPersistedDashboardSnapshot(date, store) {
+  const cachedAnalyses = store.get('analyses') ?? {};
+  const cachedMatches  = store.get('matches') ?? {};
+  const cachedDate     = store.get('dashboardFilters')?.selectedDate;
+  const cacheAt        = store.get('dashboardCacheAt') ?? null;
+  return (
+    cachedDate === date &&
+    !!cacheAt &&
+    Object.keys(cachedAnalyses).length > 0 &&
+    Object.keys(cachedMatches).length > 0
+  );
 }
 
 // Mapping nom équipe ESPN vers ID BallDontLie (officiel NBA 1-30)
@@ -240,7 +254,13 @@ export class DataOrchestrator {
       const teamIds = _extractTeamIds(matches);
       const refreshWindow = _getActiveRefreshWindow(date);
       const lastWindowKey = store.get('refreshSync.lastWindowKey') ?? null;
-      const shouldRunHeavyRefresh = !refreshWindow.isToday || !refreshWindow.windowKey || refreshWindow.windowKey !== lastWindowKey;
+      const hasSnapshotForDate = _hasPersistedDashboardSnapshot(date, store);
+      const shouldRunHeavyRefresh = (
+        !hasSnapshotForDate ||
+        !refreshWindow.isToday ||
+        !refreshWindow.windowKey ||
+        refreshWindow.windowKey !== lastWindowKey
+      );
 
       // Étape 2a : données Tank01 / ESPN / Odds — toujours d'abord
       const [injuryReport, recentForms, oddsComparison, advancedStats] = await Promise.all([
@@ -279,6 +299,7 @@ export class DataOrchestrator {
           Logger.warn('AI_INJURIES_REFRESH_FAILED', { message: err.message });
         }
       } else {
+        refreshStatus = 'muted';
         refreshDetail = 'Cache entre fenêtres';
       }
 
@@ -298,12 +319,16 @@ export class DataOrchestrator {
         store
       );
 
-      store.set({
+      const syncUpdates = {
         'refreshSync.status': refreshStatus,
         'refreshSync.detail': refreshDetail,
-        'refreshSync.lastSuccessAt': _getParisNowInfo().timeLabel,
-        'refreshSync.lastWindowKey': refreshWindow.windowKey,
-      });
+      };
+      if (shouldRunHeavyRefresh) {
+        syncUpdates['dashboardCacheAt'] = new Date().toISOString();
+        syncUpdates['refreshSync.lastSuccessAt'] = _getParisNowInfo().timeLabel;
+        syncUpdates['refreshSync.lastWindowKey'] = refreshWindow.windowKey;
+      }
+      store.set(syncUpdates);
 
       LoadingUI.update('Prêt', 100);
       LoadingUI.hide();
@@ -319,11 +344,7 @@ export class DataOrchestrator {
 
 
   static shouldServeCachedDashboard(date, store) {
-    const cachedAnalyses = store.get('analyses') ?? {};
-    const cachedMatches  = store.get('matches') ?? {};
-    const cachedDate     = store.get('dashboardFilters')?.selectedDate;
-    const hasCache = cachedDate === date && Object.keys(cachedAnalyses).length > 0 && Object.keys(cachedMatches).length > 0;
-    if (!hasCache) return false;
+    if (!_hasPersistedDashboardSnapshot(date, store)) return false;
 
     const refreshWindow = _getActiveRefreshWindow(date);
     const lastWindowKey = store.get('refreshSync.lastWindowKey') ?? null;
