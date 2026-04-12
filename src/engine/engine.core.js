@@ -114,7 +114,7 @@ export class EngineCore {
       cappedScore,
       robustness.score,
       dataQuality.score,
-      engineResult.confidence_penalty?.score ?? 0,
+      engineResult.confidence_penalty ?? 0
     );
 
     const noOdds  = !rawData?.odds && !rawData?.market_odds;
@@ -164,7 +164,7 @@ export class EngineCore {
       score_method:            engineResult.score_method ?? null,
       star_absence_modifier:   engineResult.star_absence_modifier ?? null,
       market_divergence:       engineResult.market_divergence ?? null,
-      confidence_penalty:      engineResult.confidence_penalty ?? null,
+      confidence_penalty:      engineResult.confidence_penalty ?? 0,
       debug:                   engineResult.debug ?? null,
       betting_recommendations: engineResult.betting_recommendations ?? null,
       // v2.3 : distingue "pas d'edge" de "pas de cotes disponibles"
@@ -286,7 +286,7 @@ export class EngineCore {
   /**
    * Seuils non calibrés — placeholders à ajuster après 50+ paris.
    */
-  static _computeConfidenceLevel(predictive, robustness, dataQuality) {
+  static _computeConfidenceLevel(predictive, robustness, dataQuality, confidencePenalty = 0) {
     if (predictive === null || robustness === null || dataQuality === null) {
       return 'INCONCLUSIVE';
     }
@@ -295,9 +295,10 @@ export class EngineCore {
     const MEDIUM_THRESHOLD = 0.50;  // Non calibré
 
     const minScore = Math.min(robustness, dataQuality);
+    const adjustedScore = Math.max(0, Math.min(1, minScore - (confidencePenalty ?? 0)));
 
-    if (minScore >= HIGH_THRESHOLD)   return 'HIGH';
-    if (minScore >= MEDIUM_THRESHOLD) return 'MEDIUM';
+    if (adjustedScore >= HIGH_THRESHOLD)   return 'HIGH';
+    if (adjustedScore >= MEDIUM_THRESHOLD) return 'MEDIUM';
     return 'LOW';
   }
 

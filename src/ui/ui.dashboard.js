@@ -119,30 +119,39 @@ function _injectStyles() {
  * @returns {number} timeoutId — pour nettoyage via clearTimeout
  */
 function _scheduleNextRefresh(container, storeInstance) {
-  const REFRESH_WINDOWS_PARIS = [12 * 60, 23 * 60];
-  const now = new Date();
-  const parts = new Intl.DateTimeFormat('fr-CA', {
-    timeZone: 'Europe/Paris',
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', hour12: false,
-  }).formatToParts(now);
-  const get = function(type) { return parts.find(function(p) { return p.type === type; })?.value; };
-  const currentMinutes = (parseInt(get('hour') || '0', 10) * 60) + parseInt(get('minute') || '0', 10);
+  const REFRESH_HOURS_PARIS = [23 * 60 + 30, 7 * 60]; // 23h30 et 07h00 en minutes
 
+  const now       = new Date();
+  // Convertir en heure de Paris (UTC+2 en été, UTC+1 en hiver)
+  const utcOffset = now.getTimezoneOffset(); // en minutes, négatif pour Paris
+  const parisOffset = -120; // UTC+2 (CEST) — à ajuster si UTC+1 en hiver
+  const parisMinutes = (now.getUTCHours() * 60 + now.getUTCMinutes()) + (-parisOffset);
+  const currentMinutes = parisMinutes % (24 * 60);
+
+  // Trouver le prochain créneau
   let minDelay = Infinity;
-  REFRESH_WINDOWS_PARIS.forEach(function(targetMinutes) {
+  for (const targetMinutes of REFRESH_HOURS_PARIS) {
     let delay = targetMinutes - currentMinutes;
-    if (delay <= 0) delay += 24 * 60;
+    if (delay <= 0) delay += 24 * 60; // demain
     if (delay < minDelay) minDelay = delay;
-  });
+  }
 
   const delayMs = minDelay * 60 * 1000;
-  Logger.info('AUTO_REFRESH_SCHEDULED', { next_in_min: minDelay });
+  Logger.info('AUTO_REFRESH_SCHEDULED', {
+    next_in_min: minDelay,
+    next_at_paris: (() => {
+      const d = new Date(Date.now() + delayMs);
+      return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' });
+    })(),
+  });
 
   return setTimeout(async function() {
     Logger.info('AUTO_REFRESH_TRIGGERED', {});
+    // Invalider le cache pour forcer un rechargement complet
+    storeInstance.set({ dashboardCacheAt: 0 });
     const date = storeInstance.get('dashboardFilters')?.selectedDate ?? _getTodayDate();
     await _loadAndDisplay(container, storeInstance, date);
+    // Planifier le prochain refresh
     _scheduleNextRefresh(container, storeInstance);
   }, delayMs);
 }
@@ -165,13 +174,12 @@ export async function render(container, storeInstance) {
   const refreshBtn = container.querySelector('#refresh-btn');
   if (refreshBtn) {
     refreshBtn.addEventListener('click', async function() {
-      refreshBtn.textContent = '✓ Cache';
+      refreshBtn.textContent = '⟳ Actualisation...';
       refreshBtn.disabled = true;
+      storeInstance.set({ dashboardCacheAt: 0 });
       await _loadAndDisplay(container, storeInstance, selectedDate);
-      setTimeout(function() {
-        refreshBtn.textContent = '⟳ Vérifier';
-        refreshBtn.disabled = false;
-      }, 600);
+      refreshBtn.textContent = '⟳ Actualiser';
+      refreshBtn.disabled = false;
     });
   }
 
@@ -197,13 +205,15 @@ async function _loadAndDisplay(container, storeInstance, date) {
     const cachedMatches  = storeInstance.get('matches')  ?? {};
     const cachedDate     = storeInstance.get('dashboardFilters')?.selectedDate;
 
-    const shouldServeCache = DataOrchestrator.shouldServeCachedDashboard(date, storeInstance);
+    const cachedAt  = storeInstance.get('dashboardCacheAt') ?? 0;
+    const cacheAge  = Date.now() - cachedAt;
+    const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
     if (
       cachedDate === date &&
       Object.keys(cachedAnalyses).length > 0 &&
       Object.keys(cachedMatches).length > 0 &&
-      shouldServeCache
+      cacheAge < CACHE_TTL
     ) {
       const matchList     = Object.values(cachedMatches).filter(m => m.sport === 'NBA');
       const analysisIndex = _buildAnalysisIndex(cachedAnalyses);
@@ -229,7 +239,6 @@ async function _loadAndDisplay(container, storeInstance, date) {
       const rejected   = insuffisant + rejete;
       _updateSummary(container, matchList.length, conclusive, rejected);
       _renderBestOpportunity(container, matchList, analysisIndex);
-      _renderSyncStatus(container, storeInstance);
       LoadingUI.hide();
       return;
     }
@@ -270,31 +279,10 @@ async function _loadAndDisplay(container, storeInstance, date) {
     const rejected   = insuffisant + rejete;
     _updateSummary(container, result.matches.length, conclusive, rejected);
     _renderBestOpportunity(container, result.matches, analysisIndex);
-    _renderSyncStatus(container, storeInstance);
 
   } catch (err) {
     Logger.error('DASHBOARD_RENDER_ERROR', { message: err.message });
-    storeInstance.set({
-      'refreshSync.status': 'error',
-      'refreshSync.detail': 'Dernière version conservée',
-    });
-    const cachedMatches = storeInstance.get('matches') ?? {};
-    const cachedAnalyses = storeInstance.get('analyses') ?? {};
-    const cachedDate = storeInstance.get('dashboardFilters')?.selectedDate;
-    if (cachedDate === date && Object.keys(cachedMatches).length > 0 && Object.keys(cachedAnalyses).length > 0) {
-      const matchList = Object.values(cachedMatches).filter(function(m) { return m.sport === 'NBA'; });
-      const analysisIndex = _buildAnalysisIndex(cachedAnalyses);
-      const ptState = _loadPaperState();
-      _renderMatchCards(list, matchList, storeInstance);
-      matchList.forEach(function(match) {
-        const analysis = analysisIndex[match.id];
-        if (analysis) _updateMatchCard(list, match.id, analysis, match, ptState);
-      });
-      _renderSyncStatus(container, storeInstance);
-    } else {
-      _renderError(list);
-      _renderSyncStatus(container, storeInstance);
-    }
+    _renderError(list);
   } finally {
     LoadingUI.hide();
   }
@@ -341,9 +329,8 @@ function _renderShell(selectedDate) {
           <div class="page-header__eyebrow">Mani Bet Pro</div>
           <div class="page-header__title">Dashboard</div>
           <div class="page-header__sub">${displayDate}</div>
-          <div id="sync-status" style="margin-top:6px;font-size:11px;color:var(--color-muted)">● Dernière version en cache affichée</div>
         </div>
-        <button id="refresh-btn" style="font-size:11px;padding:5px 10px;border-radius:6px;border:1px solid var(--color-border);background:var(--color-bg);color:var(--color-muted);cursor:pointer;margin-top:4px;flex-shrink:0">⟳ Vérifier</button>
+        <button id="refresh-btn" style="font-size:11px;padding:5px 10px;border-radius:6px;border:1px solid var(--color-border);background:var(--color-bg);color:var(--color-muted);cursor:pointer;margin-top:4px;flex-shrink:0">⟳ Actualiser</button>
       </div>
 
       <div class="date-selector filter-chips" id="date-selector">
@@ -662,25 +649,29 @@ function _updateMatchCard(list, matchId, analysis, match, ptState) {
         ? (match?.home_team?.abbreviation ?? 'DOM')
         : (match?.away_team?.abbreviation ?? 'EXT');
 
+      const absImpact = Math.abs(analysis.variables_used?.absences_impact?.value ?? 0);
+      const divergenceFlag = analysis.market_divergence?.flag ?? 'none';
+      const downgrade = (absImpact >= 0.18 || divergenceFlag === 'high' || divergenceFlag === 'critical');
+
       let domLabel, color, bg;
-      if (absVal < 2) {
+      if (absVal < 3) {
         domLabel = 'Niveau équivalent';
         color    = 'var(--color-muted)';
         bg       = 'rgba(255,255,255,0.04)';
-      } else if (absVal < 4) {
+      } else if (absVal < 6) {
         domLabel = `Léger avantage ${domTeam}`;
         color    = 'var(--color-warning)';
         bg       = 'rgba(255,165,0,0.08)';
-      } else if (absVal < 7) {
-        domLabel = `Avantage ${domTeam}`;
+      } else if (absVal < 9 || downgrade) {
+        domLabel = downgrade ? `Avantage prudent — ${domTeam}` : `Avantage net — ${domTeam}`;
         color    = 'var(--color-warning)';
         bg       = 'rgba(255,165,0,0.08)';
-      } else if (absVal < 10) {
+      } else if (absVal < 12 && !downgrade) {
         domLabel = `Domination forte — ${domTeam}`;
         color    = netRating > 0 ? 'var(--color-success)' : 'var(--color-danger)';
         bg       = netRating > 0 ? 'rgba(72,199,142,0.10)' : 'rgba(241,70,104,0.10)';
       } else {
-        domLabel = `Mismatch total — ${domTeam}`;
+        domLabel = downgrade ? `Lecture prudente — ${domTeam}` : `Mismatch total — ${domTeam}`;
         color    = netRating > 0 ? 'var(--color-success)' : 'var(--color-danger)';
         bg       = netRating > 0 ? 'rgba(72,199,142,0.10)' : 'rgba(241,70,104,0.10)';
       }
@@ -810,22 +801,6 @@ function _updateSummary(container, total, conclusive, rejected) {
   if (t) t.textContent = total;
   if (c) c.textContent = conclusive;
   if (r) r.textContent = rejected;
-}
-
-
-function _renderSyncStatus(container, storeInstance) {
-  const el = container.querySelector('#sync-status');
-  if (!el) return;
-  const banner = DataOrchestrator.getRefreshBanner(storeInstance);
-  const color = banner.status === 'success'
-    ? 'var(--color-success)'
-    : banner.status === 'partial'
-      ? 'var(--color-warning)'
-      : banner.status === 'error'
-        ? 'var(--color-danger)'
-        : 'var(--color-muted)';
-  el.textContent = banner.text;
-  el.style.color = color;
 }
 
 // ── MEILLEURE OPPORTUNITÉ ─────────────────────────────────────────────────

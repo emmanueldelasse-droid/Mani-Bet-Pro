@@ -72,658 +72,132 @@ const KELLY_MAX_PCT  = 0.05;
 
 // Modificateur star absente — v5.9
 const STAR_PPG_THRESHOLD = 20;   // seuil star (ppg saison)
-const STAR_FACTOR        = 1.4;  // amplificateur impact star (renforcé match-day)
-const STAR_MAX_REDUCTION = 0.30; // plafond réduction score (-30% max)
-const STAR_TEAM_PPG_FALLBACK = 112; // ppg équipe si non disponible
+const STAR_FACTOR        = 1.2;  // amplificateur impact star (à calibrer post-50 paris)
+const STAR_MAX_REDUCTION = 0.20; // plafond réduction score (-20% max)
+const STAR_TEAM_PPG_FALLBACK = 115; // ppg équipe si non disponible
 
 export class EngineNBA {
 
   static compute(matchData, customWeights = null) {
-    const weights = customWeights ?? CONFIG.default_weights;
+    const baseWeights = customWeights ?? CONFIG.default_weights;
 
     const variables = this._extractVariables(matchData);
     const { missing, missingCritical } = this._assessMissing(variables);
 
-    const uncalibrated = Object.entries(weights)
+    const uncalibrated = Object.entries(baseWeights)
       .filter(([, v]) => v === null)
       .map(([k]) => k);
 
     let score = null, signals = [], volatility = null, scoreMethod = null;
-    let weightsUsed = { ...weights };
-    let scoreDebug = null;
+    let effectiveWeights = { ...baseWeights };
+    let structureMultiplier = 1;
+    let starLineupAdjustment = null;
+    let marketDivergence = {
+      home_implied: null,
+      away_implied: null,
+      home_diff_pts: null,
+      away_diff_pts: null,
+      max_diff_pts: null,
+      flag: 'none',
+    };
+    let confidencePenalty = 0;
 
-    if (uncalibrated.length === Object.keys(weights).length) {
+    if (uncalibrated.length === Object.keys(baseWeights).length) {
       scoreMethod = 'UNCALIBRATED';
     } else if (missingCritical.length > 0) {
       scoreMethod = 'MISSING_CRITICAL';
     } else {
-      const computed = this._computeScore(variables, weights);
+      const weightedContext = this._buildEffectiveWeights(
+        baseWeights,
+        variables,
+        matchData?.home_injuries ?? null,
+        matchData?.away_injuries ?? null
+      );
+      effectiveWeights = weightedContext.weights;
+      structureMultiplier = weightedContext.structureMultiplier;
+
+      const computed = this._computeScore(variables, effectiveWeights);
       score       = computed.score;
       signals     = computed.signals;
       volatility  = computed.volatility;
-      weightsUsed = computed.weights_used ?? { ...weights };
-      scoreDebug  = computed.debug ?? null;
-      scoreMethod = computed.score_method ?? 'WEIGHTED_SUM';
-    }
+      scoreMethod = structureMultiplier < 1 ? 'WEIGHTED_SUM+LINEUP_DAMPING' : 'WEIGHTED_SUM';
 
-    let starAbsenceModifier = null;
-    if (score !== null) {
-      starAbsenceModifier = this._computeStarAbsenceModifier(
-        matchData?.home_injuries ?? null,
-        matchData?.away_injuries ?? null,
-        matchData?.home_season_stats?.avg_pts ?? null,
-        matchData?.away_season_stats?.avg_pts ?? null,
-      );
-      if (starAbsenceModifier !== null && starAbsenceModifier !== 1.0) {
-        score = Math.max(0, Math.min(1, Math.round(score * starAbsenceModifier * 1000) / 1000));
-        scoreMethod = 'WEIGHTED_SUM+STAR_MODIFIER';
+      if (score !== null) {
+        starLineupAdjustment = this._computeStarLineupAdjustment(
+          matchData?.home_injuries ?? null,
+          matchData?.away_injuries ?? null
+        );
+        if (starLineupAdjustment?.delta) {
+          score = Math.max(0, Math.min(1, Math.round((score + starLineupAdjustment.delta) * 1000) / 1000));
+          scoreMethod += '+STAR_LINEUP';
+        }
+
+        marketDivergence = this._computeMarketDivergence(score, matchData);
+        confidencePenalty = this._computeConfidencePenalty(
+          matchData?.home_injuries ?? null,
+          matchData?.away_injuries ?? null,
+          marketDivergence
+        );
       }
     }
 
-    const marketDivergence = this._computeMarketDivergence(score, matchData);
-    const confidencePenalty = this._computeConfidencePenalty(
-      matchData?.home_injuries ?? null,
-      matchData?.away_injuries ?? null,
-      marketDivergence,
-    );
-
-    // Recommandations paris — utilise ESPN odds OU The Odds API (Pinnacle)
     const hasOdds = matchData?.odds != null || matchData?.market_odds != null;
     const bettingRecs = (score !== null && hasOdds)
       ? this._computeBettingRecommendations(score, matchData?.odds ?? {}, matchData, variables, signals, marketDivergence)
       : null;
 
     Logger.debug('ENGINE_NBA_RESULT', {
-      score, method: scoreMethod,
-      missing_count: missing.length, critical_missing: missingCritical.length,
-      star_modifier: starAbsenceModifier,
+      score,
+      method: scoreMethod,
+      missing_count: missing.length,
+      critical_missing: missingCritical.length,
+      structure_multiplier: structureMultiplier,
+      star_adjustment: starLineupAdjustment?.delta ?? null,
+      market_divergence_flag: marketDivergence?.flag ?? 'none',
+      confidence_penalty: confidencePenalty,
     });
 
     return {
-      sport:                'NBA',
+      sport:                 'NBA',
       score,
-      score_method:         scoreMethod,
+      score_method:          scoreMethod,
       signals,
       volatility,
-      missing_variables:    missing,
-      missing_critical:     missingCritical,
-      uncalibrated_weights: uncalibrated,
-      variables_used:       variables,
-      weights_used:         weightsUsed,
-      star_absence_modifier: starAbsenceModifier,
-      market_divergence:    marketDivergence,
-      confidence_penalty:   confidencePenalty,
+      missing_variables:     missing,
+      missing_critical:      missingCritical,
+      uncalibrated_weights:  uncalibrated,
+      variables_used:        variables,
+      effective_weights:     effectiveWeights,
+      structure_multiplier:  structureMultiplier,
+      star_absence_modifier: starLineupAdjustment?.delta ?? null,
+      star_lineup_adjustment: starLineupAdjustment,
+      market_divergence:     marketDivergence,
+      confidence_penalty:    confidencePenalty,
+      betting_recommendations: bettingRecs,
       debug: {
-        ...(scoreDebug ?? {}),
-        absences_impact_value: variables.absences_impact?.value ?? null,
-        star_absence_modifier: starAbsenceModifier,
-        market_implied_home: marketDivergence?.market_implied_home ?? null,
-        market_implied_away: marketDivergence?.market_implied_away ?? null,
-        market_divergence_pts: marketDivergence?.divergence_pts ?? null,
-        market_divergence_flag: marketDivergence?.flag ?? null,
-        weights_used: weightsUsed,
+        predictive_score_final: score,
+        absences_impact_value: variables?.absences_impact?.value ?? null,
+        star_absence_modifier: starLineupAdjustment?.delta ?? null,
+        home_star_counts: starLineupAdjustment?.home?.counts ?? null,
+        away_star_counts: starLineupAdjustment?.away?.counts ?? null,
+        market_implied_home: marketDivergence?.home_implied ?? null,
+        market_implied_away: marketDivergence?.away_implied ?? null,
+        market_divergence_pts: marketDivergence?.max_diff_pts ?? null,
+        market_divergence_flag: marketDivergence?.flag ?? 'none',
+        weights_used: effectiveWeights,
         confidence_penalty: confidencePenalty,
       },
-      betting_recommendations: bettingRecs,
-      computed_at:          new Date().toISOString(),
+      computed_at:           new Date().toISOString(),
     };
   }
 
   /**
-   * Calcul depuis variables déjà extraites — utilisé par engine.robustness.js.
-   * NE PAS appeler compute() depuis la robustesse — ça re-extrairait depuis rawData.
+   * Compat legacy UI/debug.
+   * Retourne le delta net appliqué au score domicile :
+   *   négatif = domicile pénalisé, positif = visiteur pénalisé.
    */
-  static computeFromVariables(variables, weights) {
-    if (!variables || !weights) return null;
-    return this._computeScore(variables, weights).score;
-  }
-
-  // ── EXTRACTION ────────────────────────────────────────────────────────────
-
-  static _extractVariables(data) {
-    const homeStats    = data?.home_season_stats;
-    const awayStats    = data?.away_season_stats;
-    const homeRecent   = data?.home_recent;
-    const awayRecent   = data?.away_recent;
-    const homeInj      = data?.home_injuries;
-    const awayInj      = data?.away_injuries;
-    const advancedStats = data?.advanced_stats ?? null;  // depuis /nba/stats/advanced
-
-    const homeGames = homeStats?.games_played ?? null;
-    const awayGames = awayStats?.games_played ?? null;
-
-    return {
-
-      // ── Net Rating différentiel (NBA Stats API) ────────────────────────
-      // Signal dominant — non biaisé par le calendrier contrairement à win%.
-      // Positif = domicile a un meilleur Net Rating.
-      net_rating_diff: this._safeAdvancedDiff(
-        advancedStats,
-        homeStats,
-        awayStats,
-        'net_rating'
-      ),
-
-      // ── eFG% différentiel ─────────────────────────────────────────────
-      // CORRECTION v5 : garde min_games pour éviter les stats de 2-3 matchs
-      efg_diff: this._safeDiff(
-        this._guardStat(homeStats?.efg_pct, 0.40, 0.65),
-        this._guardStat(awayStats?.efg_pct, 0.40, 0.65),
-        'espn_scoreboard',
-        homeGames,
-        awayGames
-      ),
-
-      // ── TS% différentiel ──────────────────────────────────────────────
-      ts_diff: this._safeDiff(
-        homeStats?.ts_pct,
-        awayStats?.ts_pct,
-        'espn_scoreboard',
-        homeGames,
-        awayGames
-      ),
-
-      // ── Win% différentiel ─────────────────────────────────────────────
-      // Rôle réduit depuis v3 (win% biaisé calendrier).
-      // Toujours utile en début de saison quand net_rating absent.
-      win_pct_diff: this._safeDiff(
-        this._guardStat(homeStats?.win_pct, 0.01, 0.99),
-        this._guardStat(awayStats?.win_pct, 0.01, 0.99),
-        'espn_scoreboard',
-        homeGames,
-        awayGames
-      ),
-
-      // ── Split domicile/extérieur ──────────────────────────────────────
-      home_away_split: this._computeHomeSplit(homeStats, awayStats),
-
-      // ── Forme récente EMA ─────────────────────────────────────────────
-      // Ordre attendu : du plus récent au plus ancien (Worker BDL sort décroissant)
-      recent_form_ema: this._safeEMADiff(
-        homeRecent, awayRecent, CONFIG.ema_lambda
-      ),
-
-      // ── Impact absences ───────────────────────────────────────────────
-      absences_impact: this._computeAbsencesImpact(homeInj, awayInj),
-
-      // ── Points marqués différentiel ───────────────────────────────────
-      // Gardé pour compatibilité mais poids faible (biaisé pace)
-      avg_pts_diff: this._safeDiff(
-        this._guardStat(homeStats?.avg_pts, 85, 135),
-        this._guardStat(awayStats?.avg_pts, 85, 135),
-        'espn_scoreboard',
-        homeGames,
-        awayGames
-      ),
-
-      // ── Défense adverse différentiel ─────────────────────────────────
-      // defensive_rating = oppg (points encaissés par match) depuis Tank01.
-      // Positif = domicile a une meilleure défense (encaisse moins).
-      // Note : inversé par rapport aux autres signaux (moins = mieux pour la défense)
-      // On inverse le signe : home_oppg - away_oppg → positif = home défend mieux
-      defensive_diff: this._safeAdvancedDiff(
-        advancedStats, homeStats, awayStats, 'defensive_rating', true  // invertSign=true
-      ),
-
-      // ── Pace différentiel ─────────────────────────────────────────────
-      // Utilisé pour l'O/U. Non inclus dans les pondérations du score
-      // principal — contextuel uniquement.
-      // v5.11 : si Tank01 ne fournit pas pace (null), approximation depuis avg_pts.
-      // proxy pace = (homeAvgPts + awayAvgPts) / 2 centré sur 225 (moyenne NBA).
-      // Positif = matchs à rythme élevé → tendance OVER.
-      pace_diff: (() => {
-        const fromTank01 = this._safeAdvancedDiff(advancedStats, homeStats, awayStats, 'pace');
-        if (fromTank01.value !== null) return fromTank01;
-        // Approximation avg_pts comme proxy pace
-        const hPts = homeStats?.avg_pts ?? null;
-        const aPts = awayStats?.avg_pts ?? null;
-        if (hPts === null || aPts === null) return { value: null, source: 'espn_scoreboard', quality: 'MISSING' };
-        const avgTotal = hPts + aPts;
-        const NBA_AVG_TOTAL = 225;
-        return {
-          value:   Math.round((avgTotal - NBA_AVG_TOTAL) * 10) / 10,
-          source:  'espn_scoreboard_proxy',
-          quality: 'ESTIMATED',
-        };
-      })(),
-
-      // ── Back-to-back ──────────────────────────────────────────────────
-      back_to_back: this._computeBackToBack(data),
-
-      // ── Jours de repos ────────────────────────────────────────────────
-      rest_days_diff: this._computeRestDiff(data),
-    };
-  }
-
-  // ── SCORE ─────────────────────────────────────────────────────────────────
-
-  static _computeScore(variables, weights) {
-    let weightedSum = 0;
-    let totalWeight = 0;
-    const signals   = [];
-
-    const normalized = this._normalizeVariables(variables);
-    const weightsUsed = this._buildEffectiveWeights(weights, variables.absences_impact?.value ?? null);
-
-    for (const [varId, normValue] of Object.entries(normalized)) {
-      if (normValue === null) continue;
-      const weight = weightsUsed[varId];
-      if (weight === null || weight === undefined || weight === 0) continue;
-
-      const contribution = normValue * weight;
-      weightedSum += contribution;
-      totalWeight += weight;
-
-      const varConfig = CONFIG.variables.find(v => v.id === varId);
-
-      signals.push({
-        variable:     varId,
-        label:        varConfig?.label ?? varId,
-        raw_value:    variables[varId]?.value ?? null,
-        normalized:   normValue,
-        weight,
-        contribution,
-        direction:    contribution >  0.001 ? 'POSITIVE'
-                    : contribution < -0.001 ? 'NEGATIVE'
-                    : 'NEUTRAL',
-        data_source:  variables[varId]?.source  ?? null,
-        data_quality: variables[varId]?.quality ?? null,
-        why_signal:   this._explainSignal(varId, normValue, contribution),
-      });
-    }
-
-    const raw   = totalWeight > 0 ? (weightedSum / totalWeight + 1) / 2 : null;
-    const score = raw !== null
-      ? Math.max(0, Math.min(1, Math.round(raw * 1000) / 1000))
-      : null;
-
-    // v5.8 : weight_coverage = fraction des poids effectivement utilisés.
-    // Ex: 0.80 = 80% des poids disponibles ont une variable non-null.
-    // Transmis à engine.core.js → UI peut afficher un warning si < seuil.
-    const totalDefinedWeight = Object.entries(weightsUsed)
-      .filter(([, w]) => w !== null && w !== undefined && w > 0)
-      .reduce((s, [, w]) => s + w, 0);
-    const weightCoverage = totalDefinedWeight > 0
-      ? Math.round((totalWeight / totalDefinedWeight) * 1000) / 1000
-      : null;
-
-    signals.sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution));
-
-    return {
-      score,
-      signals,
-      volatility:      this._estimateVolatility(variables),
-      weight_coverage: weightCoverage,
-      weights_used:    weightsUsed,
-      score_method:    'WEIGHTED_SUM',
-      debug: {
-        predictive_score_raw: raw,
-        predictive_score_final: score,
-      },
-    };
-  }
-
-  // ── NORMALISATION ─────────────────────────────────────────────────────────
-
-  static _normalizeVariables(variables) {
-    return {
-      // Net Rating : plage typique NBA ±10 → ±1
-      net_rating_diff: this._clampNormalize(variables.net_rating_diff?.value, -10, 10),
-
-      efg_diff:        this._clampNormalize(variables.efg_diff?.value,        -0.07, 0.07),
-      ts_diff:         this._clampNormalize(variables.ts_diff?.value,         -0.07, 0.07),
-      win_pct_diff:    variables.win_pct_diff?.value    ?? null,
-      home_away_split: variables.home_away_split?.value ?? null,
-      recent_form_ema: variables.recent_form_ema?.value ?? null,
-      absences_impact: variables.absences_impact?.value ?? null,
-      avg_pts_diff:    this._clampNormalize(variables.avg_pts_diff?.value,    -15,   15),
-      back_to_back:    variables.back_to_back?.value    ?? null,
-      rest_days_diff:  this._clampNormalize(variables.rest_days_diff?.value,  -3,    3),
-      // defensive_diff : plage typique NBA ±5 pts encaissés → ±1
-      defensive_diff:  this._clampNormalize(variables.defensive_diff?.value,  -5,    5),
-      // pace_diff non inclus dans le score principal (contextuel O/U uniquement)
-    };
-  }
-
-  static _clampNormalize(value, min, max) {
-    if (value === null || value === undefined) return null;
-    const clamped = Math.max(min, Math.min(max, value));
-    return (clamped - (min + max) / 2) / ((max - min) / 2);
-  }
-
-  static _buildEffectiveWeights(weights, absencesImpact = null) {
-    const effective = { ...weights };
-    const abs = Math.abs(absencesImpact ?? 0);
-
-    if (abs >= 0.18) {
-      effective.net_rating_diff = Math.round((effective.net_rating_diff ?? 0) * 0.82 * 1000) / 1000;
-      effective.efg_diff        = Math.round((effective.efg_diff ?? 0) * 0.85 * 1000) / 1000;
-      effective.home_away_split = Math.round((effective.home_away_split ?? 0) * 0.85 * 1000) / 1000;
-    }
-    if (abs >= 0.28) {
-      effective.net_rating_diff = Math.round((effective.net_rating_diff ?? 0) * 0.75 * 1000) / 1000;
-      effective.efg_diff        = Math.round((effective.efg_diff ?? 0) * 0.80 * 1000) / 1000;
-      effective.home_away_split = Math.round((effective.home_away_split ?? 0) * 0.80 * 1000) / 1000;
-    }
-
-    return effective;
-  }
-
-  // ── CALCULS SPÉCIFIQUES ───────────────────────────────────────────────────
-
-  static _guardStat(value, min, max) {
-    if (value === null || value === undefined) return null;
-    if (value < min || value > max) return null;
-    return value;
-  }
-
-  /**
-   * Différentiel avec garde min_games_sample.
-   * CORRECTION v5 : si games_played < MIN_GAMES → quality='LOW_SAMPLE'
-   * Les stats de début de saison (2-5 matchs) ne doivent pas être traitées
-   * comme des stats saison fiables.
-   */
-  static _safeDiff(homeVal, awayVal, source, homeGames = null, awayGames = null) {
-    if (homeVal === null || homeVal === undefined ||
-        awayVal === null || awayVal === undefined) {
-      return { value: null, source, quality: 'MISSING' };
-    }
-
-    // Garde sample minimum
-    if ((homeGames !== null && homeGames < MIN_GAMES) ||
-        (awayGames !== null && awayGames < MIN_GAMES)) {
-      return {
-        value:  homeVal - awayVal,
-        source,
-        quality: 'LOW_SAMPLE',
-        note:   `games_played insuffisant (home=${homeGames}, away=${awayGames}, min=${MIN_GAMES})`,
-      };
-    }
-
-    return { value: homeVal - awayVal, source, quality: 'VERIFIED' };
-  }
-
-  /**
-   * Différentiel depuis les stats avancées NBA Stats API.
-   * advancedStats est indexé par nom d'équipe ESPN.
-   * Si non disponible, fallback sur les stats ESPN directes (pour net_rating/pace).
-   */
-  /**
-   * Différentiel depuis les stats avancées (Tank01/NBA Stats API).
-   * @param {boolean} invertSign — si true, inverse le signe du diff (pour oppg : moins = mieux)
-   */
-  static _safeAdvancedDiff(advancedStats, homeStats, awayStats, field, invertSign = false) {
-    if (advancedStats && homeStats?.name && awayStats?.name) {
-      const homeAdv = advancedStats[homeStats.name] ?? advancedStats[homeStats.team_name];
-      const awayAdv = advancedStats[awayStats.name] ?? advancedStats[awayStats.team_name];
-
-      if (homeAdv?.[field] != null && awayAdv?.[field] != null) {
-        const homeGames = homeAdv.games_played ?? homeStats?.games_played ?? null;
-        const awayGames = awayAdv.games_played ?? awayStats?.games_played ?? null;
-
-        const quality = (homeGames !== null && homeGames < MIN_GAMES) ||
-                        (awayGames !== null && awayGames < MIN_GAMES)
-          ? 'LOW_SAMPLE'
-          : 'VERIFIED';
-
-        const rawDiff = homeAdv[field] - awayAdv[field];
-        return {
-          value:   Math.round((invertSign ? -rawDiff : rawDiff) * 100) / 100,
-          source:  'tank01',
-          quality,
-        };
-      }
-    }
-
-    const homeVal = homeStats?.[field] ?? null;
-    const awayVal = awayStats?.[field] ?? null;
-
-    if (homeVal === null || awayVal === null) {
-      return { value: null, source: 'tank01', quality: 'MISSING' };
-    }
-
-    const rawDiff = homeVal - awayVal;
-    return { value: invertSign ? -rawDiff : rawDiff, source: 'espn_scoreboard', quality: 'PARTIAL' };
-  }
-
-  static _computeHomeSplit(homeStats, awayStats) {
-    const h = homeStats?.home_win_pct;
-    const a = awayStats?.away_win_pct;
-    if (h == null || a == null) return { value: null, source: 'espn_scoreboard', quality: 'MISSING' };
-    return {
-      value:   Math.max(-1, Math.min(1, (h - a) * 2)),
-      source:  'espn_scoreboard',
-      quality: 'VERIFIED',
-      raw:     { home_home_win_pct: h, away_away_win_pct: a },
-    };
-  }
-
-  static _safeEMADiff(homeRecent, awayRecent, lambda) {
-    if (!homeRecent?.matches || !awayRecent?.matches) {
-      return { value: null, source: 'balldontlie_v1', quality: 'MISSING' };
-    }
-    if (lambda === null) {
-      return { value: null, source: 'balldontlie_v1', quality: 'UNCALIBRATED' };
-    }
-
-    // CORRECTION v5 : garde min_games pour la forme récente également
-    if (homeRecent.matches.length < 3 || awayRecent.matches.length < 3) {
-      return { value: null, source: 'balldontlie_v1', quality: 'INSUFFICIENT_SAMPLE' };
-    }
-
-    const homeEMA = this._computeEMA(homeRecent.matches, lambda);
-    const awayEMA = this._computeEMA(awayRecent.matches, lambda);
-
-    if (homeEMA === null || awayEMA === null) {
-      return { value: null, source: 'balldontlie_v1', quality: 'INSUFFICIENT_SAMPLE' };
-    }
-
-    return {
-      value:   homeEMA - awayEMA,
-      source:  'balldontlie_v1',
-      quality: (homeRecent.matches.length >= 5 && awayRecent.matches.length >= 5)
-        ? 'VERIFIED' : 'LOW_SAMPLE',
-    };
-  }
-
-  /**
-   * EMA standard : λ · valeur_récente + (1-λ) · ema_précédente.
-   * matches trié du plus récent au plus ancien (Worker BDL sort décroissant).
-   * On inverse pour traiter du plus ancien au plus récent,
-   * puis l'EMA finale est pondérée vers le plus récent.
-   */
-  static _computeEMA(matches, lambda) {
-    if (!matches?.length) return null;
-    const ordered = [...matches].reverse();
-    let ema = null;
-    for (const match of ordered) {
-      if (match.won === null || match.won === undefined) continue;
-      const result = match.won ? 1 : 0;
-      ema = ema === null ? result : lambda * result + (1 - lambda) * ema;
-    }
-    return ema !== null ? ema * 2 - 1 : null;
-  }
-
-  /**
-   * v5.4 : Impact absences pondéré par importance du joueur (ppg).
-   *
-   * Deux modes selon la source des données :
-   *   - source='tank01'   → impact_weight = (ppg/team_ppg) × status_weight (calculé Worker)
-   *                         normFactor = 1.0 (déjà normalisé par importance)
-   *   - source='fallback' → impact_weight = status_weight brut ESPN (ancien comportement)
-   *                         normFactor = 5.0 (seuil ESPN classique)
-   *
-   * La valeur finale (as - hs) / normFactor est clampée [-1, 1] :
-   *   - Positive  = équipe domicile affaiblie par ses blessures
-   *   - Négative  = équipe visiteuse affaiblie par ses blessures
-   */
-  static _computeAbsencesImpact(homeInj, awayInj) {
-    if (!homeInj || !awayInj) return { value: null, source: 'espn_injuries', quality: 'MISSING' };
-
-    const SW = { 'Out': 1.0, 'Doubtful': 0.75, 'Questionable': 0.5, 'Probable': 0.1, 'Available': 0.0 };
-
-    const score = players => {
-      if (!Array.isArray(players)) return 0;
-      return players.reduce((acc, p) => {
-        const isGL    = p.reason?.toLowerCase().includes('g league') || p.reason?.toLowerCase().includes('two-way');
-        const glFactor = isGL ? 0.3 : 1.0;
-
-        // Si impact_weight vient du calcul pondéré Tank01 (source='tank01') :
-        // il représente déjà (ppg/team_ppg) × status_weight — on l'utilise directement.
-        // Sinon : fallback sur status_weight brut ESPN.
-        const impact = (p.source === 'tank01' && p.impact_weight != null)
-          ? p.impact_weight * glFactor
-          : (SW[p.status] ?? p.impact_weight ?? 0) * glFactor;
-
-        return acc + impact;
-      }, 0);
-    };
-
-    // Détecter si au moins un joueur provient de Tank01 (roster v6.27 ou player v6.26)
-    const isWeighted = homeInj.some(p => p.source === 'tank01' || p.source === 'tank01_roster')
-                    || awayInj.some(p => p.source === 'tank01' || p.source === 'tank01_roster');
-
-    const hs = score(homeInj);
-    const as = score(awayInj);
-
-    // Normalisation :
-    // - Pondéré ppg (Tank01) : impacts déjà relatifs à l'équipe → seuil 1.0
-    // - Brut ESPN             : impacts absolus par statut        → seuil 5.0
-    const normFactor = isWeighted ? 1.0 : 5.0;
-
-    return {
-      value:   Math.max(-1, Math.min(1, (as - hs) / normFactor)),
-      source:  isWeighted ? 'espn_injuries+tank01' : 'nba_official_pdf',
-      quality: isWeighted ? 'WEIGHTED' : 'ESTIMATED',
-      raw: {
-        home_score:  Math.round(hs * 1000) / 1000,
-        away_score:  Math.round(as * 1000) / 1000,
-        home_out:    homeInj.filter(p => p.status === 'Out').length,
-        away_out:    awayInj.filter(p => p.status === 'Out').length,
-        is_weighted: isWeighted,
-      },
-    };
-  }
-
-
-  /**
-   * v5.9 : Calcule le modificateur multiplicatif si une star est absente.
-   *
-   * Une star = joueur avec ppg > STAR_PPG_THRESHOLD (20 pts/j).
-   * Statuts concernés : Out (weight 1.0) et Doubtful (weight 0.75).
-   * Day-To-Day non inclus — statut trop incertain pour un modificateur fort.
-   *
-   * Formule par joueur star absent :
-   *   impact = (ppg / team_ppg) × status_weight × STAR_FACTOR
-   *   modifier_equipe = 1 - clamp(impact, 0, STAR_MAX_REDUCTION)
-   *
-   * Modificateur final :
-   *   - Si star DOM absente : modifier < 1 → score baisse (faveur visiteur)
-   *   - Si star EXT absente : modifier > 1 → score monte (faveur domicile)
-   *   - Si les deux : effets combinés
-   *
-   * Retourne null si aucune star absente détectée (pas de modification).
-   *
-   * @param {Array|null} homeInjuries
-   * @param {Array|null} awayInjuries
-   * @returns {number|null} modificateur [0.80, 1.20] ou null
-   */
-  static _computeStarAbsenceModifier(homeInjuries, awayInjuries, homeTeamPpg = null, awayTeamPpg = null) {
-    const STAR_STATUSES = new Set(['Out', 'Doubtful', 'Limited']);
-    const STATUS_WEIGHT = { 'Out': 1.0, 'Doubtful': 0.75, 'Limited': 0.45 };
-
-    const computeTeamReduction = (injuries, teamPpg) => {
-      if (!Array.isArray(injuries) || injuries.length === 0) return { reduction: 0, majorCount: 0 };
-
-      let totalReduction = 0;
-      let majorCount = 0;
-      const denom = teamPpg && teamPpg > 0 ? teamPpg : STAR_TEAM_PPG_FALLBACK;
-
-      for (const player of injuries) {
-        if (!STAR_STATUSES.has(player.status)) continue;
-        const ppg = player.ppg ?? null;
-        if (ppg === null || ppg <= STAR_PPG_THRESHOLD) continue;
-        majorCount += 1;
-        const sw = STATUS_WEIGHT[player.status] ?? 0.75;
-        const impact = (ppg / denom) * sw * STAR_FACTOR;
-        totalReduction += impact;
-      }
-
-      let multiplier = 1;
-      if (majorCount === 2) multiplier = 1.25;
-      if (majorCount >= 3) multiplier = 1.50;
-      totalReduction *= multiplier;
-
-      return {
-        reduction: Math.min(totalReduction, STAR_MAX_REDUCTION),
-        majorCount,
-      };
-    };
-
-    const home = computeTeamReduction(homeInjuries, homeTeamPpg);
-    const away = computeTeamReduction(awayInjuries, awayTeamPpg);
-
-    if (home.reduction === 0 && away.reduction === 0) return null;
-
-    const modifier = (1 - home.reduction) / (1 - away.reduction);
-    return Math.round(Math.max(0.70, Math.min(1.30, modifier)) * 1000) / 1000;
-  }
-
-  static _computeConfidencePenalty(homeInjuries, awayInjuries, marketDivergence = null) {
-    const STATUS_WEIGHT = { 'Out': 1.0, 'Doubtful': 0.70, 'Questionable': 0.35, 'Day-To-Day': 0.30, 'GTD': 0.30, 'Limited': 0.45 };
-    const scoreSide = injuries => {
-      if (!Array.isArray(injuries)) return 0;
-      return injuries.reduce((sum, p) => {
-        const ppg = Number(p?.ppg ?? 0) || 0;
-        const statusWeight = STATUS_WEIGHT[p?.status] ?? 0;
-        const roleWeight = ppg >= 20 ? 1.0 : ppg >= 12 ? 0.6 : 0.25;
-        return sum + statusWeight * roleWeight;
-      }, 0);
-    };
-
-    let penalty = 0;
-    const homeScore = scoreSide(homeInjuries);
-    const awayScore = scoreSide(awayInjuries);
-    const uncertaintyScore = homeScore + awayScore;
-
-    if (uncertaintyScore >= 1.5) penalty += 0.05;
-    if (uncertaintyScore >= 2.5) penalty += 0.05;
-    if (marketDivergence?.flag === 'high') penalty += 0.08;
-    if (marketDivergence?.flag === 'critical') penalty += 0.15;
-
-    return {
-      score: Math.min(0.25, Math.round(penalty * 1000) / 1000),
-      uncertainty_score: Math.round(uncertaintyScore * 1000) / 1000,
-    };
-  }
-
-  static _computeMarketDivergence(score, matchData) {
-    if (score === null || score === undefined) return null;
-    const marketOdds = matchData?.market_odds ?? null;
-    const odds = matchData?.odds ?? null;
-
-    const decToProb = d => d && d > 1 ? 1 / d : null;
-    const amToProb = n => n != null ? americanToProb(Number(n)) : null;
-
-    const homeProb = marketOdds?.home_ml_decimal ? decToProb(marketOdds.home_ml_decimal) : amToProb(odds?.home_ml);
-    const awayProb = marketOdds?.away_ml_decimal ? decToProb(marketOdds.away_ml_decimal) : amToProb(odds?.away_ml);
-    if (homeProb == null || awayProb == null) return null;
-
-    const motorHome = score;
-    const motorAway = 1 - score;
-    const divergencePts = Math.round(Math.max(Math.abs(motorHome - homeProb), Math.abs(motorAway - awayProb)) * 100);
-
-    let flag = 'low';
-    if (divergencePts >= 28) flag = 'critical';
-    else if (divergencePts >= 20) flag = 'high';
-    else if (divergencePts >= 12) flag = 'medium';
-
-    return {
-      market_implied_home: Math.round(homeProb * 1000) / 1000,
-      market_implied_away: Math.round(awayProb * 1000) / 1000,
-      divergence_pts: divergencePts,
-      flag,
-    };
+  static _computeStarAbsenceModifier(homeInjuries, awayInjuries) {
+    return this._computeStarLineupAdjustment(homeInjuries, awayInjuries)?.delta ?? null;
   }
 
   static _computeBackToBack(data) {
@@ -771,7 +245,6 @@ export class EngineNBA {
   static _computeBettingRecommendations(score, odds, matchData, variables, signals = [], marketDivergence = null) {
     const recs = [];
     const marketOdds = matchData?.market_odds ?? null;
-    const isCriticalDivergence = marketDivergence?.flag === 'critical';
 
     // Construire les cotes de référence.
     // Priorité : Winamax (bookmaker principal) > Pinnacle > premier disponible.
@@ -962,13 +435,9 @@ export class EngineNBA {
 
     recs.sort((a, b) => b.edge - a.edge);
     const validRecs = recs.filter(r => r.has_value);
-    return {
-      recommendations: validRecs,
-      best: isCriticalDivergence ? null : (validRecs[0] ?? null),
-      computed_at: new Date().toISOString(),
-      market_divergence_flag: marketDivergence?.flag ?? 'low',
-      market_divergence_pts: marketDivergence?.divergence_pts ?? null,
-    };
+    const flag = marketDivergence?.flag ?? 'none';
+    const bestRec = (flag === 'critical' || flag === 'high') ? null : (validRecs[0] ?? null);
+    return { recommendations: validRecs, best: bestRec, computed_at: new Date().toISOString() };
   }
 
   static _computeKelly(p, americanOdds) {
