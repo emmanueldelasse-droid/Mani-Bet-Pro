@@ -18,7 +18,7 @@
  *   - _loadAIInjuries() : refactorisé pour le pipeline v6.27.
  *     Appelle /nba/roster-injuries (Tank01 roster complet, cache 3h) au lieu
  *     de N appels /nba/ai-injuries individuels par match.
- *     Appelle /nba/ai-injuries-batch une seule fois pour tous les matchs du soir (cache 6h KV + cache memoire session).
+ *     Appelle /nba/ai-context une seule fois pour tous les matchs du soir (cache 6h KV + cache memoire session).
  *     0 appel Claude par match — budget réduit de ~7 appels/soir à ~1 appel/soir.
  *   - _mergeInjuryReports() : adapté pour le format roster Tank01 v6.27.
  *     Source 'tank01_roster' reconnue et fusionnée correctement.
@@ -411,7 +411,7 @@ function _getTeamAbv(espnName) {
  * Avant v3.9 : N appels /nba/ai-injuries par match (1 Claude/match).
  * Après v3.9 :
  *   1. /nba/roster-injuries → roster complet NBA avec ppg + designation (cache 3h).
- *   2. /nba/ai-injuries-batch → contexte motivationnel global pour tous les matchs (cache 6h KV, 1 Claude/soir max).
+ *   2. /nba/ai-context → contexte motivationnel global pour tous les matchs (cache 6h KV, 1 Claude/soir max).
  *   3. Fusionne en format { by_team, team_context, market_signal } identique à v3.8.
  *
  * Retourne null si aucune donnée disponible (fallback transparent).
@@ -452,14 +452,12 @@ async function _loadAIInjuries(matches, date, store, options = {}) {
       const homeAbv = _getTeamAbv(m.home_team && m.home_team.name);
       const awayAbv = _getTeamAbv(m.away_team && m.away_team.name);
       if (!homeAbv || !awayAbv) return null;
-      return { game: awayAbv + '@' + homeAbv, homeAbv, awayAbv };
+      return { game: awayAbv + '@' + homeAbv, home: homeAbv, away: awayAbv };
     })
-    .filter(Boolean);
+    .filter(Boolean)
+    .slice(0, 12);
 
   if (!eligibleMatches.length) return null;
-
-  const batchMatches = eligibleMatches.slice(0, 12);
-  const gamesParam = batchMatches.map(function(item) { return item.game; }).join(',');
 
   store.set({
     'refreshSync.inFlight': true,
@@ -468,19 +466,26 @@ async function _loadAIInjuries(matches, date, store, options = {}) {
   });
 
   try {
-    const batchPayload = await _fetchAIInjuriesBatch(dateForWorker, gamesParam, manualRefresh);
-    const aiByTeam = batchPayload && batchPayload.by_team ? batchPayload.by_team : {};
-    const totalPlayers = Object.values(aiByTeam).reduce(function(sum, arr) { return sum + arr.length; }, 0);
-    const gamesCount = batchPayload && Number.isFinite(batchPayload.games_count)
-      ? batchPayload.games_count
-      : batchMatches.length;
-    const source = batchPayload && batchPayload.source ? batchPayload.source : 'claude_web_search';
+    const batch = await _fetchAIInjuriesBatch(dateForWorker, eligibleMatches, manualRefresh ? 'manual' : 'auto');
+    const aiByTeam = {};
 
+    if (batch && batch.by_game) {
+      eligibleMatches.forEach(function(item) {
+        const gameData = batch.by_game[item.game];
+        if (!gameData) return;
+        _mergeBatchAiPlayers(aiByTeam, gameData.players_out, item.home, item.away);
+        _mergeBatchAiPlayers(aiByTeam, gameData.players_doubtful, item.home, item.away);
+        _mergeBatchAiPlayers(aiByTeam, gameData.players_dtd_confirmed_out, item.home, item.away);
+        _mergeBatchAiPlayers(aiByTeam, gameData.players_limited, item.home, item.away);
+      });
+    }
+
+    const totalPlayers = Object.values(aiByTeam).reduce(function(sum, arr) { return sum + arr.length; }, 0);
     store.set({
       'refreshSync.inFlight': false,
       'refreshSync.status': totalPlayers > 0 ? 'ok' : 'muted',
       'refreshSync.detail': totalPlayers > 0
-        ? `Claude injuries synchronisé (${gamesCount} matchs, ${totalPlayers} joueurs)`
+        ? `Claude injuries synchronisé (${eligibleMatches.length} matchs, ${totalPlayers} joueurs)`
         : 'Claude injuries : aucun joueur exploitable sur cette fenêtre',
       'refreshSync.lastSuccessAt': new Date().toISOString(),
       'refreshSync.lastWindowKey': manualRefresh ? (windowKey || 'manual') : windowKey,
@@ -490,8 +495,8 @@ async function _loadAIInjuries(matches, date, store, options = {}) {
     Logger.info('AI_INJURIES_LOADED', {
       teams: Object.keys(aiByTeam).length,
       players: totalPlayers,
-      source,
-      games: gamesCount,
+      source: 'claude_web_search',
+      games: eligibleMatches.length,
       mode: manualRefresh ? 'manual' : 'auto_window',
     });
 
@@ -511,6 +516,36 @@ async function _loadAIInjuries(matches, date, store, options = {}) {
   }
 }
 
+async function _fetchAIInjuriesBatch(dateForWorker, games, mode) {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(function() { controller.abort(); }, 45000);
+    const response = await fetch(API_CONFIG.WORKER_BASE_URL + '/nba/ai-injuries-batch', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        date: dateForWorker,
+        mode,
+        games: games.map(function(g) { return { home: g.home, away: g.away }; }),
+      }),
+    });
+    clearTimeout(timer);
+    if (!response.ok) {
+      Logger.warn('AI_INJURIES_HTTP_ERROR', { mode, status: response.status });
+      return null;
+    }
+    const payload = await response.json();
+    return payload?.available ? payload : null;
+  } catch (err) {
+    Logger.warn('AI_INJURIES_FAILED', { mode, message: err.message });
+    return null;
+  }
+}
+
 function _nowInParis() {
   const now = new Date();
   return new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
@@ -526,42 +561,26 @@ function _getClaudeWindowKey(nowParis) {
   return null;
 }
 
-async function _fetchAIInjuriesBatch(dateForWorker, gamesParam, manualRefresh) {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(function() { controller.abort(); }, 45000);
-    const response = await fetch(
-      API_CONFIG.WORKER_BASE_URL + '/nba/ai-injuries-batch' +
-      '?date=' + dateForWorker +
-      '&mode=' + encodeURIComponent(manualRefresh ? 'manual' : 'auto') +
-      '&games=' + encodeURIComponent(gamesParam),
-      { signal: controller.signal, headers: { 'Accept': 'application/json' } }
-    );
-    clearTimeout(timer);
-    if (!response.ok) {
-      Logger.warn('AI_INJURIES_BATCH_HTTP_ERROR', { status: response.status, mode: manualRefresh ? 'manual' : 'auto' });
-      return null;
-    }
-    const payload = await response.json();
-    if (!payload?.available || !payload?.data) {
-      Logger.info('AI_INJURIES_BATCH_SKIPPED', {
-        mode: manualRefresh ? 'manual' : 'auto',
-        source: payload?.source || null,
-        note: payload?.note || null,
-      });
-      return null;
-    }
-    return {
-      by_team: payload.data.by_team || {},
-      games_count: payload.games_count || 0,
-      source: payload.source || 'claude_web_search',
-    };
-  } catch (err) {
-    Logger.warn('AI_INJURIES_BATCH_FAILED', { message: err.message, mode: manualRefresh ? 'manual' : 'auto' });
-    return null;
-  }
+function _mergeBatchAiPlayers(target, players, homeAbv, awayAbv) {
+  if (!Array.isArray(players)) return;
+  players.forEach(function(p) {
+    if (!p || !p.name) return;
+    const teamAbv = String(p.team || '').toUpperCase() || null;
+    const espnTeamName = ABV_TO_ESPN_NAME[teamAbv] || ABV_TO_ESPN_NAME[homeAbv] || ABV_TO_ESPN_NAME[awayAbv];
+    if (!espnTeamName) return;
+    if (!target[espnTeamName]) target[espnTeamName] = [];
+    const exists = target[espnTeamName].some(function(existing) { return existing.name === p.name; });
+    if (exists) return;
+    target[espnTeamName].push({
+      name: p.name,
+      team: teamAbv,
+      status: p.status || 'Out',
+      ppg: p.ppg ?? null,
+      source: p.source || 'claude_web_search',
+      note: p.note || null,
+    });
+  });
 }
-
 
 /**
  * v3.7 : Fusionne le rapport ESPN+Tank01 avec les données IA.
