@@ -1,6 +1,11 @@
 /**
- * MANI BET PRO — engine.nba.js v5.11
+ * MANI BET PRO — engine.nba.js v5.12
  *
+ *
+ * AJOUTS v5.12 :
+ *   - Malus stars OUT fortement durci, sans changer le contrat de sortie moteur.
+ *   - Logique par paliers : 1 star OUT = gros malus, 2 = très gros, 3+ = critique.
+ *   - Aucun changement de structure return → compatible avec engine.core.js et l'orchestrateur.
  * AJOUTS v5.11 :
  *   - MONEYLINE edge minimum : 7% → 5% (aligné SPREAD/O/U).
  *     En NBA les books sont efficients — 7% bloquait quasi tous les Moneylines.
@@ -72,9 +77,9 @@ const KELLY_MAX_PCT  = 0.05;
 
 // Modificateur star absente — v5.9
 const STAR_PPG_THRESHOLD = 20;   // seuil star (ppg saison)
-const STAR_FACTOR        = 1.4;  // amplificateur impact star (renforcé match-day)
-const STAR_MAX_REDUCTION = 0.30; // plafond réduction score (-30% max)
-const STAR_TEAM_PPG_FALLBACK = 112; // ppg équipe si non disponible
+const STAR_FACTOR        = 1.55;  // amplificateur impact star (durci v5.12)
+const STAR_MAX_REDUCTION = 0.45; // plafond réduction score (-45% max)
+const STAR_TEAM_PPG_FALLBACK = 110; // ppg équipe si non disponible
 
 export class EngineNBA {
 
@@ -633,10 +638,11 @@ export class EngineNBA {
     const STATUS_WEIGHT = { 'Out': 1.0, 'Doubtful': 0.75, 'Limited': 0.45 };
 
     const computeTeamReduction = (injuries, teamPpg) => {
-      if (!Array.isArray(injuries) || injuries.length === 0) return { reduction: 0, majorCount: 0 };
+      if (!Array.isArray(injuries) || injuries.length === 0) return { reduction: 0, majorCount: 0, outCount: 0 };
 
       let totalReduction = 0;
       let majorCount = 0;
+      let outCount = 0;
       const denom = teamPpg && teamPpg > 0 ? teamPpg : STAR_TEAM_PPG_FALLBACK;
 
       for (const player of injuries) {
@@ -644,19 +650,29 @@ export class EngineNBA {
         const ppg = player.ppg ?? null;
         if (ppg === null || ppg <= STAR_PPG_THRESHOLD) continue;
         majorCount += 1;
+        if (player.status === 'Out') outCount += 1;
         const sw = STATUS_WEIGHT[player.status] ?? 0.75;
         const impact = (ppg / denom) * sw * STAR_FACTOR;
         totalReduction += impact;
       }
 
       let multiplier = 1;
-      if (majorCount === 2) multiplier = 1.25;
-      if (majorCount >= 3) multiplier = 1.50;
+      // v5.12 : hiérarchie dure demandée produit
+      // 1 star OUT = gros malus
+      // 2 stars OUT = très gros malus
+      // 3+ stars OUT = malus critique
+      if (outCount === 1) multiplier = 1.35;
+      else if (outCount === 2) multiplier = 2.10;
+      else if (outCount >= 3) multiplier = 3.00;
+      else if (majorCount === 2) multiplier = 1.20;
+      else if (majorCount >= 3) multiplier = 1.40;
+
       totalReduction *= multiplier;
 
       return {
         reduction: Math.min(totalReduction, STAR_MAX_REDUCTION),
         majorCount,
+        outCount,
       };
     };
 
