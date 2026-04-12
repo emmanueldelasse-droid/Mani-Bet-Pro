@@ -208,7 +208,7 @@ export class DataOrchestrator {
       // Fallback ESPN transparent si Claude timeout ou indisponible
       const [injuryReport, aiInjuries, recentForms, oddsComparison, advancedStats] = await Promise.all([
         _loadInjuries(date),              // ESPN fallback (statuts basiques)
-        _loadAIInjuries(matches, date, store, options), // Claude injuries : 12h / 23h / manuel
+        _loadAIInjuries(matches, date, store, options),
         _loadRecentForms(teamIds, season),
         _loadOddsComparison(),
         _loadAdvancedStats(),
@@ -421,232 +421,158 @@ function _getTeamAbv(espnName) {
  * @returns {Promise<object|null>} { by_team, team_context, market_signal } ou null
  */
 
-var _aiBatchMemCache = {};
-var _aiBatchInFlight = null;
-
-function _getParisDateHour() {
-  const now = new Date();
-  const date = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Europe/Paris',
-    year: 'numeric', month: '2-digit', day: '2-digit'
-  }).format(now);
-  const hour = Number(new Intl.DateTimeFormat('fr-FR', {
-    timeZone: 'Europe/Paris', hour: '2-digit', hour12: false
-  }).format(now));
-  return { date, hour };
-}
-
-function _buildAISyncPolicy(date, store, options = {}) {
-  const manualRefresh = options.manualRefresh === true;
-  const syncState = store?.get('refreshSync') || {};
-
-  if (manualRefresh) {
-    return {
-      allowed: true,
-      mode: 'manual',
-      windowKey: 'manual|' + String(date || ''),
-      reason: 'manual',
-    };
-  }
-
-  const paris = _getParisDateHour();
-  if (!date || date !== paris.date) {
-    return { allowed: false, mode: 'cache_only', windowKey: null, reason: 'not_today_paris' };
-  }
-
-  let slot = null;
-  if (paris.hour >= 23) slot = '23h';
-  else if (paris.hour >= 12) slot = '12h';
-  else return { allowed: false, mode: 'cache_only', windowKey: null, reason: 'before_first_window' };
-
-  const windowKey = paris.date + '|' + slot;
-  if (syncState.lastWindowKey === windowKey) {
-    return { allowed: false, mode: 'cache_only', windowKey, reason: 'already_synced' };
-  }
-  if (syncState.inFlightKey === windowKey) {
-    return { allowed: false, mode: 'cache_only', windowKey, reason: 'already_running' };
-  }
-
-  return { allowed: true, mode: 'auto', windowKey, reason: 'window_due' };
-}
-
-function _setRefreshSync(store, patch = {}) {
-  if (!store) return;
-  const current = store.get('refreshSync') || {};
-  store.set({
-    refreshSync: Object.assign({}, current, patch),
-  });
-}
-
-function _gamesParamFromMatches(matches) {
-  return matches.map(function(m) {
-    const homeAbv = _getTeamAbv(m.home_team && m.home_team.name);
-    const awayAbv = _getTeamAbv(m.away_team && m.away_team.name);
-    return (homeAbv && awayAbv) ? awayAbv + '@' + homeAbv : null;
-  }).filter(Boolean).join(',');
-}
-
-function _normalizeAIBatchPayload(payload) {
-  const sourceData = payload?.data;
-  if (!sourceData) return null;
-
-  const rows = Array.isArray(sourceData)
-    ? sourceData
-    : Object.values(sourceData);
-
-  const aiByTeam = {};
-  rows.forEach(function(row) {
-    if (!row || !row.game) return;
-    const parts = String(row.game).split('@');
-    const awayAbv = parts[0] && parts[0].toUpperCase();
-    const homeAbv = parts[1] && parts[1].toUpperCase();
-    const homeEspn = ABV_TO_ESPN_NAME[homeAbv] || null;
-    const awayEspn = ABV_TO_ESPN_NAME[awayAbv] || null;
-
-    const pushPlayers = function(list, espnName, abv) {
-      if (!espnName || !Array.isArray(list)) return;
-      if (!aiByTeam[espnName]) aiByTeam[espnName] = [];
-      list.forEach(function(p) {
-        if (!p || !p.name) return;
-        aiByTeam[espnName].push({
-          name: p.name,
-          team: abv,
-          status: p.status || 'Out',
-          ppg: p.ppg ?? null,
-          source: p.source || payload.source || 'claude_web_search',
-          note: p.reason || p.note || null,
-        });
-      });
-    };
-
-    pushPlayers(row.injuries_home || row.home || [], homeEspn, homeAbv);
-    pushPlayers(row.injuries_away || row.away || [], awayEspn, awayAbv);
-  });
-
-  const totalPlayers = Object.values(aiByTeam).reduce(function(sum, arr) { return sum + arr.length; }, 0);
-  if (totalPlayers <= 0) return null;
-
-  return {
-    by_team: aiByTeam,
-    team_context: {},
-    market_signal: null,
-    _meta: {
-      teams: Object.keys(aiByTeam).length,
-      players: totalPlayers,
-      source: payload.source || 'claude_web_search',
-    },
-  };
-}
-
-async function _fetchAIInjuriesBatch(dateForWorker, gamesParam) {
-  if (!gamesParam) return null;
-  const cacheKey = dateForWorker + '|' + gamesParam;
-  if (_aiBatchMemCache[cacheKey]) {
-    Logger.info('AI_BATCH_MEM_HIT', { date: dateForWorker });
-    return _aiBatchMemCache[cacheKey];
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(function() { controller.abort(); }, 35000);
-  try {
-    const response = await fetch(
-      API_CONFIG.WORKER_BASE_URL + '/nba/ai-injuries-batch' +
-      '?date=' + dateForWorker +
-      '&games=' + encodeURIComponent(gamesParam),
-      { signal: controller.signal, headers: { 'Accept': 'application/json' } }
-    );
-    clearTimeout(timer);
-
-    if (response.status === 404) {
-      Logger.warn('AI_BATCH_ROUTE_MISSING', { status: 404 });
-      return null;
-    }
-    if (response.status === 429) {
-      Logger.warn('AI_BATCH_HTTP_ERROR', { status: 429 });
-      return null;
-    }
-    if (!response.ok) {
-      Logger.warn('AI_BATCH_HTTP_ERROR', { status: response.status });
-      return null;
-    }
-
-    const payload = await response.json();
-    if (!payload?.available || !payload?.data) {
-      Logger.info('AI_BATCH_UNAVAILABLE', { note: payload?.note || null, source: payload?.source || null });
-      return null;
-    }
-
-    _aiBatchMemCache[cacheKey] = payload;
-    return payload;
-  } catch (err) {
-    clearTimeout(timer);
-    Logger.warn('AI_BATCH_FAILED', { message: err.message });
-    return null;
-  }
-}
-
 async function _loadAIInjuries(matches, date, store, options = {}) {
   if (!matches || !matches.length) return null;
+
+  const sync = store.get('refreshSync') ?? {};
+  const nowParis = _nowInParis();
+  const windowKey = _getClaudeWindowKey(nowParis);
+  const manualRefresh = options.manualRefresh === true;
+
+  if (sync.inFlight) {
+    Logger.info('AI_INJURIES_SKIPPED', { reason: 'sync_in_flight', windowKey });
+    return null;
+  }
+
+  if (!manualRefresh && !windowKey) {
+    Logger.info('AI_INJURIES_SKIPPED', { reason: 'outside_window_cache_only' });
+    return null;
+  }
+
+  if (!manualRefresh && sync.lastWindowKey === windowKey) {
+    Logger.info('AI_INJURIES_SKIPPED', { reason: 'window_already_synced', windowKey });
+    return null;
+  }
 
   const dateForWorker = date ? date.replace(/-/g, '') : '';
   if (!dateForWorker || dateForWorker.length !== 8) return null;
 
-  const policy = _buildAISyncPolicy(date, store, options);
-  if (!policy.allowed) {
-    Logger.info('AI_INJURIES_SKIP', { reason: policy.reason, window: policy.windowKey });
-    _setRefreshSync(store, {
-      status: 'cache_only',
-      detail: policy.reason,
-      mode: policy.mode,
-    });
-    return null;
-  }
+  const eligibleMatches = matches
+    .map(function(m) {
+      const homeAbv = _getTeamAbv(m.home_team && m.home_team.name);
+      const awayAbv = _getTeamAbv(m.away_team && m.away_team.name);
+      if (!homeAbv || !awayAbv) return null;
+      return { game: awayAbv + '@' + homeAbv, homeAbv, awayAbv };
+    })
+    .filter(Boolean);
 
-  const gamesParam = _gamesParamFromMatches(matches);
-  if (!gamesParam) return null;
+  if (!eligibleMatches.length) return null;
 
-  if (_aiBatchInFlight && _aiBatchInFlight.key === policy.windowKey) {
-    return await _aiBatchInFlight.promise;
-  }
+  const limitedMatches = eligibleMatches.slice(0, 4); // garde-fou coût/quota
+  const uniqueTeams = new Set();
+  limitedMatches.forEach(function(m) { uniqueTeams.add(m.homeAbv); uniqueTeams.add(m.awayAbv); });
 
-  _setRefreshSync(store, {
-    status: 'syncing',
-    detail: policy.mode === 'manual' ? 'actualisation manuelle injuries' : 'fenêtre ' + policy.windowKey,
-    inFlightKey: policy.windowKey,
-    mode: policy.mode,
+  store.set({
+    'refreshSync.inFlight': true,
+    'refreshSync.status': manualRefresh ? 'manual' : 'syncing',
+    'refreshSync.detail': manualRefresh ? 'Actualisation manuelle Claude injuries…' : 'Sync Claude injuries en cours…',
   });
 
-  const promise = (async function() {
-    const payload = await _fetchAIInjuriesBatch(dateForWorker, gamesParam);
-    const normalized = _normalizeAIBatchPayload(payload);
-
-    if (!normalized) {
-      _setRefreshSync(store, {
-        status: 'cache_only',
-        detail: 'aucune donnée Claude chargée',
-        inFlightKey: null,
-        lastWindowKey: policy.mode === 'auto' ? policy.windowKey : (store.get('refreshSync') || {}).lastWindowKey,
-      });
-      return null;
+  try {
+    const aiByTeam = {};
+    for (const item of limitedMatches) {
+      const data = await _fetchAIInjuriesForMatch(dateForWorker, item.homeAbv, item.awayAbv);
+      if (!data) continue;
+      _mergeBatchAiPlayers(aiByTeam, data.players_out, item.homeAbv, item.awayAbv);
+      _mergeBatchAiPlayers(aiByTeam, data.players_doubtful, item.homeAbv, item.awayAbv);
+      _mergeBatchAiPlayers(aiByTeam, data.players_dtd_confirmed_out, item.homeAbv, item.awayAbv);
+      _mergeBatchAiPlayers(aiByTeam, data.players_limited, item.homeAbv, item.awayAbv);
     }
 
-    Logger.info('AI_INJURIES_LOADED', normalized._meta);
-    _setRefreshSync(store, {
-      status: 'success',
-      detail: policy.mode === 'manual' ? 'injuries Claude mises à jour (manuel)' : 'injuries Claude synchronisées',
-      lastSuccessAt: new Date().toISOString(),
-      lastWindowKey: policy.windowKey,
-      lastManualAt: policy.mode === 'manual' ? new Date().toISOString() : (store.get('refreshSync') || {}).lastManualAt,
-      inFlightKey: null,
-      mode: policy.mode,
+    const totalPlayers = Object.values(aiByTeam).reduce(function(sum, arr) { return sum + arr.length; }, 0);
+    store.set({
+      'refreshSync.inFlight': false,
+      'refreshSync.status': totalPlayers > 0 ? 'ok' : 'muted',
+      'refreshSync.detail': totalPlayers > 0
+        ? `Claude injuries synchronisé (${limitedMatches.length} matchs, ${totalPlayers} joueurs)`
+        : 'Claude injuries : aucun joueur exploitable sur cette fenêtre',
+      'refreshSync.lastSuccessAt': new Date().toISOString(),
+      'refreshSync.lastWindowKey': manualRefresh ? (windowKey || 'manual') : windowKey,
+      'refreshSync.lastManualAt': manualRefresh ? new Date().toISOString() : sync.lastManualAt ?? null,
     });
-    return normalized;
-  })().finally(function() {
-    _aiBatchInFlight = null;
-  });
 
-  _aiBatchInFlight = { key: policy.windowKey, promise };
-  return await promise;
+    Logger.info('AI_INJURIES_LOADED', {
+      teams: Object.keys(aiByTeam).length,
+      players: totalPlayers,
+      source: 'claude_web_search',
+      games: limitedMatches.length,
+      mode: manualRefresh ? 'manual' : 'auto_window',
+    });
+
+    return totalPlayers > 0 ? {
+      by_team: aiByTeam,
+      team_context: {},
+      market_signal: null,
+    } : null;
+  } catch (err) {
+    store.set({
+      'refreshSync.inFlight': false,
+      'refreshSync.status': 'error',
+      'refreshSync.detail': `Claude injuries indisponible: ${err.message}`,
+    });
+    Logger.warn('AI_INJURIES_FAILED', { message: err.message });
+    return null;
+  }
+}
+
+function _nowInParis() {
+  const now = new Date();
+  return new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
+}
+
+function _getClaudeWindowKey(nowParis) {
+  const year = nowParis.getFullYear();
+  const month = String(nowParis.getMonth() + 1).padStart(2, '0');
+  const day = String(nowParis.getDate()).padStart(2, '0');
+  const hh = nowParis.getHours();
+  if (hh >= 23) return `${year}${month}${day}_23`;
+  if (hh >= 12 && hh < 13) return `${year}${month}${day}_12`;
+  return null;
+}
+
+function _mergeBatchAiPlayers(target, players, homeAbv, awayAbv) {
+  if (!Array.isArray(players)) return;
+  players.forEach(function(p) {
+    if (!p || !p.name) return;
+    const teamAbv = String(p.team || '').toUpperCase() || null;
+    const espnTeamName = ABV_TO_ESPN_NAME[teamAbv] || ABV_TO_ESPN_NAME[homeAbv] || ABV_TO_ESPN_NAME[awayAbv];
+    if (!espnTeamName) return;
+    if (!target[espnTeamName]) target[espnTeamName] = [];
+    const exists = target[espnTeamName].some(function(existing) { return existing.name === p.name; });
+    if (exists) return;
+    target[espnTeamName].push({
+      name: p.name,
+      team: teamAbv,
+      status: p.status || 'Out',
+      ppg: p.ppg ?? null,
+      source: p.source || 'claude_web_search',
+      note: p.note || null,
+    });
+  });
+}
+
+async function _fetchAIInjuriesForMatch(dateForWorker, homeAbv, awayAbv) {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(function() { controller.abort(); }, 30000);
+    const response = await fetch(
+      API_CONFIG.WORKER_BASE_URL + '/nba/ai-injuries' +
+      '?date=' + dateForWorker +
+      '&home=' + encodeURIComponent(homeAbv) +
+      '&away=' + encodeURIComponent(awayAbv),
+      { signal: controller.signal, headers: { 'Accept': 'application/json' } }
+    );
+    clearTimeout(timer);
+    if (!response.ok) {
+      Logger.warn('AI_INJURIES_HTTP_ERROR', { game: awayAbv + '@' + homeAbv, status: response.status });
+      return null;
+    }
+    const payload = await response.json();
+    return payload?.available ? payload.data : null;
+  } catch (err) {
+    Logger.warn('AI_INJURIES_FAILED', { game: awayAbv + '@' + homeAbv, message: err.message });
+    return null;
+  }
 }
 
 /**

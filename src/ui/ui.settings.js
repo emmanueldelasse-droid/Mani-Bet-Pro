@@ -1,10 +1,15 @@
 export async function render(container) {
   container.innerHTML = `
-    <div class="view-placeholder">
-      <div class="view-placeholder__icon">⚙</div>
-      <div class="view-placeholder__title">Configuration</div>
-      <div class="view-placeholder__sub">Vue de configuration en attente. Le reste de l'application reste utilisable.</div>
-    </div>
-  `;
+    <div class="page-shell">
+      <div class="page-header">
+        <div class="page-header__eyebrow">Mani Bet Pro</div>
+        <div class="page-header__title">Configuration</div>
+        <div class="page-header__sub">Vue simple pour garder une navigation propre.</div>
+      </div>
+      <div class="card">
+        <div class="card__title">Statut</div>
+        <div class="text-muted">Les réglages avancés seront branchés plus tard. Cette page évite une route vide.</div>
+      </div>
+    </div>`;
   return { destroy() {} };
 }

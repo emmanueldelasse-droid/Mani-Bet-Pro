@@ -18,6 +18,8 @@ const INITIAL_STATE = {
   // ── Navigation ──────────────────────────────────────────────────────────
   currentRoute:  'dashboard',
   previousRoute: null,
+
+  // ── Sport actif ──────────────────────────────────────────────────────────
   selectedSport: 'NBA',
 
   // ── Matches ─────────────────────────────────────────────────────────────
@@ -54,13 +56,12 @@ const INITIAL_STATE = {
   injuryReport: null,
   dashboardCacheAt: null,
   refreshSync: {
-    status: 'idle',
+    status: 'muted',
     detail: '',
     lastSuccessAt: null,
     lastWindowKey: null,
+    inFlight: false,
     lastManualAt: null,
-    inFlightKey: null,
-    mode: null,
   },
 
   // ── Providers ───────────────────────────────────────────────────────────
@@ -203,6 +204,7 @@ class Store {
     if (!persisted || typeof persisted !== 'object') return;
 
     const PERSISTABLE_KEYS = [
+      'selectedSport',
       'ui.displayMode',
       'history',
       'dashboardFilters',

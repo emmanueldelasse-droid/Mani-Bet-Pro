@@ -119,7 +119,7 @@ function _injectStyles() {
  * @returns {number} timeoutId — pour nettoyage via clearTimeout
  */
 function _scheduleNextRefresh(container, storeInstance) {
-  const REFRESH_HOURS_PARIS = [12 * 60, 23 * 60]; // 12h00 et 23h00 en minutes
+  const REFRESH_HOURS_PARIS = [23 * 60 + 30, 7 * 60]; // 23h30 et 07h00 en minutes
 
   const now       = new Date();
   // Convertir en heure de Paris (UTC+2 en été, UTC+1 en hiver)
@@ -150,7 +150,7 @@ function _scheduleNextRefresh(container, storeInstance) {
     // Invalider le cache pour forcer un rechargement complet
     storeInstance.set({ dashboardCacheAt: 0 });
     const date = storeInstance.get('dashboardFilters')?.selectedDate ?? _getTodayDate();
-    await _loadAndDisplay(container, storeInstance, date);
+    await _loadAndDisplay(container, storeInstance, date, { manualRefresh: false });
     // Planifier le prochain refresh
     _scheduleNextRefresh(container, storeInstance);
   }, delayMs);
@@ -183,7 +183,7 @@ export async function render(container, storeInstance) {
     });
   }
 
-  await _loadAndDisplay(container, storeInstance, selectedDate);
+  await _loadAndDisplay(container, storeInstance, selectedDate, { manualRefresh: false });
 
   // v4.7 : Planifier l'auto-refresh
   _scheduleNextRefresh(container, storeInstance);
@@ -288,35 +288,24 @@ async function _loadAndDisplay(container, storeInstance, date, options = {}) {
   }
 }
 
+// ── INDEX DES ANALYSES ────────────────────────────────────────────────────
 
-function _analysisTimestamp(analysis) {
-  if (!analysis) return 0;
-  const raw = analysis.updated_at ?? analysis.computed_at ?? analysis.saved_at ?? null;
-  const ts = raw ? Date.parse(raw) : NaN;
-  return Number.isFinite(ts) ? ts : 0;
-}
 
-function _resolveLatestAnalysisForMatch(analyses, matchId, preferredAnalysisId = null) {
+function _resolveLatestAnalysisForMatch(analyses, matchId) {
   if (!analyses || !matchId) return null;
-
-  if (preferredAnalysisId && analyses[preferredAnalysisId]?.match_id === matchId) {
-    return analyses[preferredAnalysisId];
-  }
-
-  let best = null;
-  let bestTs = -1;
+  let latest = null;
   for (const analysis of Object.values(analyses)) {
     if (!analysis || analysis.match_id !== matchId) continue;
-    const ts = _analysisTimestamp(analysis);
-    if (!best || ts > bestTs || (ts === bestTs && String(analysis.analysis_id ?? '') > String(best.analysis_id ?? ''))) {
-      best = analysis;
-      bestTs = ts;
+    if (!latest) {
+      latest = analysis;
+      continue;
     }
+    const currentTs = new Date(analysis.generated_at ?? analysis.created_at ?? 0).getTime() || 0;
+    const latestTs  = new Date(latest.generated_at ?? latest.created_at ?? 0).getTime() || 0;
+    if (currentTs >= latestTs) latest = analysis;
   }
-  return best;
+  return latest;
 }
-
-// ── INDEX DES ANALYSES ────────────────────────────────────────────────────
 
 function _buildAnalysisIndex(analyses) {
   if (!analyses) return {};
