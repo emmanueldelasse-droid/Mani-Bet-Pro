@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — store.js v2
+ * MANI BET PRO — store.js v2.1
  *
  * État applicatif global — vanilla JS, sans framework.
  * Pattern : store observable avec abonnements par clé.
@@ -45,6 +45,18 @@ const INITIAL_STATE = {
     minRobustness: null,
     status:        null,
     dateOffset:    0,
+  },
+
+
+  // ── Dashboard snapshot / synchronisation ───────────────────────────────
+  teamDetails: {},
+  injuryReport: null,
+  dashboardCacheAt: null,
+  refreshSync: {
+    status: 'muted',
+    detail: '',
+    lastSuccessAt: null,
+    lastWindowKey: null,
   },
 
   // ── Providers ───────────────────────────────────────────────────────────
@@ -187,6 +199,13 @@ class Store {
     const PERSISTABLE_KEYS = [
       'ui.displayMode',
       'history',
+      'dashboardFilters',
+      'matches',
+      'analyses',
+      'teamDetails',
+      'injuryReport',
+      'dashboardCacheAt',
+      'refreshSync',
     ];
 
     for (const key of PERSISTABLE_KEYS) {
@@ -194,13 +213,6 @@ class Store {
       if (value !== undefined) {
         this.set({ [key]: value });
       }
-    }
-
-    // dashboardFilters persisté partiellement — selectedDate exclu
-    // pour que l'app recalcule la bonne date à chaque démarrage
-    if (persisted.dashboardFilters) {
-      const { selectedDate, ...otherFilters } = persisted.dashboardFilters;
-      this.set({ dashboardFilters: otherFilters });
     }
   }
 
