@@ -914,28 +914,55 @@ function renderBlocSources(analysis) {
     </div>`;
 }
 
-// ── BLOC IA ───────────────────────────────────────────────────────────────
+// ── BLOC SYNTHÈSE ─────────────────────────────────────────────────────────
 
 function renderBlocIA(analysis, match) {
-  const canCallAI = analysis && analysis.confidence_level !== null && analysis.explanation_context;
+  const summary = _buildLocalSummary(analysis, match);
 
   return `
     <div class="card match-detail__bloc">
       <div class="bloc-header" style="margin-bottom:var(--space-3)">
-        <span class="bloc-header__title">Analyse IA</span>
+        <span class="bloc-header__title">Synthèse</span>
       </div>
-      <div id="ai-content">
-        ${!canCallAI ? `<div class="text-muted" style="font-size:12px">Analyse non disponible.</div>` : `
-          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:var(--space-3)">
-            <button class="btn btn--primary" data-ai-task="EXPLAIN" id="btn-ai-explain">💬 Expliquer ce match</button>
-            <button class="btn btn--ghost btn--sm" data-ai-task="AUDIT">🔍 Vérifier la cohérence</button>
-            <button class="btn btn--ghost btn--sm" data-ai-task="DETECT_INCONSISTENCY">⚡ Anomalies</button>
-          </div>
-          <div id="ai-response" class="text-muted" style="font-size:13px;line-height:1.8;min-height:40px">
-            Clique sur "Expliquer ce match" pour une analyse en langage simple.
-          </div>`}
+      <div class="text-muted" style="font-size:13px;line-height:1.8">
+        ${escapeHtml(summary)}
+      </div>
+      <div class="text-muted" style="font-size:10px;margin-top:var(--space-2)">
+        Basé uniquement sur les données du moteur. Aucun appel Claude dans cette vue.
       </div>
     </div>`;
+}
+
+function _buildLocalSummary(analysis, match) {
+  if (!analysis) return 'Analyse non disponible.';
+
+  const home = match?.home_team?.name ?? 'Domicile';
+  const away = match?.away_team?.name ?? 'Extérieur';
+  const score = analysis.predictive_score !== null && analysis.predictive_score !== undefined
+    ? Math.round(Number(analysis.predictive_score) * 100)
+    : null;
+  const confidence = analysis.confidence_level ?? 'indisponible';
+  const best = analysis.betting_recommendations?.best ?? null;
+  const signals = (analysis.key_signals ?? []).slice(0, 2).map(function(s) {
+    return _simplifyLabel(s.label, s.variable);
+  }).filter(Boolean);
+
+  let firstLine = 'Le moteur ne dégage pas encore de lecture claire sur ce match.';
+  if (score !== null) {
+    if (score > 55) firstLine = `${home} ressort devant dans la lecture actuelle du moteur (${score}%).`;
+    else if (score < 45) firstLine = `${away} ressort devant dans la lecture actuelle du moteur (${100 - score}%).`;
+    else firstLine = 'Le match reste plutôt équilibré dans la lecture actuelle du moteur.';
+  }
+
+  const signalLine = signals.length
+    ? `Les signaux qui comptent le plus ici sont : ${signals.join(' et ')}.`
+    : 'Aucun signal fort n'a été remonté comme vraiment dominant.';
+
+  const betLine = best
+    ? `Le meilleur pari détecté pour l'instant est ${best.side} avec un edge de +${best.edge}%.`
+    : 'Aucun pari n'a assez de valeur pour être recommandé proprement.';
+
+  return `${firstLine} ${signalLine} Niveau de confiance : ${confidence}. ${betLine}`.trim();
 }
 
 // ── COTES MULTI-BOOKS ────────────────────────────────────────────────────
@@ -1045,67 +1072,9 @@ function bindEvents(container, storeInstance, match, analysis) {
   container.querySelectorAll('.paper-bet-btn').forEach(btn => {
     btn.addEventListener('click', () => _openBetModal(btn, match, analysis, storeInstance));
   });
-
-  if (analysis?.explanation_context) {
-    container.querySelectorAll('[data-ai-task]').forEach(btn => {
-      btn.addEventListener('click', () => triggerAIExplanation(container, analysis, match, btn.dataset.aiTask));
-    });
-  }
 }
 
-// ── APPEL IA ─────────────────────────────────────────────────────────────
-
-// Cache mémoire session pour éviter les appels Claude répétés sur le même match
-// Clé : match.id + task — stable entre clics dans la même session
-const _aiSessionCache = new Map();
-
-async function triggerAIExplanation(container, analysis, match, task) {
-  const responseEl = container.querySelector('#ai-response');
-  if (!responseEl) return;
-
-  // Vérifier le cache session — évite appel Claude si déjà demandé ce soir
-  const _cacheKey = `${match?.id ?? 'unknown'}_${task}`;
-  if (_aiSessionCache.has(_cacheKey)) {
-    responseEl.innerHTML = _aiSessionCache.get(_cacheKey);
-    return;
-  }
-
-  responseEl.innerHTML = '<span class="text-muted">Analyse en cours…</span>';
-
-  const TASK_PROMPTS = {
-    EXPLAIN: `Tu es un analyste sportif NBA. Réponds en 3-4 phrases courtes, sans titres, sans gras, sans listes. N'invente aucun chiffre. Utilise uniquement les valeurs du contexte. Phrase 1 : quelle équipe est favorisée et pourquoi. Phrase 2 : le signal principal en termes simples. Phrase 3 : si un pari recommandé est fourni, confirme ou nuance-le — sinon dis explicitement qu'aucune valeur n'a été détectée et qu'il vaut mieux passer. Phrase 4 : une limite courte. Max 80 mots.`,
-    AUDIT: `Tu es un analyste sportif NBA. En 2-3 phrases simples sans titres ni listes : dis si les signaux sont cohérents entre eux. Si contradiction, explique laquelle. Uniquement les données fournies. Max 60 mots.`,
-    DETECT_INCONSISTENCY: `Tu es un analyste sportif NBA. En 2 phrases simples sans titres ni listes : dis s'il y a une anomalie dans les données. Si aucune anomalie, dis-le clairement. Max 50 mots.`,
-  };
-
-  const home   = match.home_team?.name ?? '—';
-  const away   = match.away_team?.name ?? '—';
-  const score  = analysis.predictive_score !== null ? Math.round(analysis.predictive_score * 100) : null;
-  const favori = score !== null ? (score > 50 ? `${home} (${score}%)` : score < 50 ? `${away} (${100 - score}%)` : 'Équilibré (50%)') : 'Non déterminé';
-  const best   = analysis.betting_recommendations?.best;
-  const parisInfo = best ? `Pari recommandé : ${best.side} à cote ${best.odds_decimal ?? '—'}, edge +${best.edge}%` : 'Aucun pari recommandé — aucune valeur détectée sur ce match.';
-
-  const userMessage = `N'INVENTE AUCUN CHIFFRE. Utilise uniquement les valeurs ci-dessous.\nMatch : ${home} vs ${away}\nFavori : ${favori}\nScore prédictif : ${score ?? 'non calculé'}%\nRobustesse : ${analysis.robustness_score !== null ? Math.round(analysis.robustness_score * 100) + '%' : 'non calculée'}\nQualité données : ${analysis.data_quality_score !== null ? Math.round(analysis.data_quality_score * 100) + '%' : 'non calculée'}\n${parisInfo}\nSignaux :\n${(analysis.key_signals ?? []).slice(0, 3).map(s => `- ${_simplifyLabel(s.label, s.variable)} : ${s.direction === 'POSITIVE' ? 'avantage domicile' : 'avantage extérieur'}`).join('\n')}\nVariables manquantes : ${(analysis.missing_critical ?? []).join(', ') || 'aucune'}`.trim();
-
-  try {
-    const response = await fetch(`${WORKER_URL}/ai/messages`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 600, system: TASK_PROMPTS[task] ?? TASK_PROMPTS.EXPLAIN, messages: [{ role: 'user', content: userMessage }] }),
-    });
-    if (!response.ok) throw new Error(`Worker HTTP ${response.status}`);
-    const data = await response.json();
-    const text = data.content?.map(b => b.type === 'text' ? b.text : '').join('\n').trim();
-    if (!text) throw new Error('Réponse vide');
-    const clean = text.replace(/^#{1,4}\s.+$/gm, '').replace(/\*\*(.+?)\*\*/gs, '$1').replace(/\*(.+?)\*/gs, '$1').replace(/^[-•]\s/gm, '').trim();
-    const htmlResult = `<div style="line-height:1.8;font-size:13px">${escapeHtml(clean)}</div><div class="text-muted" style="font-size:10px;margin-top:var(--space-2)">Source : Claude Sonnet · Basé uniquement sur les données du moteur</div>`;
-    responseEl.innerHTML = htmlResult;
-    // Stocker en cache session — même clic = 0 appel Claude
-    _aiSessionCache.set(_cacheKey, htmlResult);
-  } catch (err) {
-    Logger.error('AI_EXPLANATION_ERROR', { message: err.message });
-    responseEl.innerHTML = `<div class="text-muted" style="font-size:12px">Erreur : ${escapeHtml(err.message)}</div>`;
-  }
-}
+// ── PAS D'APPEL CLAUDE DANS CETTE VUE ────────────────────────────────────
 
 // ── MODAL PAPER TRADING ──────────────────────────────────────────────────
 

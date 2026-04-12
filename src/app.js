@@ -22,39 +22,11 @@ import { router }        from './ui/ui.router.js';
 import { ProviderCache } from './providers/provider.cache.js';
 import { PaperSettler }  from './paper/paper.settler.js';
 import { PaperEngine }   from './paper/paper.engine.js';
-import { Logger }        from './utils/utils.logger.js';
-import { APP_CONFIG }    from './config/sports.config.js';
+import { Logger }          from './utils/utils.logger.js';
+import { APP_CONFIG }      from './config/sports.config.js';
+import { initThemeToggle } from './ui/ui.theme-toggle.js';
 
 // ── THEME ─────────────────────────────────────────────────────────────────
-
-function initThemeToggle() {
-  const saved = localStorage.getItem('mbp_theme') ?? 'dark';
-  _applyTheme(saved);
-
-  const btn = document.createElement('button');
-  btn.id          = 'theme-toggle';
-  btn.title       = 'Changer le thème';
-  btn.textContent = saved === 'light' ? '🌙' : '☀️';
-  document.body.appendChild(btn);
-
-  btn.addEventListener('click', () => {
-    const current = document.body.classList.contains('theme-light') ? 'light' : 'dark';
-    const next    = current === 'light' ? 'dark' : 'light';
-    _applyTheme(next);
-    localStorage.setItem('mbp_theme', next);
-    btn.textContent = next === 'light' ? '🌙' : '☀️';
-  });
-}
-
-function _applyTheme(theme) {
-  if (theme === 'light') {
-    document.body.classList.add('theme-light');
-    document.body.setAttribute('data-theme', 'light');
-  } else {
-    document.body.classList.remove('theme-light');
-    document.body.removeAttribute('data-theme');
-  }
-}
 
 // ── SETTLER POLLING ───────────────────────────────────────────────────────
 
@@ -127,6 +99,7 @@ function _persistState() {
 
     localStorage.setItem('mbp_state', JSON.stringify({
       ...current,
+      selectedSport: state.selectedSport,
       dashboardFilters: state.dashboardFilters,
       matches: state.matches,
       analyses: state.analyses,
@@ -209,6 +182,7 @@ async function init() {
 
   [
     'currentRoute',
+    'selectedSport',
     'dashboardFilters',
     'matches',
     'analyses',

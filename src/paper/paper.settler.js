@@ -1,15 +1,9 @@
 /**
- * MANI BET PRO — paper.settler.js v3.1
+ * MANI BET PRO — paper.settler.js v3.2
  *
- * CORRECTIONS v3 :
- *   - SPREAD sans spread_line : récupère la ligne depuis les cotes ESPN
- *     du résultat (odds.spread) au lieu d'ignorer le pari.
- *     Fallback : si la ligne ESPN est aussi absente, le pari reste PENDING
- *     avec un warning.
- *
- * CORRECTION v2 :
- *   - SPREAD : utilisait odds_line (cote américaine) comme ligne de points.
- *     Désormais lit spread_line stockée au moment du placement.
+ * Règle simple :
+ *   - on clôture un pari seulement si la ligne utile a été stockée au placement
+ *   - plus de faux fallback sur result.odds, car /nba/results ne renvoie pas ces cotes
  */
 
 import { PaperEngine } from './paper.engine.js';
@@ -107,10 +101,8 @@ function _matchBetToResult(bet, results) {
 /**
  * Détermine le résultat d'un pari depuis le score final ESPN.
  *
- * CORRECTION v3 SPREAD :
- *   Si bet.spread_line est null (paris placés avant le fix),
- *   on tente de récupérer la ligne depuis result.odds.spread (ESPN DraftKings).
- *   Si toujours absent, on retourne null (pari reste PENDING).
+ * Si la ligne n'existe pas sur le pari, on le laisse en PENDING.
+ * Cela évite une clôture fausse.
  */
 function _determineOutcome(bet, result) {
   const homeScore = result.home_team?.score ?? 0;
@@ -138,29 +130,11 @@ function _determineOutcome(bet, result) {
         ? Number(bet.spread_line)
         : null;
 
-      // FALLBACK v3 : récupérer depuis ESPN si absent
-      if (spreadLine === null && result.odds?.spread != null) {
-        const espnSpread = Number(result.odds.spread);
-        // ESPN stocke la ligne du point de vue de la home team
-        // Si bet.side === 'HOME', on utilise espnSpread tel quel
-        // Si bet.side === 'AWAY', on inverse
-        spreadLine = betHomeIsResultHome
-          ? (bet.side === 'HOME' ? espnSpread : -espnSpread)
-          : (bet.side === 'HOME' ? -espnSpread : espnSpread);
-
-        Logger.info('PAPER_SETTLER_SPREAD_FALLBACK', {
-          bet_id: bet.bet_id,
-          match:  `${bet.home} vs ${bet.away}`,
-          espn_spread: espnSpread,
-          spread_line_used: spreadLine,
-        });
-      }
-
       if (spreadLine === null) {
         Logger.warn('PAPER_SETTLER_SPREAD_NO_LINE', {
           bet_id: bet.bet_id,
           match:  `${bet.home} vs ${bet.away}`,
-          note:   'spread_line absent même dans ESPN — clôture manuelle requise',
+          note:   'spread_line absent — clôture manuelle requise',
         });
         return null;
       }
@@ -181,21 +155,11 @@ function _determineOutcome(bet, result) {
     }
 
     case 'OVER_UNDER': {
-      // Priorité : ou_line stocké au placement → fallback ESPN result.odds.over_under
-      // odds_line = cote américaine (-110) — NE PAS utiliser comme ligne de total
+      // Priorité : ou_line stocké au placement.
+      // odds_line = cote américaine (-110) — NE PAS utiliser comme ligne de total.
       let line = bet.ou_line !== null && bet.ou_line !== undefined
         ? Number(bet.ou_line)
         : null;
-
-      // FALLBACK : récupérer depuis ESPN si ou_line absent
-      if (line === null && result.odds?.over_under != null) {
-        line = Number(result.odds.over_under);
-        Logger.info('PAPER_SETTLER_OU_FALLBACK', {
-          bet_id: bet.bet_id,
-          match:  `${bet.home} vs ${bet.away}`,
-          ou_line_used: line,
-        });
-      }
 
       if (line === null) {
         Logger.warn('PAPER_SETTLER_OU_NO_LINE', {

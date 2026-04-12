@@ -1,10 +1,10 @@
 /**
- * MANI BET PRO — data.orchestrator.js v3.10.1
+ * MANI BET PRO — data.orchestrator.js v3.11
  *
- * AJOUTS v3.10.1 :
- *   - Suppression _enrichInjuriesWithAI() (zombie v3.6) — élimine risque N appels Claude/soir.
- *   - Cache mémoire session _aiContextMemCache — 0 appel worker si même date déjà chargée.
- *   - Commentaires "cache 12h" corrigés → "cache 6h KV".
+ * AJOUTS v3.11 :
+ *   - Suppression complète de la dépendance à /nba/ai-context.
+ *   - Claude reste utilisé uniquement via /nba/ai-injuries.
+ *   - Cache mémoire par match/date pour éviter les appels répétés dans la session.
  *
  * AJOUTS v3.10 :
  *   - _loadTeamDetail(homeAbv, awayAbv) : charge /nba/team-detail depuis le worker.
@@ -15,19 +15,12 @@
  *   - store.set({ teamDetail }) après resolution du Promise.all.
  *
  * AJOUTS v3.9 :
- *   - _loadAIInjuries() : refactorisé pour le pipeline v6.27.
- *     Appelle /nba/roster-injuries (Tank01 roster complet, cache 3h) au lieu
- *     de N appels /nba/ai-injuries individuels par match.
- *     Appelle /nba/ai-context une seule fois pour tous les matchs du soir (cache 6h KV + cache memoire session).
- *     0 appel Claude par match — budget réduit de ~7 appels/soir à ~1 appel/soir.
- *   - _mergeInjuryReports() : adapté pour le format roster Tank01 v6.27.
- *     Source 'tank01_roster' reconnue et fusionnée correctement.
+ *   - _loadAIInjuries() : utilise uniquement /nba/ai-injuries.
+ *   - _mergeInjuryReports() : fusionne ESPN avec les blessures Claude.
  *
  * AJOUTS v3.8 :
  *   - _mergeInjuryReports : intègre players_limited (status_weight 0.4)
  *     dans le calcul du modificateur star.
- *   - team_context et market_signal exposés dans le rapport mergé
- *     pour affichage UI dans renderBlocPourquoi..1
  *
  * CORRECTIONS v3.7.1 :
  *   - _mergeInjuryReports() : statut Day-To-Day mis à jour en Doubtful
@@ -204,11 +197,11 @@ export class DataOrchestrator {
       // appelle _loadTeamDetail individuellement via le store
       // Étape 2a : ESPN + Tank01 + Odds + Stats — bloquant (données critiques moteur)
       // FIX 3 : _loadAIInjuries bloquant — moteur attend Claude avant de calculer
-      // Claude retourne injuries+PPG+contexte en 8-12s (cache KV 6h après)
+      // Claude retourne uniquement les blessures enrichies (PPG + statut)
       // Fallback ESPN transparent si Claude timeout ou indisponible
       const [injuryReport, aiInjuries, recentForms, oddsComparison, advancedStats] = await Promise.all([
         _loadInjuries(date),              // ESPN fallback (statuts basiques)
-        _loadAIInjuries(matches, date),   // Claude : injuries+PPG+contexte (bloquant)
+        _loadAIInjuries(matches, date),   // Claude : injuries uniquement (bloquant)
         _loadRecentForms(teamIds, season),
         _loadOddsComparison(),
         _loadAdvancedStats(),
@@ -388,9 +381,7 @@ async function _loadInjuries(date) {
 }
 
 
-// _enrichInjuriesWithAI() supprimée en v3.10 — fonction zombie v3.6.
-// Appelait /nba/ai-injuries par match (N appels Claude/soir). Remplacée
-// par _loadAIInjuries() + _fetchAIContext() (1 seul appel Claude/soir).
+// _enrichInjuriesWithAI() supprimée : Claude sert uniquement aux injuries.
 
 /**
  * Retourne l'abréviation Tank01 d'une équipe depuis son nom ESPN complet.
@@ -406,19 +397,12 @@ function _getTeamAbv(espnName) {
 
 
 /**
- * v3.9 : Pipeline injuries v6.27 — Tank01 roster + Claude contexte global.
- *
- * Avant v3.9 : N appels /nba/ai-injuries par match (1 Claude/match).
- * Après v3.9 :
- *   1. /nba/roster-injuries → roster complet NBA avec ppg + designation (cache 3h).
- *   2. /nba/ai-context → contexte motivationnel global pour tous les matchs (cache 6h KV, 1 Claude/soir max).
- *   3. Fusionne en format { by_team, team_context, market_signal } identique à v3.8.
- *
- * Retourne null si aucune donnée disponible (fallback transparent).
+ * Charge les injuries Claude, match par match, puis les regroupe par équipe ESPN.
+ * Claude ne sert qu'aux blessures.
  *
  * @param {Array}  matches - matchs du jour
  * @param {string} date    - YYYY-MM-DD
- * @returns {Promise<object|null>} { by_team, team_context, market_signal } ou null
+ * @returns {Promise<object|null>} { by_team } ou null
  */
 async function _loadAIInjuries(matches, date) {
   if (!matches || !matches.length) return null;
@@ -426,181 +410,106 @@ async function _loadAIInjuries(matches, date) {
   const dateForWorker = date ? date.replace(/-/g, '') : '';
   if (!dateForWorker || dateForWorker.length !== 8) return null;
 
-  // Construire la liste des matchs pour /nba/ai-context : AWAY@HOME
-  const gamesParam = matches.map(function(m) {
+  const pairs = matches.map(function(m) {
     const homeAbv = _getTeamAbv(m.home_team && m.home_team.name);
     const awayAbv = _getTeamAbv(m.away_team && m.away_team.name);
-    return (homeAbv && awayAbv) ? awayAbv + '@' + homeAbv : null;
-  }).filter(Boolean).join(',');
+    if (!homeAbv || !awayAbv) return null;
+    return { homeAbv: homeAbv, awayAbv: awayAbv };
+  }).filter(Boolean);
 
-  // FIX — Un seul appel Claude (injuries + contexte fusionnés)
-  // Tank01 roster supprimé — ne retournait pas les PPG des blessés LT
-  const contextData = await _fetchAIContext(dateForWorker, gamesParam);
+  const aiByTeam = {};
+  const seenByTeam = {};
 
-  // ── Construire aiByTeam depuis les injuries Claude ────────────────────
-  // FIX 2 : lire injuries_home/away depuis contextData (auparavant ignorées)
-  const aiByTeam      = {};
-  const aiTeamContext = {};
-  const aiMarketSignals = [];
+  for (const pair of pairs) {
+    const matchData = await _fetchAIInjuriesForMatch(pair.homeAbv, pair.awayAbv, dateForWorker);
+    if (!matchData) continue;
 
-  if (contextData && contextData.data) {
-    Object.values(contextData.data).forEach(function(ctx) {
-      if (!ctx || !ctx.game) return;
+    const homeEspn = ABV_TO_ESPN_NAME[pair.homeAbv] || null;
+    const awayEspn = ABV_TO_ESPN_NAME[pair.awayAbv] || null;
 
-      // Décoder AWAY@HOME
-      const parts   = ctx.game.split('@');
-      const awayAbv = parts[0] && parts[0].toUpperCase();
-      const homeAbv = parts[1] && parts[1].toUpperCase();
-
-      const homeEspn = ABV_TO_ESPN_NAME[homeAbv] || null;
-      const awayEspn = ABV_TO_ESPN_NAME[awayAbv] || null;
-
-      // ── Injuries HOME depuis Claude ──────────────────────────────────
-      if (homeEspn && Array.isArray(ctx.injuries_home)) {
-        ctx.injuries_home.forEach(function(p) {
-          if (!p || !p.name) return;
-          if (!aiByTeam[homeEspn]) aiByTeam[homeEspn] = [];
-          aiByTeam[homeEspn].push({
-            name:          p.name,
-            team:          homeAbv,
-            status:        p.status || 'Out',
-            ppg:           p.ppg    || null,
-            source:        'claude_web_search',
-            note:          p.reason || null,
-          });
-        });
-      }
-
-      // ── Injuries AWAY depuis Claude ──────────────────────────────────
-      if (awayEspn && Array.isArray(ctx.injuries_away)) {
-        ctx.injuries_away.forEach(function(p) {
-          if (!p || !p.name) return;
-          if (!aiByTeam[awayEspn]) aiByTeam[awayEspn] = [];
-          aiByTeam[awayEspn].push({
-            name:          p.name,
-            team:          awayAbv,
-            status:        p.status || 'Out',
-            ppg:           p.ppg    || null,
-            source:        'claude_web_search',
-            note:          p.reason || null,
-          });
-        });
-      }
-
-      // ── Contexte motivationnel ────────────────────────────────────────
-      if (homeEspn && ctx.motivation_home) aiTeamContext[homeEspn] = ctx.motivation_home;
-      if (awayEspn && ctx.motivation_away) aiTeamContext[awayEspn] = ctx.motivation_away;
-
-      // ── Line movement ─────────────────────────────────────────────────
-      if (ctx.line_movement) {
-        aiMarketSignals.push({
-          movement: null,
-          detail:   ctx.line_movement,
-          source:   'claude_web_search',
-        });
-      }
-    });
+    _appendAIPlayers(aiByTeam, seenByTeam, homeEspn, pair.homeAbv, matchData.players_home || []);
+    _appendAIPlayers(aiByTeam, seenByTeam, awayEspn, pair.awayAbv, matchData.players_away || []);
   }
 
   const totalPlayers = Object.values(aiByTeam).reduce(function(s, arr) { return s + arr.length; }, 0);
   Logger.info('AI_INJURIES_LOADED', {
-    teams:    Object.keys(aiByTeam).length,
-    players:  totalPlayers,
-    contexts: Object.keys(aiTeamContext).length,
-    source:   'claude_web_search',
+    teams:   Object.keys(aiByTeam).length,
+    players: totalPlayers,
+    source:  'claude_web_search',
   });
 
-  const hasData = totalPlayers > 0 || Object.keys(aiTeamContext).length > 0;
-  return hasData ? {
-    by_team:       aiByTeam,
-    team_context:  aiTeamContext,
-    market_signal: aiMarketSignals[0] || null,
-  } : null;
+  return totalPlayers > 0 ? { by_team: aiByTeam } : null;
 }
 
-/**
- * Appelle /nba/roster-injuries — roster Tank01 complet (cache 3h worker-side).
- * Timeout 15s. Non bloquant si Tank01 indisponible.
- */
-async function _fetchRosterInjuries() {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(function() { controller.abort(); }, 15000);
-    const response = await fetch(
-      API_CONFIG.WORKER_BASE_URL + '/nba/roster-injuries',
-      { signal: controller.signal, headers: { 'Accept': 'application/json' } }
-    );
-    clearTimeout(timer);
-    if (!response.ok) {
-      Logger.warn('ROSTER_INJURIES_HTTP_ERROR', { status: response.status });
-      return null;
-    }
-    const data = await response.json();
-    if (!data.available) {
-      Logger.warn('ROSTER_INJURIES_UNAVAILABLE', { note: data.note });
-      return null;
-    }
-    Logger.info('ROSTER_INJURIES_LOADED', {
-      source:  data.source,
-      players: data.players_indexed || Object.keys(data.data || {}).length,
+const _aiInjuriesMemCache = {};
+
+function _appendAIPlayers(aiByTeam, seenByTeam, espnTeamName, teamAbv, players) {
+  if (!espnTeamName || !Array.isArray(players) || !players.length) return;
+  if (!aiByTeam[espnTeamName]) aiByTeam[espnTeamName] = [];
+  if (!seenByTeam[espnTeamName]) seenByTeam[espnTeamName] = new Set();
+
+  players.forEach(function(player) {
+    if (!player || !player.name) return;
+    const dedupeKey = String(player.name).trim().toLowerCase();
+    if (seenByTeam[espnTeamName].has(dedupeKey)) return;
+    seenByTeam[espnTeamName].add(dedupeKey);
+
+    aiByTeam[espnTeamName].push({
+      name:   player.name,
+      team:   teamAbv,
+      status: player.status || 'Out',
+      ppg:    player.ppg ?? null,
+      source: player.source || 'claude_web_search',
+      note:   player.note || null,
     });
-    return data;
-  } catch (err) {
-    Logger.warn('ROSTER_INJURIES_FAILED', { message: err.message });
-    return null;
-  }
+  });
 }
 
-/**
- * Appelle /nba/ai-context — 1 seul appel Claude/soir pour tous les matchs (cache 6h KV + mem cache session).
- * Timeout 30s. Non bloquant si Claude indisponible.
- *
- * @param {string} dateForWorker - YYYYMMDD
- * @param {string} gamesParam    - "CLE@ATL,DEN@MEM,..."
- */
-// Cache memoire ai-context (session courante) — evite de rappeler le worker
-// si la date n'a pas change depuis le dernier chargement.
-// Le cache KV worker-side (6h) reste la source de verite entre sessions.
-var _aiContextMemCache = { date: null, data: null };
-
-async function _fetchAIContext(dateForWorker, gamesParam) {
-  if (!gamesParam) return null;
-
-  // Guard memoire : si meme date deja chargee dans cette session, retourner le cache
-  if (_aiContextMemCache.date === dateForWorker && _aiContextMemCache.data) {
-    Logger.info('AI_CONTEXT_MEM_HIT', { date: dateForWorker });
-    return _aiContextMemCache.data;
+async function _fetchAIInjuriesForMatch(homeAbv, awayAbv, dateForWorker) {
+  const cacheKey = dateForWorker + '_' + awayAbv + '@' + homeAbv;
+  if (_aiInjuriesMemCache[cacheKey]) {
+    Logger.info('AI_INJURIES_MEM_HIT', { game: awayAbv + '@' + homeAbv, date: dateForWorker });
+    return _aiInjuriesMemCache[cacheKey];
   }
 
   try {
     const controller = new AbortController();
-    const timer = setTimeout(function() { controller.abort(); }, 30000);
+    const timer = setTimeout(function() { controller.abort(); }, API_CONFIG.TIMEOUTS.AI || 30000);
     const response = await fetch(
-      API_CONFIG.WORKER_BASE_URL + '/nba/ai-context' +
+      API_CONFIG.WORKER_BASE_URL + '/nba/ai-injuries' +
       '?date=' + dateForWorker +
-      '&games=' + encodeURIComponent(gamesParam),
+      '&home=' + encodeURIComponent(homeAbv) +
+      '&away=' + encodeURIComponent(awayAbv),
       { signal: controller.signal, headers: { 'Accept': 'application/json' } }
     );
     clearTimeout(timer);
+
     if (!response.ok) {
-      Logger.warn('AI_CONTEXT_HTTP_ERROR', { status: response.status });
+      Logger.warn('AI_INJURIES_HTTP_ERROR', { game: awayAbv + '@' + homeAbv, status: response.status });
       return null;
     }
-    const data = await response.json();
-    if (!data.available || !data.data) {
-      Logger.info('AI_CONTEXT_UNAVAILABLE', { source: data.source, note: data.note });
+
+    const payload = await response.json();
+    if (!payload.available || !payload.data) {
+      Logger.info('AI_INJURIES_UNAVAILABLE', { game: awayAbv + '@' + homeAbv, note: payload.note || null });
       return null;
     }
-    Logger.info('AI_CONTEXT_LOADED', {
-      source:  data.source,
-      date:    data.date,
-      games:   data.games_count || '?',
-    });
-    // Stocker en memoire pour cette session
-    _aiContextMemCache = { date: dateForWorker, data };
-    return data;
+
+    const allPlayers = []
+      .concat(payload.data.players_out || [])
+      .concat(payload.data.players_doubtful || [])
+      .concat(payload.data.players_dtd_confirmed_out || [])
+      .concat(payload.data.players_limited || []);
+
+    const result = {
+      players_home: allPlayers.filter(function(p) { return String(p.team).toUpperCase() === homeAbv; }),
+      players_away: allPlayers.filter(function(p) { return String(p.team).toUpperCase() === awayAbv; }),
+    };
+
+    _aiInjuriesMemCache[cacheKey] = result;
+    return result;
   } catch (err) {
-    Logger.warn('AI_CONTEXT_FAILED', { message: err.message });
+    Logger.warn('AI_INJURIES_FAILED', { game: awayAbv + '@' + homeAbv, message: err.message });
     return null;
   }
 }

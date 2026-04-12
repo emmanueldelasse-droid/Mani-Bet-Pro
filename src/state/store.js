@@ -18,6 +18,7 @@ const INITIAL_STATE = {
   // ── Navigation ──────────────────────────────────────────────────────────
   currentRoute:  'dashboard',
   previousRoute: null,
+  selectedSport: 'NBA',
 
   // ── Matches ─────────────────────────────────────────────────────────────
   // { [matchId]: MatchObject }
@@ -65,6 +66,8 @@ const INITIAL_STATE = {
 
   // ── Logs API ────────────────────────────────────────────────────────────
   apiLogs: [],
+  appLogs: [],
+  aiLogs: [],
 
   // ── UI ───────────────────────────────────────────────────────────────────
   ui: {
@@ -198,6 +201,7 @@ class Store {
 
     const PERSISTABLE_KEYS = [
       'ui.displayMode',
+      'selectedSport',
       'history',
       'dashboardFilters',
       'matches',

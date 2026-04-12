@@ -1,40 +1,42 @@
 /**
- * MANI BET PRO — Theme Toggle
- * Ajouter dans app.js dans la fonction init(), après le render.
+ * MANI BET PRO — ui.theme-toggle.js v2
  *
- * Usage :
- *   import { initThemeToggle } from './ui/ui.theme-toggle.js';
- *   initThemeToggle();
+ * Bouton de thème unique pour toute l'application.
  */
 
 export function initThemeToggle() {
-  // Lire la préférence sauvegardée
   const saved = localStorage.getItem('mbp_theme') ?? 'dark';
-  _applyTheme(saved);
+  applyTheme(saved);
 
-  // Créer le bouton toggle
-  const btn = document.createElement('button');
-  btn.id          = 'theme-toggle';
-  btn.title       = 'Changer le thème';
+  let btn = document.getElementById('theme-toggle');
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.id = 'theme-toggle';
+    btn.title = 'Changer le thème';
+    document.body.appendChild(btn);
+  }
+
   btn.textContent = saved === 'light' ? '🌙' : '☀️';
-  document.body.appendChild(btn);
-
-  btn.addEventListener('click', () => {
+  btn.onclick = function() {
     const current = document.body.classList.contains('theme-light') ? 'light' : 'dark';
-    const next    = current === 'light' ? 'dark' : 'light';
-    _applyTheme(next);
+    const next = current === 'light' ? 'dark' : 'light';
+    applyTheme(next);
     localStorage.setItem('mbp_theme', next);
     btn.textContent = next === 'light' ? '🌙' : '☀️';
-  });
+  };
 }
 
-function _applyTheme(theme) {
+export function applyTheme(theme) {
+  const html = document.documentElement;
+
   if (theme === 'light') {
     document.body.classList.add('theme-light');
-    document.body.removeAttribute('data-theme');
     document.body.setAttribute('data-theme', 'light');
-  } else {
-    document.body.classList.remove('theme-light');
-    document.body.removeAttribute('data-theme');
+    html.setAttribute('data-theme', 'light');
+    return;
   }
+
+  document.body.classList.remove('theme-light');
+  document.body.setAttribute('data-theme', 'dark');
+  html.setAttribute('data-theme', 'dark');
 }
