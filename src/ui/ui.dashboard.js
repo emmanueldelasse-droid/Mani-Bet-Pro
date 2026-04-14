@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — ui.dashboard.js v4.7
+ * MANI BET PRO — ui.dashboard.js v5.0
  *
  * AJOUTS v4.7 :
  *   - Auto-refresh à 23h30 et 07h00 heure de Paris.
@@ -40,71 +40,189 @@ import { LoadingUI }        from './ui.loading.js';
 import { Logger }           from '../utils/utils.logger.js';
 import { americanToDecimal, formatEdge } from '../utils/utils.odds.js';
 
-// Injecter les styles dynamiques v4 (pulse, barre proba, countdown)
+// Injecter les styles dynamiques v5 (nouvelle carte)
 function _injectStyles() {
-  if (document.querySelector('#mbp-dash-v4-styles')) return;
+  if (document.querySelector('#mbp-dash-v5-styles')) return;
   const s = document.createElement('style');
-  s.id = 'mbp-dash-v4-styles';
+  s.id = 'mbp-dash-v5-styles';
   s.textContent = `
     @keyframes mbp-pulse {
-      0%, 100% { opacity: 1; transform: translateY(-50%) scale(1); }
-      50%       { opacity: 0.4; transform: translateY(-50%) scale(0.7); }
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.35; transform: scale(0.65); }
     }
-    .mbp-proba-bar {
-      height: 5px;
-      border-radius: 3px;
-      overflow: hidden;
-      background: var(--color-border);
-      margin: 6px 0 2px;
-      position: relative;
+    @keyframes mbp-bar-in {
+      from { width: 50%; }
     }
-    .mbp-proba-bar__fill {
-      height: 100%;
-      border-radius: 3px;
-      background: var(--color-signal);
-      transition: width 0.6s ease;
-    }
+
+    /* ── COUNTDOWN ── */
     .mbp-countdown {
-      font-size: 11px;
-      font-weight: 600;
+      font-size: 10px; font-weight: 700; letter-spacing: 0.03em;
       color: var(--color-warning);
-      padding: 2px 6px;
-      border-radius: 4px;
-      background: rgba(255,165,0,0.08);
+      padding: 2px 6px; border-radius: 3px;
+      background: rgba(245,158,11,0.10);
     }
-    .mbp-countdown--soon { color: var(--color-danger); background: rgba(241,70,104,0.08); }
-    .mbp-countdown--live { color: var(--color-success); background: rgba(72,199,142,0.08); }
+    .mbp-countdown--soon { color: var(--color-danger); background: rgba(239,68,68,0.10); }
+    .mbp-countdown--live { color: var(--color-success); background: rgba(34,197,94,0.10); animation: mbp-live-pulse 2s ease-in-out infinite; }
+    @keyframes mbp-live-pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+
+    /* ── ZONE ÉQUIPES v5 ── */
+    .mc-teams {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      gap: 0;
+      padding: 2px 0 0;
+    }
+    .mc-team { display: flex; flex-direction: column; gap: 3px; }
+    .mc-team--away { align-items: flex-end; text-align: right; }
+
+    .mc-team__abbr {
+      font-family: var(--font-mono);
+      font-size: 22px; font-weight: 800;
+      letter-spacing: -0.02em;
+      line-height: 1;
+      color: var(--color-text-primary);
+    }
+    .mc-team__name {
+      font-size: 11px; font-weight: 400;
+      color: var(--color-text-secondary);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      max-width: 110px;
+    }
+    .mc-team__record {
+      font-family: var(--font-mono);
+      font-size: 10px; color: var(--color-text-muted);
+    }
+    .mc-team__odds {
+      font-family: var(--font-mono);
+      font-size: 15px; font-weight: 700;
+      margin-top: 5px; line-height: 1;
+    }
+    .mc-team__odds--home { color: var(--color-text-primary); }
+    .mc-team__odds--away { color: var(--color-text-primary); }
+    .mc-team__odds-src {
+      font-size: 9px; font-weight: 400;
+      color: var(--color-text-muted);
+      display: block; margin-top: 1px;
+    }
+    .mc-team__prob {
+      font-size: 11px; font-weight: 700;
+      color: var(--color-text-muted);
+      margin-top: 2px;
+    }
+    .mc-team__prob--fav { color: var(--color-signal); }
+
+    /* Séparateur central */
+    .mc-vs {
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 4px; padding: 0 10px;
+      min-width: 44px;
+    }
+    .mc-vs__label {
+      font-family: var(--font-mono);
+      font-size: 10px; font-weight: 700;
+      color: var(--color-text-muted);
+      letter-spacing: 0.12em;
+    }
+    .mc-vs__score {
+      font-family: var(--font-mono);
+      font-size: 13px; font-weight: 700;
+      color: var(--color-text-primary);
+      text-align: center; line-height: 1.3;
+    }
+
+    /* Barre de probabilité v5 */
+    .mc-proba-bar {
+      height: 3px; border-radius: 2px; overflow: hidden;
+      background: var(--color-border-default);
+      margin: 8px 0 4px;
+    }
+    .mc-proba-bar__fill {
+      height: 100%; border-radius: 2px;
+      background: linear-gradient(90deg, var(--color-signal) 0%, var(--color-signal-light) 100%);
+      transition: width 0.7s cubic-bezier(0.4,0,0.2,1);
+      animation: mbp-bar-in 0.7s cubic-bezier(0.4,0,0.2,1);
+    }
+
+    /* ── NIVEAU / NET RATING ── */
+    .mc-level {
+      display: flex; align-items: center; gap: 5px;
+      padding: 4px 8px; border-radius: 4px;
+      font-size: 10px; font-weight: 600;
+    }
+    .mc-level__dot {
+      width: 5px; height: 5px; border-radius: 50%;
+      background: currentColor; flex-shrink: 0;
+    }
+
+    /* ── MEILLEURE REC ── */
+    .mc-best-rec {
+      display: flex; align-items: center; gap: 6px;
+      padding: 7px 10px; border-radius: 6px;
+      background: var(--color-bg-elevated);
+      border: 1px solid var(--color-border-default);
+    }
+    .mc-best-rec--value {
+      border-color: rgba(34,197,94,0.25);
+      background: rgba(34,197,94,0.05);
+    }
+    .mc-best-rec--warn {
+      border-color: rgba(245,158,11,0.20);
+      background: rgba(245,158,11,0.04);
+    }
+    .mc-best-rec__star {
+      font-size: 10px; flex-shrink: 0;
+      color: var(--color-success);
+    }
+    .mc-best-rec__label {
+      font-size: 10px; color: var(--color-text-muted);
+      flex-shrink: 0; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .mc-best-rec__side {
+      font-size: 12px; font-weight: 700;
+      color: var(--color-text-primary);
+      flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .mc-best-rec__odds {
+      font-family: var(--font-mono);
+      font-size: 13px; font-weight: 700;
+      color: var(--color-text-primary);
+      flex-shrink: 0;
+    }
+    .mc-best-rec__edge {
+      font-family: var(--font-mono);
+      font-size: 11px; font-weight: 700;
+      flex-shrink: 0; min-width: 36px; text-align: right;
+    }
+
+    /* ── DONNÉES PARTIELLES ── */
+    .mbp-weight-warning {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 10px; font-weight: 600;
+      color: var(--color-warning);
+      background: rgba(245,158,11,0.08);
+      border: 1px solid rgba(245,158,11,0.20);
+      padding: 2px 7px; border-radius: 4px;
+    }
+
+    /* ── PARIS EN COURS ── */
+    .mbp-open-bet-indicator {
+      display: flex; align-items: center; gap: 5px;
+      font-size: 10px; font-weight: 600;
+      color: var(--color-signal);
+      padding: 3px 7px; border-radius: 4px;
+      background: rgba(59,130,246,0.07);
+      border: 1px solid rgba(59,130,246,0.18);
+    }
     .mbp-bet-dot {
       display: inline-block;
-      width: 7px; height: 7px;
-      border-radius: 50%;
+      width: 6px; height: 6px; border-radius: 50%;
       background: var(--color-signal);
-      margin-right: 4px;
-      vertical-align: middle;
     }
-    .match-card__net-rating-v4 {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      font-size: 11px;
-      font-weight: 600;
-      padding: 2px 7px;
-      border-radius: 4px;
-      margin-top: 4px;
-    }
-    .mbp-weight-warning {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      font-size: 10px;
-      font-weight: 600;
-      color: var(--color-warning);
-      background: rgba(255,165,0,0.08);
-      border: 1px solid rgba(255,165,0,0.20);
-      padding: 2px 7px;
-      border-radius: 4px;
-      margin-top: 4px;
-    }
+
+    /* IDs cachés hérités — maintenus pour _updateMatchCard */
+    #proba-placeholder { display: none !important; }
   `;
   document.head.appendChild(s);
 }
@@ -431,85 +549,133 @@ function _createMatchCard(match) {
   card.className       = 'match-card';
   card.dataset.matchId = match.id;
 
-  const time = match.datetime
+  const time         = match.datetime
     ? new Date(match.datetime).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
     : '—';
   const countdownHtml = match.datetime ? _renderCountdown(match.datetime) : '';
+  const isTennis      = match.sport === 'TENNIS';
+  const homeRecord    = isTennis ? (match.surface ?? '') : (match.home_team?.record ?? '—');
+  const awayRecord    = isTennis ? (match.tournament ?? '') : (match.away_team?.record ?? '—');
+  const isFinal       = match.status === 'STATUS_FINAL' || match.status === 'STATUS_FINAL_OT';
+  const homeScore     = match.home_team?.score;
+  const awayScore     = match.away_team?.score;
+  const showScore     = isFinal && homeScore != null && awayScore != null;
 
-  const isTennis   = match.sport === 'TENNIS';
-  const homeRecord = isTennis ? (match.surface ?? '') : (match.home_team?.record ?? '—');
-  const awayRecord = isTennis ? (match.tournament ?? '') : (match.away_team?.record ?? '—');
-  const isFinal    = match.status === 'STATUS_FINAL' || match.status === 'STATUS_FINAL_OT';
-  const homeScore  = match.home_team?.score;
-  const awayScore  = match.away_team?.score;
-  const showScore  = isFinal && homeScore != null && awayScore != null;
-  const odds       = match.odds;
-  const spread     = odds?.spread != null ? (odds.spread > 0 ? `+${odds.spread}` : String(odds.spread)) : '—';
-  const ou         = odds?.over_under ?? '—';
+  // Cotes ML depuis market_odds (Pinnacle) ou odds ESPN
+  const marketOdds  = match.market_odds ?? null;
+  const pinnacle    = marketOdds?.bookmakers?.find(b => b.key === 'winamax')
+                   ?? marketOdds?.bookmakers?.find(b => b.key === 'pinnacle')
+                   ?? marketOdds?.bookmakers?.[0]
+                   ?? null;
+  const espnOdds    = match.odds ?? {};
+
+  function _decToAm(d) { return d >= 2 ? Math.round((d-1)*100) : Math.round(-100/(d-1)); }
+  function _fmtML(am) {
+    if (am == null) return null;
+    return am > 0 ? `+${am}` : String(am);
+  }
+  function _amToDec(am) {
+    if (am == null) return null;
+    return am > 0 ? Number((am/100+1).toFixed(2)) : Number((1-100/am).toFixed(2));
+  }
+
+  const homeAmRaw = espnOdds.home_ml ?? (pinnacle?.home_ml != null ? _decToAm(pinnacle.home_ml) : null);
+  const awayAmRaw = espnOdds.away_ml ?? (pinnacle?.away_ml != null ? _decToAm(pinnacle.away_ml) : null);
+  const homeML    = _fmtML(homeAmRaw);
+  const awayML    = _fmtML(awayAmRaw);
+  const oddsSource = pinnacle ? (pinnacle.key === 'winamax' ? 'Winamax' : 'Pinnacle') : (espnOdds.home_ml != null ? 'ESPN' : null);
+
+  // Spread + O/U pour la ligne d'infos
+  const spread = espnOdds.spread != null ? (espnOdds.spread > 0 ? `+${espnOdds.spread}` : String(espnOdds.spread))
+               : pinnacle?.spread_line != null ? (pinnacle.spread_line > 0 ? `+${pinnacle.spread_line}` : String(pinnacle.spread_line))
+               : null;
+  const ou     = espnOdds.over_under ?? pinnacle?.total_line ?? null;
 
   card.innerHTML = `
-    <div class="match-card__header">
-      <span class="sport-tag ${match.sport === 'TENNIS' ? 'sport-tag--tennis' : 'sport-tag--nba'}">${match.sport === 'TENNIS' ? 'Tennis' : 'NBA'}</span>
-      <span class="match-card__time text-muted">${isFinal ? 'Terminé' : time + ' (heure locale)'}</span>
+    <!-- ── HEADER ── -->
+    <div class="match-card__header" style="display:flex;align-items:center;gap:6px">
+      <span class="sport-tag ${isTennis ? 'sport-tag--tennis' : 'sport-tag--nba'}">${isTennis ? 'Tennis' : 'NBA'}</span>
+      <span style="font-size:11px;color:var(--color-text-muted)">${isFinal ? 'Terminé' : time}</span>
       ${!isFinal ? countdownHtml : ''}
-      <span class="match-card__status-badge badge badge--inconclusive" id="badge-${match.id}">
+      <span style="margin-left:auto" class="match-card__status-badge badge badge--inconclusive" id="badge-${match.id}">
         ${isFinal ? 'Final' : 'Analyse…'}
       </span>
     </div>
 
-    <div class="match-card__teams">
-      <div class="match-card__team">
-        <span class="match-card__team-abbr">${match.home_team?.abbreviation ?? '—'}</span>
-        <span class="match-card__team-name truncate">${match.home_team?.name ?? '—'}</span>
-        <span class="match-card__team-record text-muted mono">${homeRecord}</span>
+    <!-- ── ÉQUIPES + COTES ── -->
+    <div class="mc-teams">
+
+      <!-- Équipe domicile -->
+      <div class="mc-team">
+        <span class="mc-team__abbr">${match.home_team?.abbreviation ?? '—'}</span>
+        <span class="mc-team__name">${match.home_team?.name ?? '—'}</span>
+        <span class="mc-team__record">${homeRecord}</span>
+        ${homeML ? `
+        <span class="mc-team__odds mc-team__odds--home" id="odds-home-${match.id}">${homeML}</span>
+        ${oddsSource ? `<span class="mc-team__odds-src">${oddsSource}</span>` : ''}
+        ` : `<span class="mc-team__odds" id="odds-home-${match.id}" style="color:var(--color-text-muted)">—</span>`}
+        <!-- prob moteur (cachée — mise à jour par _updateMatchCard) -->
+        <span class="mc-team__prob" id="motor-home-${match.id}" style="display:none"></span>
+        <span style="display:none" id="market-home-${match.id}"></span>
       </div>
-      <div class="match-card__vs" style="text-align:center">
+
+      <!-- Séparateur central -->
+      <div class="mc-vs">
         ${showScore
-          ? `<div style="font-family:var(--font-mono);font-size:20px;font-weight:700;line-height:1.2">${homeScore}<br><span style="font-size:11px;color:var(--color-muted)">–</span><br>${awayScore}</div>`
-          : 'VS'
+          ? `<div class="mc-vs__score">${homeScore}<br><span style="font-size:10px;color:var(--color-text-muted)">–</span><br>${awayScore}</div>`
+          : `<span class="mc-vs__label">VS</span>`
         }
+        ${ou ? `<span style="font-size:9px;color:var(--color-text-muted);margin-top:2px">O/U ${ou}</span>` : ''}
+        ${spread ? `<span style="font-size:9px;color:var(--color-text-muted)">±${spread.replace(/[+-]/g,'')}</span>` : ''}
       </div>
-      <div class="match-card__team match-card__team--away">
-        <span class="match-card__team-abbr">${match.away_team?.abbreviation ?? '—'}</span>
-        <span class="match-card__team-name truncate">${match.away_team?.name ?? '—'}</span>
-        <span class="match-card__team-record text-muted mono">${awayRecord}</span>
-      </div>
-    </div>
 
-    <!-- Probabilités -->
-    <div id="proba-${match.id}" class="match-card__proba" style="display:none">
-      <div class="match-card__proba-side" id="proba-home-${match.id}">
-        <span class="match-card__proba-motor" id="motor-home-${match.id}">—%</span>
-        <span class="match-card__proba-market text-muted" id="market-home-${match.id}"></span>
-        <span class="text-muted" style="font-size:10px">${match.home_team?.abbreviation ?? 'DOM'}</span>
-      </div>
-      <div class="match-card__proba-sep text-muted" style="font-size:11px">vs</div>
-      <div class="match-card__proba-side match-card__proba-side--away" id="proba-away-${match.id}">
-        <span class="match-card__proba-motor" id="motor-away-${match.id}">—%</span>
-        <span class="match-card__proba-market text-muted" id="market-away-${match.id}"></span>
-        <span class="text-muted" style="font-size:10px">${match.away_team?.abbreviation ?? 'EXT'}</span>
+      <!-- Équipe extérieure -->
+      <div class="mc-team mc-team--away">
+        <span class="mc-team__abbr">${match.away_team?.abbreviation ?? '—'}</span>
+        <span class="mc-team__name">${match.away_team?.name ?? '—'}</span>
+        <span class="mc-team__record">${awayRecord}</span>
+        ${awayML ? `
+        <span class="mc-team__odds mc-team__odds--away" id="odds-away-${match.id}">${awayML}</span>
+        ${oddsSource ? `<span class="mc-team__odds-src">${oddsSource}</span>` : ''}
+        ` : `<span class="mc-team__odds" id="odds-away-${match.id}" style="color:var(--color-text-muted)">—</span>`}
+        <span class="mc-team__prob" id="motor-away-${match.id}" style="display:none"></span>
+        <span style="display:none" id="market-away-${match.id}"></span>
       </div>
     </div>
 
-    <!-- Edge + qualité -->
-    <div id="edge-${match.id}" style="display:none" class="match-card__edge">
-      <span style="font-size:10px;font-weight:600;color:var(--color-muted)">Avantage</span>
-      <span class="match-card__edge-value" id="edge-val-${match.id}">—</span>
-      <span style="font-size:10px;font-weight:600;color:var(--color-muted);margin-left:12px">Qualité données</span>
-      <span class="mono" style="font-size:11px" id="quality-val-${match.id}">—</span>
+    <!-- Barre de probabilité (rendue par _updateMatchCard) -->
+    <div id="proba-bar-${match.id}" style="display:none">
+      <div class="mc-proba-bar"><div class="mc-proba-bar__fill" id="proba-fill-${match.id}" style="width:50%"></div></div>
+      <div style="display:flex;justify-content:space-between;margin-top:2px">
+        <span id="prob-label-home-${match.id}" style="font-size:9px;color:var(--color-text-muted)"></span>
+        <span id="prob-label-away-${match.id}" style="font-size:9px;color:var(--color-text-muted)"></span>
+      </div>
     </div>
 
-    ${odds ? `
-    <div class="match-card__stats-inline text-muted" style="font-size:11px;display:flex;gap:12px">
-      <span class="mono">Spread ${spread} · O/U ${ou}</span>
-    </div>` : ''}
+    <!-- Nœuds hérités — conservés pour compatibilité _updateMatchCard -->
+    <div id="proba-${match.id}" style="display:none"></div>
+    <div id="edge-${match.id}" style="display:none">
+      <span id="edge-val-${match.id}"></span>
+      <span id="quality-val-${match.id}"></span>
+    </div>
 
-    <!-- Paris recommandés -->
+    <!-- Niveau / signal principal (injecté par _updateMatchCard) -->
+    <div id="level-${match.id}" style="display:none"></div>
+
+    <!-- Meilleure recommandation (rendue par _updateMatchCard) -->
+    <div id="best-rec-${match.id}" style="display:none"></div>
+
+    <!-- Paris recommandés supplémentaires -->
     <div id="recs-${match.id}" class="match-card__recs" style="display:none"></div>
 
-    <button class="btn btn--ghost match-card__cta" data-match-id="${match.id}" data-analysis-id="">
-      → Analyser
-    </button>
+    <!-- Footer : paris en cours + CTA -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:2px;gap:8px">
+      <div id="bet-indicator-${match.id}"></div>
+      <button class="btn btn--ghost match-card__cta" data-match-id="${match.id}" data-analysis-id=""
+        style="margin-top:0;width:auto;padding:5px 12px;font-size:11px;flex-shrink:0">
+        → Voir analyse
+      </button>
+    </div>
   `;
 
   card.querySelector('.match-card__cta').addEventListener('click', (e) => {
@@ -522,284 +688,193 @@ function _createMatchCard(match) {
 
 function _updateMatchCard(list, matchId, analysis, match, ptState) {
   const decision = analysis.decision ?? _legacyDecision(analysis);
+  const card     = list.querySelector(`[data-match-id="${matchId}"]`);
+  if (!card) return;
 
-  // Badge décision
-  const badge = list.querySelector(`#badge-${matchId}`);
+  // ── 1. Badge décision ────────────────────────────────────────────────────
+  const badge = card.querySelector(`#badge-${matchId}`);
   if (badge) {
     const cfg = _decisionConfig(decision);
     badge.className = `match-card__status-badge badge ${cfg.cssClass}`;
     if (decision === 'ANALYSER') {
-      badge.innerHTML = `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;margin-right:5px;vertical-align:middle;animation:mbp-pulse 1.5s ease-in-out infinite"></span>${cfg.label}`;
+      badge.innerHTML = `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;margin-right:4px;vertical-align:middle;animation:mbp-pulse 1.5s ease-in-out infinite"></span>${cfg.label}`;
     } else {
       badge.textContent = cfg.label;
     }
   }
 
-  // Bordure carte
-  const card = list.querySelector(`[data-match-id="${matchId}"]`);
-  if (card) {
-    card.dataset.analysisId = analysis.analysis_id ?? '';
-    const cta = card.querySelector('.match-card__cta');
-    if (cta) cta.dataset.analysisId = analysis.analysis_id ?? '';
-    const borderColors = {
-      ANALYSER:    'var(--color-success)',
-      EXPLORER:    'var(--color-warning)',
-      INSUFFISANT: 'transparent',
-      'REJETÉ':    'transparent',
-    };
-    const color = borderColors[decision];
-    if (color && color !== 'transparent') {
-      card.style.borderLeft = `3px solid ${color}`;
-    }
-  }
+  // ── 2. Bordure gauche selon décision ─────────────────────────────────────
+  card.dataset.analysisId = analysis.analysis_id ?? '';
+  const cta = card.querySelector('.match-card__cta');
+  if (cta) cta.dataset.analysisId = analysis.analysis_id ?? '';
 
-  // Probabilités moteur
-  const probaBlock = list.querySelector(`#proba-${matchId}`);
-  if (probaBlock && analysis.predictive_score !== null) {
+  const borderColors = { ANALYSER: 'var(--color-success)', EXPLORER: 'var(--color-warning)' };
+  const borderColor  = borderColors[decision];
+  if (borderColor) card.style.borderLeft = `3px solid ${borderColor}`;
+
+  // ── 3. Probabilités + barre + cotes colorées ─────────────────────────────
+  if (analysis.predictive_score !== null) {
     const homeProb = Math.round(analysis.predictive_score * 100);
     const awayProb = 100 - homeProb;
+    const isFavHome = homeProb > awayProb;
 
-    const motorHome  = list.querySelector(`#motor-home-${matchId}`);
-    const motorAway  = list.querySelector(`#motor-away-${matchId}`);
-    const marketHome = list.querySelector(`#market-home-${matchId}`);
-    const marketAway = list.querySelector(`#market-away-${matchId}`);
-
-    if (motorHome) {
-      motorHome.textContent = `${homeProb}%`;
-      motorHome.className   = `match-card__proba-motor${homeProb > awayProb ? ' match-card__proba-motor--fav' : ''}`;
+    // Colorier les cotes ML selon le favori moteur
+    const oddsHomeEl = card.querySelector(`#odds-home-${matchId}`);
+    const oddsAwayEl = card.querySelector(`#odds-away-${matchId}`);
+    if (oddsHomeEl) {
+      oddsHomeEl.style.color = isFavHome
+        ? 'var(--color-text-primary)'
+        : 'var(--color-text-muted)';
+      if (isFavHome) oddsHomeEl.style.fontWeight = '800';
     }
-    if (motorAway) {
-      motorAway.textContent = `${awayProb}%`;
-      motorAway.className   = `match-card__proba-motor${awayProb > homeProb ? ' match-card__proba-motor--fav' : ''}`;
-    }
-
-    const marketProbHome = analysis.betting_recommendations?.market_prob_home;
-    const marketProbAway = analysis.betting_recommendations?.market_prob_away;
-    if (marketHome && marketProbHome != null) marketHome.textContent = `Marché ${Math.round(marketProbHome * 100)}%`;
-    if (marketAway && marketProbAway != null) marketAway.textContent = `Marché ${Math.round(marketProbAway * 100)}%`;
-
-    probaBlock.style.display = '';
-
-    // Barre de probabilité horizontale
-    const existingBar = card?.querySelector('.mbp-proba-bar');
-    if (!existingBar && card) {
-      const bar = document.createElement('div');
-      bar.className = 'mbp-proba-bar';
-      bar.innerHTML = `<div class="mbp-proba-bar__fill" style="width:${homeProb}%"></div>`;
-      probaBlock.after(bar);
-    }
-  }
-
-  // Edge + qualité — 3 niveaux de couleur
-  const edgeBlock = list.querySelector(`#edge-${matchId}`);
-  const edgeVal   = list.querySelector(`#edge-val-${matchId}`);
-  const qualVal   = list.querySelector(`#quality-val-${matchId}`);
-  const best      = analysis.betting_recommendations?.best;
-
-  if (edgeBlock && best?.edge != null) {
-    edgeBlock.style.display = '';
-
-    if (edgeVal) {
-      edgeVal.textContent = `+${best.edge}%`;
-      edgeVal.style.color = best.edge >= 12
-        ? 'var(--color-success)'
-        : best.edge >= 7
-        ? 'var(--color-warning)'
-        : 'var(--color-muted)';
+    if (oddsAwayEl) {
+      oddsAwayEl.style.color = !isFavHome
+        ? 'var(--color-text-primary)'
+        : 'var(--color-text-muted)';
+      if (!isFavHome) oddsAwayEl.style.fontWeight = '800';
     }
 
-    if (qualVal && analysis.data_quality_score != null) {
-      const q = Math.round(analysis.data_quality_score * 100);
-      qualVal.textContent = `${q}%`;
-      qualVal.style.color = q >= 80
-        ? 'var(--color-success)'
-        : q >= 60
-        ? 'var(--color-warning)'
-        : 'var(--color-danger)';
+    // Probabilités sous les équipes
+    const motorHomeEl = card.querySelector(`#motor-home-${matchId}`);
+    const motorAwayEl = card.querySelector(`#motor-away-${matchId}`);
+    if (motorHomeEl) {
+      motorHomeEl.textContent = `${homeProb}% analyse`;
+      motorHomeEl.className   = `mc-team__prob${isFavHome ? ' mc-team__prob--fav' : ''}`;
+      motorHomeEl.style.display = '';
+    }
+    if (motorAwayEl) {
+      motorAwayEl.textContent = `${awayProb}% analyse`;
+      motorAwayEl.className   = `mc-team__prob${!isFavHome ? ' mc-team__prob--fav' : ''}`;
+      motorAwayEl.style.display = '';
+    }
+
+    // Barre de probabilité
+    const probaBarEl   = card.querySelector(`#proba-bar-${matchId}`);
+    const probaFillEl  = card.querySelector(`#proba-fill-${matchId}`);
+    const labelHomeEl  = card.querySelector(`#prob-label-home-${matchId}`);
+    const labelAwayEl  = card.querySelector(`#prob-label-away-${matchId}`);
+    if (probaBarEl && probaFillEl) {
+      probaFillEl.style.width = `${homeProb}%`;
+      if (labelHomeEl) labelHomeEl.textContent = `${match?.home_team?.abbreviation ?? 'DOM'} ${homeProb}%`;
+      if (labelAwayEl) labelAwayEl.textContent = `${awayProb}% ${match?.away_team?.abbreviation ?? 'EXT'}`;
+      probaBarEl.style.display = '';
     }
   }
 
-  // Badge warning weight_coverage — v4.5
-  // Affiché quand < 75% des poids sont couverts par des données disponibles.
-  // Ex : forme récente manquante = signal à 0.20 de poids non calculé.
-  if (card && !card.querySelector('.mbp-weight-warning')) {
+  // ── 4. Niveau / Net Rating ────────────────────────────────────────────────
+  const netRating = analysis.variables_used?.net_rating_diff?.value;
+  const levelEl   = card.querySelector(`#level-${matchId}`);
+  if (levelEl && netRating != null) {
+    const absVal  = Math.abs(netRating);
+    const domTeam = netRating > 0
+      ? (match?.home_team?.abbreviation ?? 'DOM')
+      : (match?.away_team?.abbreviation ?? 'EXT');
+
+    let label, color, bg;
+    if (absVal < 2)       { label = 'Niveau équivalent';          color = 'var(--color-text-muted)'; bg = 'rgba(255,255,255,0.04)'; }
+    else if (absVal < 4)  { label = `Léger avantage ${domTeam}`;  color = 'var(--color-warning)';    bg = 'rgba(245,158,11,0.08)'; }
+    else if (absVal < 7)  { label = `Avantage ${domTeam}`;        color = 'var(--color-warning)';    bg = 'rgba(245,158,11,0.08)'; }
+    else if (absVal < 10) { label = `Domination ${domTeam}`;      color = netRating > 0 ? 'var(--color-success)' : 'var(--color-danger)'; bg = netRating > 0 ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)'; }
+    else                  { label = `Mismatch total — ${domTeam}`; color = netRating > 0 ? 'var(--color-success)' : 'var(--color-danger)'; bg = netRating > 0 ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)'; }
+
+    levelEl.className = 'mc-level';
+    levelEl.style.cssText = `color:${color};background:${bg}`;
+    levelEl.innerHTML = `<span class="mc-level__dot"></span><span>${label}</span>`;
+    levelEl.style.display = '';
+  }
+
+  // ── 5. Badge warning données partielles ──────────────────────────────────
+  if (!card.querySelector('.mbp-weight-warning')) {
     const coverage = analysis.weight_coverage;
     if (coverage !== null && coverage !== undefined && coverage < 0.75) {
-      const missing = analysis.missing_variables ?? [];
       const LABELS = {
-        recent_form_ema:  'forme récente',
-        net_rating_diff:  'net rating',
-        absences_impact:  'blessures',
-        home_away_split:  'split dom/ext',
-        efg_diff:         'efficacité tir',
-        back_to_back:     'back-to-back',
-        rest_days_diff:   'repos',
-        win_pct_diff:     'bilan saison',
-        defensive_diff:   'défense',
+        recent_form_ema: 'forme récente', net_rating_diff: 'net rating',
+        absences_impact: 'blessures',     home_away_split: 'split dom/ext',
+        efg_diff: 'efficacité tir',       back_to_back: 'back-to-back',
+        rest_days_diff: 'repos',          win_pct_diff: 'bilan saison',
+        defensive_diff: 'défense',
       };
-      const missingLabels = missing
-        .map(id => LABELS[id] ?? id)
-        .slice(0, 3)
-        .join(', ');
-      const pct = Math.round(coverage * 100);
-      const warn = document.createElement('div');
-      warn.className = 'mbp-weight-warning';
-      warn.title = `Données manquantes : ${missingLabels || 'inconnues'}`;
-      warn.innerHTML = `⚠ Données partielles (${pct}%) — ${missingLabels || 'signaux manquants'}`;
-      const edgeEl = list.querySelector(`#edge-${matchId}`);
-      if (edgeEl) edgeEl.after(warn);
+      const missing       = analysis.missing_variables ?? [];
+      const missingLabels = missing.map(id => LABELS[id] ?? id).slice(0, 3).join(', ');
+      const warn          = document.createElement('div');
+      warn.className      = 'mbp-weight-warning';
+      warn.title          = `Données manquantes : ${missingLabels || 'inconnues'}`;
+      warn.textContent    = `⚠ Données partielles (${Math.round(coverage * 100)}%)`;
+      const levelEl2 = card.querySelector(`#level-${matchId}`);
+      if (levelEl2) levelEl2.after(warn);
     }
   }
 
-  // Net Rating — lecture directe v4 (signal dominant du moteur)
-  const netRating = analysis.variables_used?.net_rating_diff?.value;
-  if (card && netRating != null) {
-    const existing = card.querySelector('.match-card__net-rating-v4');
-    if (!existing) {
-      // Déterminer quelle équipe domine et à quel niveau
-      const absVal   = Math.abs(netRating);
-      const domTeam  = netRating > 0
-        ? (match?.home_team?.abbreviation ?? 'DOM')
-        : (match?.away_team?.abbreviation ?? 'EXT');
+  // ── 6. Meilleure recommandation ───────────────────────────────────────────
+  const bestRecEl = card.querySelector(`#best-rec-${matchId}`);
+  const best      = analysis.betting_recommendations?.best;
 
-      let domLabel, color, bg;
-      if (absVal < 2) {
-        domLabel = 'Niveau équivalent';
-        color    = 'var(--color-muted)';
-        bg       = 'rgba(255,255,255,0.04)';
-      } else if (absVal < 4) {
-        domLabel = `Léger avantage ${domTeam}`;
-        color    = 'var(--color-warning)';
-        bg       = 'rgba(255,165,0,0.08)';
-      } else if (absVal < 7) {
-        domLabel = `Avantage ${domTeam}`;
-        color    = 'var(--color-warning)';
-        bg       = 'rgba(255,165,0,0.08)';
-      } else if (absVal < 10) {
-        domLabel = `Domination forte — ${domTeam}`;
-        color    = netRating > 0 ? 'var(--color-success)' : 'var(--color-danger)';
-        bg       = netRating > 0 ? 'rgba(72,199,142,0.10)' : 'rgba(241,70,104,0.10)';
-      } else {
-        domLabel = `Mismatch total — ${domTeam}`;
-        color    = netRating > 0 ? 'var(--color-success)' : 'var(--color-danger)';
-        bg       = netRating > 0 ? 'rgba(72,199,142,0.10)' : 'rgba(241,70,104,0.10)';
-      }
+  if (bestRecEl && best?.edge != null) {
+    const typeLabel = best.type === 'MONEYLINE' ? 'Vainqueur'
+                    : best.type === 'SPREAD'    ? 'Handicap'
+                    : 'O/U';
 
-      const nr = document.createElement('div');
-      nr.className = 'match-card__net-rating-v4';
-      nr.style.cssText = `color:${color};background:${bg}`;
-      nr.innerHTML = `<span style="font-size:9px;opacity:0.7;font-weight:400">Niveau</span><span>${domLabel}</span>`;
-      const edgeBlock = list.querySelector(`#edge-${matchId}`);
-      if (edgeBlock) edgeBlock.before(nr);
-    }
+    const sideLabel = best.type === 'MONEYLINE'
+      ? (best.side === 'HOME' ? match?.home_team?.abbreviation : match?.away_team?.abbreviation)
+      : best.type === 'SPREAD'
+      ? (best.side === 'HOME'
+          ? `${match?.home_team?.abbreviation ?? ''} ${best.spread_line > 0 ? '+' : ''}${best.spread_line}`
+          : `${match?.away_team?.abbreviation ?? ''} ${-best.spread_line > 0 ? '+' : ''}${-best.spread_line}`)
+      : best.side === 'OVER'
+        ? `Plus de ${best.ou_line ?? best.market_total ?? '—'} pts`
+        : `Moins de ${best.ou_line ?? best.market_total ?? '—'} pts`;
+
+    const decOdds = best.odds_decimal ?? (best.odds_line > 0 ? (best.odds_line/100+1) : (1-100/best.odds_line));
+    const fmtOdds = Number(decOdds).toFixed(2);
+
+    const edgeColor = best.edge >= 12 ? 'var(--color-success)'
+                    : best.edge >= 7  ? 'var(--color-warning)'
+                    : 'var(--color-text-muted)';
+
+    // Classe visuelle selon qualité de l'opportunité
+    const dataQ     = analysis.data_quality_score ?? 0;
+    const divFlag   = analysis.market_divergence?.flag ?? 'low';
+    const isGoodRec = best.edge >= 7 && dataQ >= 0.80 && divFlag !== 'critical' && !best.is_contrarian;
+    const recClass  = isGoodRec ? 'mc-best-rec--value' : best.edge >= 5 ? 'mc-best-rec--warn' : '';
+
+    bestRecEl.className = `mc-best-rec ${recClass}`;
+    bestRecEl.innerHTML = `
+      <span class="mc-best-rec__star">${isGoodRec ? '★' : '·'}</span>
+      <span class="mc-best-rec__label">${typeLabel}</span>
+      <span class="mc-best-rec__side">${sideLabel}${best.is_contrarian ? ' <span style="font-size:9px;color:var(--color-warning)">(contrarian)</span>' : ''}</span>
+      <span class="mc-best-rec__odds">${fmtOdds}</span>
+      <span class="mc-best-rec__edge" style="color:${edgeColor}">+${best.edge}%</span>
+    `;
+    bestRecEl.style.display = '';
   }
 
-  // Paris recommandés — vocabulaire simplifié + cotes lisibles
-  const recsContainer = list.querySelector(`#recs-${matchId}`);
-  const recs = analysis.betting_recommendations?.recommendations ?? [];
-
-  if (recsContainer && recs.length > 0) {
-    recsContainer.innerHTML = recs.slice(0, 3).map(rec => {
-
-      // Label du type de pari — vocabulaire simple
-      const typeLabel = rec.type === 'MONEYLINE' ? 'Vainqueur'
-                      : rec.type === 'SPREAD'    ? 'Handicap'
-                      : 'O/U';
-
-      // Équipe ou côté
-      const sideLabel = rec.type === 'MONEYLINE'
-        ? (rec.side === 'HOME' ? match.home_team?.abbreviation : match.away_team?.abbreviation)
-        : rec.type === 'SPREAD'
-        ? (rec.side === 'HOME'
-            ? `${match.home_team?.abbreviation} ${rec.spread_line > 0 ? '+' : ''}${rec.spread_line}`
-            : `${match.away_team?.abbreviation} ${-rec.spread_line > 0 ? '+' : ''}${-rec.spread_line}`)
-        : rec.side === 'OVER'
-          ? `Plus de ${rec.ou_line ?? rec.market_total ?? '—'} pts`
-          : `Moins de ${rec.ou_line ?? rec.market_total ?? '—'} pts`;
-
-      // Cote décimale
-      const oddsDecimal = rec.odds_decimal ?? (rec.odds_line > 0
-        ? (rec.odds_line / 100 + 1)
-        : (1 - 100 / rec.odds_line));
-      const oddsFormatted = Number(oddsDecimal).toFixed(2);
-
-      // Gain pour 100€
-      const gainPour100 = Math.round((oddsDecimal - 1) * 100);
-      const oddsTooltip = `Cote ${oddsFormatted} = gain de ${gainPour100}€ pour 100€ misés`;
-
-      // Couleur edge
-      const edgeColor = rec.edge >= 12 ? 'var(--color-success)'
-                      : rec.edge >= 7  ? 'var(--color-warning)'
-                      : 'var(--color-muted)';
-
-      // is_contrarian vient directement du moteur (engine.nba.js v5.6)
-      // Plus fiable que de recalculer côté UI
-      const underdogNote = rec.is_contrarian
-        ? `<span style="font-size:9px;color:var(--color-warning);margin-left:4px" title="Le moteur favorise l'adversaire mais la cote est sous-évaluée">cote sous-évaluée</span>`
-        : '';
-
-      return `<div class="match-card__rec" title="${oddsTooltip}">
-        <span class="match-card__rec-type text-muted">${typeLabel}</span>
-        <span class="match-card__rec-side">${sideLabel}${underdogNote}</span>
-        <span class="match-card__rec-odds mono">${oddsFormatted}
-          <span style="font-size:9px;color:var(--color-muted);margin-left:2px">${rec.odds_source ?? ''}</span>
-        </span>
-        <span class="match-card__rec-edge" style="color:${edgeColor}">+${rec.edge}%</span>
-      </div>`;
-    }).join('');
-    recsContainer.style.display = '';
-  }
-
-  // Indicateur paris en cours — enrichi v4.3
-  if (card && ptState && !card.querySelector('.mbp-open-bet-indicator')) {
+  // ── 7. Paris en cours ─────────────────────────────────────────────────────
+  const betIndicatorEl = card.querySelector(`#bet-indicator-${matchId}`);
+  if (betIndicatorEl && ptState && !betIndicatorEl.querySelector('.mbp-open-bet-indicator')) {
     const pendingIndex = _buildPendingIndex(ptState);
     const pendingBets  = pendingIndex[matchId] ?? [];
     if (pendingBets.length > 0) {
-      const totalStake = pendingBets.reduce(function(s, b) { return s + (b.stake || 0); }, 0);
-      const markets    = pendingBets.map(function(b) {
-        const mLabel = b.market === 'MONEYLINE' ? 'ML'
-                     : b.market === 'SPREAD'    ? 'Hcap'
-                     : 'O/U';
-        return mLabel;
-      }).join(' · ');
-
-      const dot = document.createElement('div');
-      dot.className = 'mbp-open-bet-indicator';
-      dot.style.cssText = [
-        'display:flex;align-items:center;gap:6px',
-        'font-size:10px;font-weight:600',
-        'color:var(--color-signal)',
-        'margin-top:4px',
-        'padding:3px 6px',
-        'background:rgba(var(--color-signal-rgb,99,179,237),0.08)',
-        'border-radius:4px',
-        'border:1px solid rgba(var(--color-signal-rgb,99,179,237),0.20)',
-      ].join(';');
-      dot.innerHTML = [
-        '<span class="mbp-bet-dot"></span>',
-        pendingBets.length + ' pari' + (pendingBets.length > 1 ? 's' : '') + ' en cours',
-        '<span style="opacity:0.6;font-weight:400">(' + markets + ' · ' + totalStake.toFixed(0) + '€)</span>',
-      ].join('');
-
-      const cta = card.querySelector('.match-card__cta');
-      if (cta) cta.before(dot);
+      const totalStake = pendingBets.reduce((s, b) => s + (b.stake || 0), 0);
+      const markets    = pendingBets.map(b => b.market === 'MONEYLINE' ? 'ML' : b.market === 'SPREAD' ? 'Hcap' : 'O/U').join(' · ');
+      const dot        = document.createElement('div');
+      dot.className    = 'mbp-open-bet-indicator';
+      dot.innerHTML    = `<span class="mbp-bet-dot"></span>${pendingBets.length} pari${pendingBets.length > 1 ? 's' : ''} en cours <span style="opacity:0.6;font-weight:400">(${markets} · ${totalStake.toFixed(0)}€)</span>`;
+      betIndicatorEl.appendChild(dot);
     }
   }
 
-  // Motif de rejet, insuffisance ou absence de cotes
-  const hasReason = analysis.rejection_reason || analysis.insuffisant_reason;
-  if (hasReason) {
-    const el     = document.createElement('div');
-    el.className = 'match-card__rejection text-muted';
-    if (analysis.rejection_reason) {
-      el.textContent = `↳ ${_formatRejection(analysis.rejection_reason)}`;
-    } else {
-      el.textContent = `↳ ${analysis.insuffisant_reason}`;
+  // ── 8. Motif de rejet ─────────────────────────────────────────────────────
+  if (!card.querySelector('.match-card__rejection')) {
+    const hasReason = analysis.rejection_reason || analysis.insuffisant_reason;
+    if (hasReason) {
+      const el     = document.createElement('div');
+      el.className = 'match-card__rejection text-muted';
+      el.textContent = `↳ ${analysis.rejection_reason ? _formatRejection(analysis.rejection_reason) : analysis.insuffisant_reason}`;
+      bestRecEl?.after(el);
     }
-    const edgeEl   = list.querySelector(`#edge-${matchId}`);
-    if (edgeEl) edgeEl.after(el);
   }
 }
+
 
 // ── RÉSUMÉ ────────────────────────────────────────────────────────────────
 
