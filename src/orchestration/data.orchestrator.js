@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — data.orchestrator.js v3.12
+ * MANI BET PRO — data.orchestrator.js v3.13
  *
  * REFACTOR v3.12 :
  *   - Suppression de TEAM_NAME_TO_BDL_ID (30 entrées) et ABV_TO_ESPN_NAME (30 entrées).
@@ -232,21 +232,26 @@ export class DataOrchestrator {
       : null;
 
     return {
-      match_id:           match.id,
-      home_season_stats:  Object.assign({}, match.home_season_stats || {}, { name: homeTeamName }),
-      away_season_stats:  Object.assign({}, match.away_season_stats || {}, { name: awayTeamName }),
-      home_recent:        homeRecent,
-      away_recent:        awayRecent,
-      home_injuries:      homeInjuries && homeInjuries.length > 0 ? homeInjuries : null,
-      away_injuries:      awayInjuries && awayInjuries.length > 0 ? awayInjuries : null,
-      odds:               match.odds || null,
-      absences_confirmed: injuryReport !== null,
-      advanced_stats:     advancedStats || null,
-      market_odds:        null,
-      home_back_to_back:  _isBackToBack(homeRecent, match.date || match.datetime),
-      away_back_to_back:  _isBackToBack(awayRecent, match.date || match.datetime),
-      home_rest_days:     _computeRestDays(homeRecent, match.date || match.datetime),
-      away_rest_days:     _computeRestDays(awayRecent, match.date || match.datetime),
+      match_id:             match.id,
+      home_season_stats:    Object.assign({}, match.home_season_stats || {}, { name: homeTeamName }),
+      away_season_stats:    Object.assign({}, match.away_season_stats || {}, { name: awayTeamName }),
+      home_recent:          homeRecent,
+      away_recent:          awayRecent,
+      home_injuries:        homeInjuries && homeInjuries.length > 0 ? homeInjuries : null,
+      away_injuries:        awayInjuries && awayInjuries.length > 0 ? awayInjuries : null,
+      odds:                 match.odds || null,
+      absences_confirmed:   injuryReport !== null,
+      advanced_stats:       advancedStats || null,
+      market_odds:          null,
+      home_back_to_back:    _isBackToBack(homeRecent, match.date || match.datetime),
+      away_back_to_back:    _isBackToBack(awayRecent, match.date || match.datetime),
+      home_rest_days:       _computeRestDays(homeRecent, match.date || match.datetime),
+      away_rest_days:       _computeRestDays(awayRecent, match.date || match.datetime),
+      // Moyenne de points marqués sur les 5 derniers matchs — utilisée pour la projection O/U
+      // Calculée ici depuis recentForms (BDL) disponible au moment du calcul moteur.
+      // Plus réactive que avg_pts saison pour détecter les tendances Over/Under récentes.
+      home_last5_avg_pts:   _computeLast5AvgPts(homeRecent),
+      away_last5_avg_pts:   _computeLast5AvgPts(awayRecent),
     };
   }
 
@@ -944,6 +949,21 @@ DataOrchestrator._loadAndAnalyzeTennis = async function(date, store) {
     return { matches: [], analyses: {} };
   }
 };
+
+/**
+ * Calcule la moyenne de points marqués sur les 5 derniers matchs.
+ * Utilise team_score depuis BDL (recentForms).
+ * Retourne null si données insuffisantes (< 3 matchs avec score).
+ */
+function _computeLast5AvgPts(recentForm) {
+  if (!recentForm?.matches?.length) return null;
+  const scores = recentForm.matches
+    .slice(0, 5)
+    .map(m => m.team_score)
+    .filter(s => s != null && s > 0);
+  if (scores.length < 3) return null;
+  return Math.round((scores.reduce((s, v) => s + v, 0) / scores.length) * 10) / 10;
+}
 
 /**
  * Calcule le nombre de jours de repos depuis le dernier match.
