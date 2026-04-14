@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — sports.config.js v6.4
+ * MANI BET PRO — sports.config.js v6.5
  *
  * AJOUTS v6.4 :
  *   - NBA_TEAMS : table centrale des 30 équipes NBA (abv, espn, bdl_id).
@@ -81,6 +81,36 @@ export const SPORTS_CONFIG = {
       back_to_back:     0.03,
       rest_days_diff:   0.02,
       // Somme = 0.24+0.18+0.16+0.10+0.20+0.02+0.05+0.03+0.02 = 1.00
+    },
+
+    /**
+     * Ponderations Play-In / Play-Off — v5.14
+     * Actives automatiquement mi-avril → mi-juin via getNBAPhase().
+     *
+     * Différences vs default_weights :
+     *   recent_form_ema  ↑ 0.16 → 0.28  forme récente >> bilan saison en playoff
+     *   home_away_split  ↑ 0.10 → 0.16  avantage terrain plus marqué (~65% domicile)
+     *   absences_impact  ↑ 0.20 → 0.22  rotations courtes, stars plus critiques
+     *   net_rating_diff  ↓ 0.24 → 0.18  défenses s'adaptent, moins prédictif
+     *   efg_diff         ↓ 0.18 → 0.10  défenses s'adaptent au tir adverse
+     *   win_pct_diff     ↓ 0.05 → 0.01  bilan saison quasi inutile en playoff
+     *   defensive_diff   ↑ 0.02 → 0.03
+     *   back_to_back     ↓ 0.03 → 0.01  pas de B2B en playoff (1 match tous les 2j min)
+     *   rest_days_diff   ↑ 0.02 → 0.01
+     * Somme = 0.18+0.10+0.28+0.16+0.22+0.03+0.01+0.01+0.01 = 1.00
+     *
+     * STATUT : hypotheses d'expert — à calibrer après 30+ paris playoff.
+     */
+    playoff_weights: {
+      net_rating_diff:  0.18,
+      efg_diff:         0.10,
+      recent_form_ema:  0.28,
+      home_away_split:  0.16,
+      absences_impact:  0.22,
+      defensive_diff:   0.03,
+      win_pct_diff:     0.01,
+      back_to_back:     0.01,
+      rest_days_diff:   0.01,
     },
 
     ema_lambda: 0.85,
@@ -260,7 +290,7 @@ export function getEnabledSports() {
  * exportés ci-dessous (getNBATeamByAbv, getNBATeamByEspn, etc.).
  * NE PAS dupliquer ces données dans d'autres fichiers.
  *
- * Mis à jour : sports.config.js v6.4
+ * Mis à jour : sports.config.js v6.5
  */
 export const NBA_TEAMS = [
   { abv: 'ATL', espn: 'Atlanta Hawks',           bdl_id: '1'  },
@@ -315,4 +345,45 @@ export function getNBAEspnFromAbv(abv) {
 /** espnName → bdl_id BallDontLie  (ex: 'Golden State Warriors' → '10') */
 export function getNBABdlIdFromEspn(espnName) {
   return NBA_TEAM_BY_ESPN[espnName]?.bdl_id ?? null;
+}
+
+/**
+ * Détecte automatiquement la phase NBA selon le mois et le jour.
+ *
+ * Calendrier NBA approximatif (stable d'une saison à l'autre) :
+ *   Saison régulière : octobre → mi-avril
+ *   Play-In          : 3ème semaine d'avril (vers le 15-20 avril)
+ *   Play-Off         : fin avril → mi-juin
+ *   Intersaison      : mi-juin → fin septembre
+ *
+ * @returns {'regular' | 'playin' | 'playoff' | 'offseason'}
+ */
+export function getNBAPhase(date = new Date()) {
+  const month = date.getMonth() + 1; // 1-12
+  const day   = date.getDate();
+
+  if (month >= 10) return 'regular';                          // oct-déc
+  if (month <= 3)  return 'regular';                          // jan-mars
+  if (month === 4 && day < 15) return 'regular';              // début avril
+  if (month === 4 && day < 22) return 'playin';               // ~15-21 avril
+  if (month === 4 || month === 5) return 'playoff';            // fin avril + mai
+  if (month === 6 && day <= 20) return 'playoff';             // début juin
+  return 'offseason';                                          // fin juin-sept
+}
+
+/**
+ * Retourne les poids à utiliser selon la phase NBA actuelle.
+ * Sélection automatique : playoff_weights en Play-In/Play-Off,
+ * default_weights le reste de l'année.
+ *
+ * @param {Date} [date] - date de référence (défaut : maintenant)
+ * @returns {object} weights
+ */
+export function getNBAWeights(date = new Date()) {
+  const phase = getNBAPhase(date);
+  const config = SPORTS_CONFIG.NBA;
+  const weights = (phase === 'playin' || phase === 'playoff')
+    ? config.playoff_weights
+    : config.default_weights;
+  return { weights, phase };
 }
