@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — ui.match-detail.js v3.9
+ * MANI BET PRO — ui.match-detail.js v3.11
  *
  * REFACTOR v3.9 :
  *   Découpe en 3 sous-modules pour améliorer la maintenabilité :
@@ -141,6 +141,14 @@ function renderBlocProbas(analysis, match) {
   else if (edge >= 7)                  { decisionLabel = 'Pari intéressant'; decisionColor = 'var(--color-warning)'; }
   else                                 { decisionLabel = 'Passer';           decisionColor = 'var(--color-muted)'; }
 
+  const NBA_PHASE_BADGE = {
+    playin:  { label: '🏆 Play-In',  color: '#f97316' },
+    playoff: { label: '🏆 Play-Off', color: '#a855f7' },
+    regular: null,
+    offseason: null,
+  };
+  const phaseBadge = analysis.nba_phase ? (NBA_PHASE_BADGE[analysis.nba_phase] ?? null) : null;
+
   return `
     <div class="card match-detail__bloc">
       <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-bottom:12px">
@@ -160,11 +168,14 @@ function renderBlocProbas(analysis, match) {
         <div style="height:100%;width:${homeProb}%;background:var(--color-signal);border-radius:3px"></div>
       </div>
       ${best && edge >= 5 ? `
-        <div style="border-left:3px solid ${decisionColor};padding:8px 12px;border-radius:4px;background:var(--color-bg);font-size:12px">
-          <span style="font-weight:700;color:${decisionColor}">${decisionLabel}</span>
-          <span style="color:var(--color-muted);margin-left:8px">Avantage estimé +${edge}%</span>
+        <div style="border-left:3px solid ${decisionColor};padding:8px 12px;border-radius:4px;background:var(--color-bg);font-size:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
+          <div>
+            <span style="font-weight:700;color:${decisionColor}">${decisionLabel}</span>
+            <span style="color:var(--color-muted);margin-left:8px">Avantage estimé +${edge}%</span>
+          </div>
+          ${phaseBadge ? `<span style="font-size:10px;font-weight:700;color:${phaseBadge.color};border:1px solid ${phaseBadge.color};border-radius:4px;padding:2px 7px">${phaseBadge.label} · poids ajustés</span>` : ''}
         </div>
-      ` : `<div style="font-size:12px;color:var(--color-muted)">Aucun avantage suffisant détecté sur ce match.</div>`}
+      ` : `<div style="font-size:12px;color:var(--color-muted)">Aucun avantage suffisant détecté sur ce match.${phaseBadge ? ` <span style="color:${phaseBadge.color};font-weight:600">${phaseBadge.label}</span>` : ''}</div>`}
     </div>`;
 }
 
@@ -264,12 +275,55 @@ function renderBlocPourquoi(analysis, match, storeInstance) {
   const signals   = (analysis?.key_signals ?? []).slice(0, 3);
   const homeName  = match?.home_team?.name ?? 'Domicile';
   const awayName  = match?.away_team?.name ?? 'Extérieur';
+  const homeAbbr  = match?.home_team?.abbreviation ?? 'DOM';
+  const awayAbbr  = match?.away_team?.abbreviation ?? 'EXT';
   const vars      = analysis?.variables_used ?? {};
   const injReport = storeInstance?.get('injuryReport') ?? null;
   const teamCtx   = injReport?.team_context ?? null;
   const marketSig = injReport?.market_signal ?? null;
   const homeCtx   = teamCtx?.[homeName] ?? null;
   const awayCtx   = teamCtx?.[awayName] ?? null;
+
+  // Trend O/U — affiché si la recommandation best est un Over/Under
+  const best = analysis?.betting_recommendations?.best ?? null;
+  const ouTrendHtml = (() => {
+    if (best?.type !== 'OVER_UNDER') return '';
+    const teamDetails = storeInstance?.get('teamDetails') ?? {};
+    const matchId     = storeInstance?.get('activeMatchId');
+    const td          = teamDetails[matchId] ?? null;
+    if (!td) return '';
+
+    const homeLast10 = td.home?.last10 ?? [];
+    const awayLast10 = td.away?.last10 ?? [];
+    const ouLine     = best.ou_line ?? match?.odds?.over_under;
+    if (!ouLine) return '';
+
+    const calcOver = (games) => {
+      const valid = games.filter(g => g.total !== null && g.total !== undefined);
+      if (!valid.length) return null;
+      const over = valid.filter(g => g.total > ouLine).length;
+      return { over, total: valid.length };
+    };
+
+    const homeOU = calcOver(homeLast10);
+    const awayOU = calcOver(awayLast10);
+    if (!homeOU && !awayOU) return '';
+
+    const side      = best.side;
+    const color     = side === 'OVER' ? '#22c55e' : '#3b82f6';
+    const icon      = side === 'OVER' ? '📈' : '📉';
+    const homeOverPct = homeOU ? Math.round(homeOU.over / homeOU.total * 100) : null;
+    const awayOverPct = awayOU ? Math.round(awayOU.over / awayOU.total * 100) : null;
+
+    const parts = [];
+    if (homeOverPct !== null) parts.push(`${homeAbbr} Over ${homeOU.over}/${homeOU.total} (${homeOverPct}%)`);
+    if (awayOverPct !== null) parts.push(`${awayAbbr} Over ${awayOU.over}/${awayOU.total} (${awayOverPct}%)`);
+
+    return `
+      <div style="margin-top:10px;font-size:12px;padding:8px 12px;background:rgba(34,197,94,0.06);border-left:3px solid ${color};border-radius:6px;color:var(--color-muted)">
+        ${icon} <strong style="color:${color}">Trend O/U ${ouLine}</strong> sur les 10 derniers matchs — ${parts.join(' · ')}
+      </div>`;
+  })();
 
   return `
     <div class="card match-detail__bloc">
@@ -280,7 +334,6 @@ function renderBlocPourquoi(analysis, match, storeInstance) {
         <div style="display:grid;gap:10px">
           ${signals.map(s => {
             const isHome   = s.direction === 'POSITIVE';
-            const teamName = isHome ? homeName : awayName;
             const icon     = isHome ? '▲' : '▼';
             const color    = isHome ? 'var(--color-success)' : 'var(--color-danger)';
             const detail   = _getSignalDetail(s, vars, match, isHome, homeName, awayName);
@@ -294,6 +347,7 @@ function renderBlocPourquoi(analysis, match, storeInstance) {
               </div>`;
           }).join('')}
         </div>`}
+      ${ouTrendHtml}
       ${homeCtx || awayCtx ? `
         <div style="margin-top:10px;display:grid;gap:8px">
           ${homeCtx ? `<div style="font-size:12px;padding:8px 12px;background:rgba(255,165,0,0.06);border-left:3px solid var(--color-warning);border-radius:6px;color:var(--color-muted)">
