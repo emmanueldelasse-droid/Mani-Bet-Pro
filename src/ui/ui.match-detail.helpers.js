@@ -13,16 +13,16 @@ export const WORKER_URL = 'https://manibetpro.emmanueldelasse.workers.dev';
 
 export const SIGNAL_LABELS = {
   'recent_form_ema':   'Forme récente',
-  'home_away_split':   'Avantage domicile',
+  'home_away_split':   'Avantage terrain',
   'efg_diff':          'Efficacité au tir',
-  'net_rating_diff':   'Niveau général (Net Rating)',
+  'net_rating_diff':   'Niveau général',
   'win_pct_diff':      'Bilan victoires/défaites',
   'absences_impact':   'Blessures',
   'ts_diff':           'Efficacité offensive',
   'avg_pts_diff':      'Points marqués',
-  'defensive_diff':    'Défense adverse',
-  'back_to_back':      'Matchs consécutifs',
-  'rest_days_diff':    'Jours de repos',
+  'defensive_diff':    'Défense',
+  'back_to_back':      'Fatigue (match consécutif)',
+  'rest_days_diff':    'Repos',
 };
 
 export function americanToDecimal(american) {

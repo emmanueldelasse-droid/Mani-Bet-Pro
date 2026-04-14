@@ -171,7 +171,7 @@ function renderBlocProbas(analysis, match) {
         <div style="border-left:3px solid ${decisionColor};padding:8px 12px;border-radius:4px;background:var(--color-bg);font-size:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
           <div>
             <span style="font-weight:700;color:${decisionColor}">${decisionLabel}</span>
-            <span style="color:var(--color-muted);margin-left:8px">Avantage estimé +${edge}%</span>
+            <span style="color:var(--color-muted);margin-left:8px">Cote sous-évaluée de ${edge}%</span>
           </div>
           ${phaseBadge ? `<span style="font-size:10px;font-weight:700;color:${phaseBadge.color};border:1px solid ${phaseBadge.color};border-radius:4px;padding:2px 7px">${phaseBadge.label} · poids ajustés</span>` : ''}
         </div>
@@ -219,14 +219,14 @@ export function renderBlocParis(analysis, match) {
     let whyText = '';
     if (r.type === 'MONEYLINE') {
       whyText = r.is_contrarian
-        ? `Bien que le moteur favorise l'adversaire, la cote ${oddsDecimal} sur ${sideLabel} est sous-évaluée par le marché. Le moteur estime ${motorProb}% de chances — la cote implicite du bookmaker est inférieure, d'où un avantage de +${r.edge}%.`
-        : `Le moteur estime ${motorProb}% de chances pour ${sideLabel}. La cote ${oddsDecimal} chez ${r.odds_source ?? 'le bookmaker'} offre un avantage de +${r.edge}%.`;
+        ? `Bien que l'analyse favorise l'adversaire, la cote ${oddsDecimal} sur ${sideLabel} est sous-évaluée par le marché. L'analyse estime ${motorProb}% de chances — la cote est sous-évaluée de ${r.edge}%.`
+        : `L'analyse estime ${motorProb}% de chances pour ${sideLabel}. La cote ${oddsDecimal} chez ${r.odds_source ?? 'le bookmaker'} est sous-évaluée de ${r.edge}%.`;
     } else if (r.type === 'SPREAD') {
-      whyText = `Le moteur pense que ${sideLabel} peut gagner avec ${r.spread_line > 0 ? '+' : ''}${r.spread_line} pts d'écart. La cote de ${oddsDecimal} sous-estime cette probabilité.`;
+      whyText = `L'analyse estime que ${sideLabel} peut gagner avec ${r.spread_line > 0 ? '+' : ''}${r.spread_line} pts d'écart. La cote de ${oddsDecimal} sous-estime cette probabilité.`;
     } else if (r.type === 'OVER_UNDER') {
       whyText = r.side === 'OVER'
-        ? `Le moteur projette un match à points élevés. La ligne de ${r.ou_line} pts semble trop basse.`
-        : `Le moteur projette un match serré et défensif. La ligne de ${r.ou_line} pts semble trop haute.`;
+        ? `L'analyse projette un match à points élevés. La ligne de ${r.ou_line} pts semble trop basse.`
+        : `L'analyse projette un match serré et défensif. La ligne de ${r.ou_line} pts semble trop haute.`;
     }
 
     return `
@@ -244,7 +244,7 @@ export function renderBlocParis(analysis, match) {
             ${r.odds_source ? `<div style="font-size:9px;color:var(--color-muted);text-transform:uppercase">${r.odds_source}</div>` : ''}
           </div>
           <div style="text-align:right">
-            <div style="font-size:10px;color:var(--color-muted);margin-bottom:2px">Avantage estimé</div>
+            <div style="font-size:10px;color:var(--color-muted);margin-bottom:2px">Cote sous-évaluée</div>
             <div style="font-size:22px;font-weight:700;color:${edgeColor}">+${r.edge}%</div>
             ${kellyEuros ? `<div style="font-size:10px;color:var(--color-muted)">Mise conseillée : ${kellyEuros}€</div>` : ''}
           </div>
@@ -470,7 +470,7 @@ function renderBlocTousLesParis(analysis, match) {
           ${_probPill(prob)}
           <div style="min-width:0">
             <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${label}</div>
-            <div style="font-size:10px;color:var(--color-muted)">${prob !== null ? prob + '% moteur' : '—'} · impl. ${impliedProb}%</div>
+            <div style="font-size:10px;color:var(--color-muted)">${prob !== null ? prob + '% analyse' : '—'} · book ${impliedProb}%</div>
           </div>
         </div>
         <div style="text-align:center;min-width:42px">
@@ -520,12 +520,12 @@ function renderBlocTousLesParis(analysis, match) {
     <div class="card match-detail__bloc">
       <div class="bloc-header" style="margin-bottom:var(--space-2)">
         <span class="bloc-header__title">Tous les marchés</span>
-        <span class="text-muted" style="font-size:10px">● prob. moteur · impl. = prob. implicite book</span>
+        <span class="text-muted" style="font-size:10px">● % analyse · book = probabilité bookmaker</span>
       </div>
       <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:4px;padding:6px 10px;margin-bottom:4px">
         <div style="font-size:10px;color:var(--color-muted)">Pari</div>
         <div style="font-size:10px;color:var(--color-muted);text-align:center">Cote</div>
-        <div style="font-size:10px;color:var(--color-muted);text-align:center">Edge</div>
+        <div style="font-size:10px;color:var(--color-muted);text-align:center">Cote sous-évaluée</div>
         <div></div>
       </div>
       ${validRows.join('')}
@@ -769,7 +769,7 @@ function renderBlocIA(analysis, match) {
       </div>
       <div id="ai-content">
         <div id="ai-response" style="font-size:13px;line-height:1.8">${summary}</div>
-        <div class="text-muted" style="font-size:10px;margin-top:var(--space-2)">Source : moteur local uniquement · Claude non utilisé ici</div>
+        <div class="text-muted" style="font-size:10px;margin-top:var(--space-2)">Analyse locale · pas d'IA utilisée ici</div>
       </div>
     </div>`;
 }
@@ -788,11 +788,11 @@ function _buildLocalAIStyleSummary(analysis, match) {
   if (predictive != null) {
     if (predictive > 52)      line1 = `${home} ressort légèrement devant (${predictive}%).`;
     else if (predictive < 48) line1 = `${away} ressort légèrement devant (${100 - predictive}%).`;
-    else                      line1 = 'Le moteur voit un match serré.';
+    else                      line1 = 'L'analyse voit un match serré.';
   }
 
   const line2 = keySignals.length ? `Signal principal : ${keySignals.join(' · ')}.` : 'Aucun signal majeur clairement exploitable.';
-  const line3 = best ? `Valeur détectée : ${best.label ?? best.side} avec un edge de ${best.edge ?? '—'}%.` : 'Pas de valeur claire détectée pour parier maintenant.';
+  const line3 = best ? `Valeur détectée : ${best.label ?? best.side} cote sous-évaluée de ${best.edge ?? '—'}%.` : 'Pas de valeur claire détectée pour parier maintenant.';
   const line4 = `Robustesse ${robustness ?? '—'}% · qualité des données ${quality ?? '—'}%.`;
 
   return `<div>${escapeHtml(line1)}</div><div style="margin-top:8px">${escapeHtml(line2)}</div><div style="margin-top:8px">${escapeHtml(line3)}</div><div style="margin-top:8px">${escapeHtml(line4)}</div>`;
@@ -881,7 +881,7 @@ function bindEvents(container, storeInstance, match, analysis) {
     const SIDE_MAP  = { HOME: match.home_team?.name, AWAY: match.away_team?.name, OVER: 'Over', UNDER: 'Under' };
     const sideLabel = SIDE_MAP[best.side] ?? best.side;
     const odds      = _americanToDecimal(best.odds_line);
-    const text = `🏀 ${match.home_team?.name} vs ${match.away_team?.name}\n✅ Pari : ${sideLabel} @ ${odds}\n📊 Avantage : +${best.edge}%\n🤖 Mani Bet Pro`;
+    const text = `🏀 ${match.home_team?.name} vs ${match.away_team?.name}\n✅ Pari : ${sideLabel} @ ${odds}\n📊 Cote sous-évaluée : +${best.edge}%\n🤖 Mani Bet Pro`;
     navigator.clipboard?.writeText(text).then(() => {
       const btn = container.querySelector('#share-btn');
       if (btn) { btn.textContent = '✓ Copié !'; setTimeout(() => btn.textContent = '📤 Partager', 2000); }
@@ -940,7 +940,7 @@ function _openBetModal(btn, match, analysis, storeInstance) {
           <span style="font-size:13px;font-weight:600;color:var(--color-signal)">${oddsDecimal}</span>
         </div>
         <div style="display:flex;gap:12px;margin-top:6px;font-size:11px;color:var(--color-muted)">
-          <span>Avantage <strong style="color:var(--color-text)">${edge}%</strong></span>
+          <span>Cote sous-évaluée <strong style="color:var(--color-text)">${edge}%</strong></span>
           <span>Moteur <strong style="color:var(--color-text)">${motorProb}%</strong></span>
           <span>Book <strong style="color:var(--color-text)">${impliedProb}%</strong></span>
         </div>
