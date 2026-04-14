@@ -1,8 +1,15 @@
 /**
- * MANI BET PRO — store.js v2.1
+ * MANI BET PRO — store.js v2.2
  *
  * État applicatif global — vanilla JS, sans framework.
  * Pattern : store observable avec abonnements par clé.
+ *
+ * CORRECTIONS v2.2 :
+ *   - Suppression du bloc auto-load localStorage au niveau module et du subscriber
+ *     'history' dédié. Le store était chargé deux fois au démarrage (module load +
+ *     app.js.init), déclenchant les subscribers 2× et créant une race condition sur
+ *     la persistence history. app.js est désormais le seul responsable du cycle
+ *     persist/restore.
  *
  * CORRECTIONS v2 :
  *   - set() notation pointée : vérification typeof avant de créer
@@ -281,19 +288,7 @@ class Store {
 }
 
 // Export singleton
+// NB : le chargement de l'état persisté est délégué à app.js (init).
+//      Ne pas charger ici — évite le double chargement et le double déclenchement
+//      des subscribers au démarrage (bug v2 → corrigé store.js v2.2).
 export const store = new Store();
-
-// Charger l'état persisté au démarrage
-try {
-  const saved = localStorage.getItem('mbp_state');
-  if (saved) store.load(JSON.parse(saved));
-} catch {}
-
-// Persister history à chaque changement
-// Note : app.js._persistState() merge l'état existant — pas de conflit.
-store.subscribe('history', (history) => {
-  try {
-    const saved = JSON.parse(localStorage.getItem('mbp_state') ?? '{}');
-    localStorage.setItem('mbp_state', JSON.stringify({ ...saved, history }));
-  } catch {}
-});
