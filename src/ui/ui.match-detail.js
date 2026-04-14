@@ -788,7 +788,7 @@ function _buildLocalAIStyleSummary(analysis, match) {
   if (predictive != null) {
     if (predictive > 52)      line1 = `${home} ressort légèrement devant (${predictive}%).`;
     else if (predictive < 48) line1 = `${away} ressort légèrement devant (${100 - predictive}%).`;
-    else                      line1 = 'L'analyse voit un match serré.';
+    else                      line1 = `L'analyse voit un match serré.`;
   }
 
   const line2 = keySignals.length ? `Signal principal : ${keySignals.join(' · ')}.` : 'Aucun signal majeur clairement exploitable.';
