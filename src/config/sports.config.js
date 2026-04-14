@@ -1,5 +1,13 @@
 /**
- * MANI BET PRO — sports.config.js v6.3
+ * MANI BET PRO — sports.config.js v6.4
+ *
+ * AJOUTS v6.4 :
+ *   - NBA_TEAMS : table centrale des 30 équipes NBA (abv, espn, bdl_id).
+ *     Source de vérité unique — remplace les objets TEAM_NAME_TO_BDL_ID et
+ *     ABV_TO_ESPN_NAME qui étaient dupliqués dans data.orchestrator.js.
+ *     Helpers exportés : getNBAAbvFromEspn, getNBAEspnFromAbv, getNBABdlIdFromEspn.
+ *     data.orchestrator.js dérive ses lookups depuis NBA_TEAMS au lieu de les
+ *     redéfinir — une seule mise à jour nécessaire en cas de relocalisation d'équipe.
  *
  * CHANGEMENTS v6 — défense adverse :
  *   - defensive_diff : 0 → 0.05 (NOUVEAU — oppg Tank01, 0 appel supplémentaire)
@@ -237,4 +245,74 @@ export function getEnabledSports() {
   return Object.entries(SPORTS_CONFIG)
     .filter(([, cfg]) => cfg.enabled)
     .map(([key]) => key);
+}
+
+/**
+ * NBA_TEAMS — source de vérité unique pour les mappings d'équipes NBA.
+ *
+ * Chaque entrée contient :
+ *   abv     : abréviation Tank01 (clé primaire — conforme aux abbréviations confirmées :
+ *             GS, NO, NY, SA pour les cas non-standard)
+ *   espn    : nom complet ESPN (utilisé comme clé dans les données ESPN/BDL)
+ *   bdl_id  : ID BallDontLie (1–30, API BDL v1)
+ *
+ * Usage : importer NBA_TEAMS et dériver les lookups nécessaires via les helpers
+ * exportés ci-dessous (getNBATeamByAbv, getNBATeamByEspn, etc.).
+ * NE PAS dupliquer ces données dans d'autres fichiers.
+ *
+ * Mis à jour : sports.config.js v6.4
+ */
+export const NBA_TEAMS = [
+  { abv: 'ATL', espn: 'Atlanta Hawks',           bdl_id: '1'  },
+  { abv: 'BOS', espn: 'Boston Celtics',           bdl_id: '2'  },
+  { abv: 'BKN', espn: 'Brooklyn Nets',            bdl_id: '3'  },
+  { abv: 'CHA', espn: 'Charlotte Hornets',        bdl_id: '4'  },
+  { abv: 'CHI', espn: 'Chicago Bulls',            bdl_id: '5'  },
+  { abv: 'CLE', espn: 'Cleveland Cavaliers',      bdl_id: '6'  },
+  { abv: 'DAL', espn: 'Dallas Mavericks',         bdl_id: '7'  },
+  { abv: 'DEN', espn: 'Denver Nuggets',           bdl_id: '8'  },
+  { abv: 'DET', espn: 'Detroit Pistons',          bdl_id: '9'  },
+  { abv: 'GS',  espn: 'Golden State Warriors',    bdl_id: '10' },
+  { abv: 'HOU', espn: 'Houston Rockets',          bdl_id: '11' },
+  { abv: 'IND', espn: 'Indiana Pacers',           bdl_id: '12' },
+  { abv: 'LAC', espn: 'LA Clippers',              bdl_id: '13' },
+  { abv: 'LAL', espn: 'Los Angeles Lakers',       bdl_id: '14' },
+  { abv: 'MEM', espn: 'Memphis Grizzlies',        bdl_id: '15' },
+  { abv: 'MIA', espn: 'Miami Heat',               bdl_id: '16' },
+  { abv: 'MIL', espn: 'Milwaukee Bucks',          bdl_id: '17' },
+  { abv: 'MIN', espn: 'Minnesota Timberwolves',   bdl_id: '18' },
+  { abv: 'NO',  espn: 'New Orleans Pelicans',     bdl_id: '19' },
+  { abv: 'NY',  espn: 'New York Knicks',          bdl_id: '20' },
+  { abv: 'OKC', espn: 'Oklahoma City Thunder',    bdl_id: '21' },
+  { abv: 'ORL', espn: 'Orlando Magic',            bdl_id: '22' },
+  { abv: 'PHI', espn: 'Philadelphia 76ers',       bdl_id: '23' },
+  { abv: 'PHO', espn: 'Phoenix Suns',             bdl_id: '24' },
+  { abv: 'POR', espn: 'Portland Trail Blazers',   bdl_id: '25' },
+  { abv: 'SAC', espn: 'Sacramento Kings',         bdl_id: '26' },
+  { abv: 'SA',  espn: 'San Antonio Spurs',        bdl_id: '27' },
+  { abv: 'TOR', espn: 'Toronto Raptors',          bdl_id: '28' },
+  { abv: 'UTA', espn: 'Utah Jazz',                bdl_id: '29' },
+  { abv: 'WAS', espn: 'Washington Wizards',       bdl_id: '30' },
+];
+
+// ── Helpers dérivés — O(1) après construction ─────────────────────────────────
+
+// abv → { abv, espn, bdl_id }
+export const NBA_TEAM_BY_ABV  = Object.fromEntries(NBA_TEAMS.map(t => [t.abv,  t]));
+// espnName → { abv, espn, bdl_id }
+export const NBA_TEAM_BY_ESPN = Object.fromEntries(NBA_TEAMS.map(t => [t.espn, t]));
+
+/** espnName → abv Tank01  (ex: 'Golden State Warriors' → 'GS') */
+export function getNBAAbvFromEspn(espnName) {
+  return NBA_TEAM_BY_ESPN[espnName]?.abv ?? null;
+}
+
+/** abv Tank01 → espnName  (ex: 'GS' → 'Golden State Warriors') */
+export function getNBAEspnFromAbv(abv) {
+  return NBA_TEAM_BY_ABV[abv]?.espn ?? null;
+}
+
+/** espnName → bdl_id BallDontLie  (ex: 'Golden State Warriors' → '10') */
+export function getNBABdlIdFromEspn(espnName) {
+  return NBA_TEAM_BY_ESPN[espnName]?.bdl_id ?? null;
 }
