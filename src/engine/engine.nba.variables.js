@@ -53,7 +53,7 @@ export function extractVariables(data) {
 
     home_away_split: computeHomeSplit(homeStats, awayStats),
 
-    recent_form_ema: safeEMADiff(homeRecent, awayRecent, CONFIG.ema_lambda),
+    recent_form_ema: safeEMADiff(homeRecent, awayRecent, data?.__ema_lambda ?? CONFIG.ema_lambda),
 
     absences_impact: computeAbsencesImpact(homeInj, awayInj),
 
@@ -145,9 +145,13 @@ export function computeAbsencesImpact(homeInj, awayInj) {
   };
 }
 
-export function computeStarAbsenceModifier(homeInjuries, awayInjuries, homeTeamPpg = null, awayTeamPpg = null) {
+export function computeStarAbsenceModifier(homeInjuries, awayInjuries, homeTeamPpg = null, awayTeamPpg = null, isPlayoff = false) {
   const STAR_STATUSES = new Set(['Out', 'Doubtful', 'Limited']);
   const STATUS_WEIGHT = { 'Out': 1.0, 'Doubtful': 0.75, 'Limited': 0.45 };
+
+  // Facteurs renforcés en playoffs — rotations courtes (~8 joueurs), star irremplaçable
+  const starFactor    = isPlayoff ? 2.0  : STAR_FACTOR;        // 1.55 → 2.0
+  const maxReduction  = isPlayoff ? 0.55 : STAR_MAX_REDUCTION; // 0.45 → 0.55
 
   const computeTeamReduction = (injuries, teamPpg) => {
     if (!Array.isArray(injuries) || injuries.length === 0) return { reduction: 0, majorCount: 0, outCount: 0 };
@@ -162,7 +166,7 @@ export function computeStarAbsenceModifier(homeInjuries, awayInjuries, homeTeamP
       majorCount += 1;
       if (player.status === 'Out') outCount += 1;
       const sw = STATUS_WEIGHT[player.status] ?? 0.75;
-      totalReduction += (ppg / denom) * sw * STAR_FACTOR;
+      totalReduction += (ppg / denom) * sw * starFactor;
     }
 
     let multiplier = 1;
@@ -172,7 +176,7 @@ export function computeStarAbsenceModifier(homeInjuries, awayInjuries, homeTeamP
     else if (majorCount === 2) multiplier = 1.20;
     else if (majorCount >= 3)  multiplier = 1.40;
 
-    return { reduction: Math.min(totalReduction * multiplier, STAR_MAX_REDUCTION), majorCount, outCount };
+    return { reduction: Math.min(totalReduction * multiplier, maxReduction), majorCount, outCount };
   };
 
   const home = computeTeamReduction(homeInjuries, homeTeamPpg);
