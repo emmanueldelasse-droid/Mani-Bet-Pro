@@ -1,5 +1,12 @@
 /**
- * MANI BET PRO — data.orchestrator.js v3.10.1
+ * MANI BET PRO — data.orchestrator.js v3.11
+ *
+ * CORRECTION v3.11 :
+ *   - _computeRestDays() : guard sur diff < 0 (données BDL incohérentes → null).
+ *     La formule `diff > 1 ? diff - 1 : 0` était fonctionnellement identique à
+ *     Math.max(0, diff - 1) pour diff >= 0, mais silencieuse sur diff < 0 (retournait 0).
+ *     Désormais null est retourné → engine.nba._computeRestDiff() produit quality='MISSING'
+ *     au lieu d'une valeur 0 trompeuse. Signal non biaisé par données corrompues.
  *
  * AJOUTS v3.10.1 :
  *   - Suppression _enrichInjuriesWithAI() (zombie v3.6) — élimine risque N appels Claude/soir.
@@ -984,6 +991,15 @@ DataOrchestrator._loadAndAnalyzeTennis = async function(date, store) {
   }
 };
 
+/**
+ * Calcule le nombre de jours de repos depuis le dernier match.
+ *
+ * CORRECTION v3.11 :
+ *   La formule `diff > 1 ? diff - 1 : 0` masquait les back-to-back (diff=1 → 0 jours)
+ *   et les cas incohérents (diff < 0). Remplacée par Math.max(0, diff - 1) avec guard
+ *   sur diff négatif (données BDL incohérentes → null au lieu de 0 silencieux).
+ *   Cohérent avec _isBackToBack (diff===1 → back-to-back → 0 jours de repos).
+ */
 function _computeRestDays(recentForm, matchDate) {
   if (!recentForm || !recentForm.matches || !recentForm.matches.length || !matchDate) return null;
   var lastDate = recentForm.matches[0].date;
@@ -991,7 +1007,8 @@ function _computeRestDays(recentForm, matchDate) {
   var last = new Date(lastDate + 'T12:00:00');
   var curr = new Date(_normalizeDate(String(matchDate)) + 'T12:00:00');
   var diff = Math.round((curr - last) / 86400000);
-  return diff > 1 ? diff - 1 : 0;
+  if (diff < 0) return null; // données BDL incohérentes
+  return Math.max(0, diff - 1);
 }
 
 function _normalizeDate(s) {
