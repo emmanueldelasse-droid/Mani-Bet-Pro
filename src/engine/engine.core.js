@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — engine.core.js v2.6
+ * MANI BET PRO — engine.core.js v2.7
  *
  * CORRECTION v2.6 :
  *   - _computeConfidenceLevel() accepte désormais un 4ème paramètre penaltyScore (défaut 0).
@@ -37,7 +37,7 @@
  *     Désormais, les variables perturbées sont passées directement à _computeScore.
  */
 
-import { SPORTS_CONFIG, getSportConfig } from '../config/sports.config.js';
+import { SPORTS_CONFIG, getSportConfig, getNBAWeights } from '../config/sports.config.js';
 import { EngineNBA }        from './engine.nba.js';
 import { EngineRobustness } from './engine.robustness.js';
 import { Logger }           from '../utils/utils.logger.js';
@@ -70,7 +70,16 @@ export class EngineCore {
       return this._buildRejected(sport, 'ENGINE_NOT_IMPLEMENTED', null, null);
     }
 
-    const weights      = customWeights ?? sportConfig.default_weights;
+    // Sélection automatique des poids selon la phase NBA (saison / playoff).
+    // customWeights (laboratoire) prend toujours le dessus.
+    let weights = customWeights ?? sportConfig.default_weights;
+    let nbaPhase = null;
+    if (!customWeights && sport === 'NBA') {
+      const { weights: phaseWeights, phase } = getNBAWeights();
+      weights  = phaseWeights;
+      nbaPhase = phase;
+    }
+
     const engineResult = SportEngine.compute(rawData, weights);
 
     const immediateRejection = this._checkImmediateRejection(
@@ -141,6 +150,7 @@ export class EngineCore {
       model_version:        '0.3.0',
       computed_at:          new Date().toISOString(),
       computation_ms:       Date.now() - startTime,
+      nba_phase:            nbaPhase,  // 'regular' | 'playin' | 'playoff' | null (autres sports)
 
       // Score plafonné — affiché dans l'UI
       predictive_score:     cappedScore,
