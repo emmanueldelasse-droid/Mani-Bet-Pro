@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — engine.nba.betting.js v1.0
+ * MANI BET PRO — engine.nba.betting.js v1.1
  *
  * Extrait depuis engine.nba.js v5.12 (refactor v5.13).
  * Responsabilité : calcul des recommandations de paris (Moneyline, Spread, O/U),
@@ -108,17 +108,20 @@ export function computeBettingRecommendations(score, odds, matchData, variables,
       if (!bestBook) return;
       const impliedProb = decimalToProb(bestBook.decimalOdds);
       if (impliedProb === null) return;
-      const edge = motorProb - impliedProb;
-      if (edge >= EDGE_THRESHOLDS.SPREAD) {
-        recs.push({
-          type: 'SPREAD', label: 'Handicap (spread)', side,
-          odds_line: bestBook.odds, odds_decimal: bestBook.decimalOdds, odds_source: bestBook.bookmaker,
-          spread_line: sLine,
-          motor_prob: Math.round(motorProb * 100), implied_prob: Math.round(impliedProb * 100),
-          edge: Math.round(edge * 100), confidence: edgeToConfidence(edge),
-          has_value: true, kelly_stake: computeKelly(motorProb, bestBook.odds), is_contrarian: false,
-        });
-      }
+      const edge     = motorProb - impliedProb;
+      const hasValue = edge >= EDGE_THRESHOLDS.SPREAD;
+      recs.push({
+        type: 'SPREAD', label: 'Handicap (spread)', side,
+        odds_line: bestBook.odds, odds_decimal: bestBook.decimalOdds, odds_source: bestBook.bookmaker,
+        spread_line: sLine,
+        motor_prob:   Math.round(motorProb * 100),
+        implied_prob: Math.round(impliedProb * 100),
+        edge:         Math.round(edge * 100),
+        confidence:   hasValue ? edgeToConfidence(edge) : null,
+        has_value:    hasValue,
+        kelly_stake:  hasValue ? computeKelly(motorProb, bestBook.odds) : null,
+        is_contrarian: false,
+      });
     };
 
     checkSpreadSide(pSpreadHome,     bestHome, 'HOME',  spreadLine);
@@ -127,60 +130,89 @@ export function computeBettingRecommendations(score, odds, matchData, variables,
 
   // ── OVER/UNDER ────────────────────────────────────────────────────────────
   if (normalizedOdds.over_under !== null) {
-    const homeAvgPtsRaw = matchData?.home_season_stats?.avg_pts;
-    const awayAvgPtsRaw = matchData?.away_season_stats?.avg_pts;
+    const homeAvgPtsRaw  = matchData?.home_season_stats?.avg_pts;
+    const awayAvgPtsRaw  = matchData?.away_season_stats?.avg_pts;
+    const homeLast5Raw   = matchData?.home_last5_avg_pts ?? null;
+    const awayLast5Raw   = matchData?.away_last5_avg_pts ?? null;
+
     const isLiveData = (homeAvgPtsRaw != null && (homeAvgPtsRaw < 60 || homeAvgPtsRaw > 140))
                     || (awayAvgPtsRaw != null && (awayAvgPtsRaw < 60 || awayAvgPtsRaw > 140));
     const homeAvgPts = isLiveData ? null : homeAvgPtsRaw;
     const awayAvgPts = isLiveData ? null : awayAvgPtsRaw;
 
     if (homeAvgPts != null && awayAvgPts != null) {
-      const ouLine    = normalizedOdds.over_under;
-      const absImpact = variables?.absences_impact?.value ?? 0;
-      const homeInjAdj = absImpact > 0 ? -homeAvgPts * absImpact * 0.12 : 0;
-      const awayInjAdj = absImpact < 0 ? -awayAvgPts * Math.abs(absImpact) * 0.12 : 0;
+      const ouLine     = normalizedOdds.over_under;
+      const absImpact  = variables?.absences_impact?.value ?? 0;
       const paceDiff   = variables?.pace_diff?.value ?? null;
       const paceAdj    = paceDiff !== null ? paceDiff * 0.5 : 0;
-      const projectedTotal = homeAvgPts + homeInjAdj + awayAvgPts + awayInjAdj + paceAdj;
-      const diff  = projectedTotal - ouLine;
-      const side  = diff > 0 ? 'OVER' : 'UNDER';
-      const bestOUBook = getBestBookOdds(marketOdds, side, 'totals');
 
-      if (bestOUBook) {
-        const motorProb   = 0.50 + 0.15 * (1 - Math.exp(-Math.abs(diff) / 12));
-        const impliedProb = decimalToProb(bestOUBook.decimalOdds);
-        if (impliedProb !== null) {
-          const edge = motorProb - impliedProb;
-          if (edge >= EDGE_THRESHOLDS.OVER_UNDER) {
-            const adjParts = [];
-            if (paceDiff !== null) adjParts.push(`pace ${paceAdj > 0 ? '+' : ''}${paceAdj.toFixed(1)}`);
-            if (homeInjAdj !== 0) adjParts.push(`inj.dom ${homeInjAdj.toFixed(1)}`);
-            if (awayInjAdj !== 0) adjParts.push(`inj.ext ${awayInjAdj.toFixed(1)}`);
-            const adjNote = adjParts.length > 0 ? ` (${adjParts.join(', ')})` : '';
+      const homeBase = homeLast5Raw !== null
+        ? homeAvgPts * 0.60 + homeLast5Raw * 0.40
+        : homeAvgPts;
+      const awayBase = awayLast5Raw !== null
+        ? awayAvgPts * 0.60 + awayLast5Raw * 0.40
+        : awayAvgPts;
 
-            recs.push({
-              type: 'OVER_UNDER', label: 'Total de points', side,
-              odds_line: bestOUBook.odds, odds_decimal: bestOUBook.decimalOdds, odds_source: bestOUBook.bookmaker,
-              ou_line: ouLine,
-              motor_prob:      Math.round(motorProb * 100),
-              implied_prob:    Math.round(impliedProb * 100),
-              predicted_total: Math.round(projectedTotal),
-              market_total:    ouLine,
-              edge: Math.round(edge * 100), confidence: edgeToConfidence(edge),
-              has_value: true,
-              note: `Projection ${Math.round(projectedTotal)} pts${adjNote} · ligne ${ouLine}`,
-              kelly_stake: computeKelly(motorProb, bestOUBook.odds),
-            });
-          }
-        }
+      const homeInjAdj = absImpact > 0 ? -homeBase * absImpact * 0.12 : 0;
+      const awayInjAdj = absImpact < 0 ? -awayBase * Math.abs(absImpact) * 0.12 : 0;
+
+      const projectedTotal = homeBase + homeInjAdj + awayBase + awayInjAdj + paceAdj;
+      const diff = projectedTotal - ouLine;
+
+      // Prob Over : > 50% si projection dépasse la ligne, < 50% sinon
+      const motorProbOver  = diff > 0
+        ? 0.50 + 0.15 * (1 - Math.exp(-diff / 12))
+        : 0.50 - 0.15 * (1 - Math.exp(diff / 12));
+      const motorProbUnder = 1 - motorProbOver;
+
+      const adjParts = [];
+      if (homeLast5Raw !== null) adjParts.push(`dom last5 ${homeBase.toFixed(1)}`);
+      if (awayLast5Raw !== null) adjParts.push(`ext last5 ${awayBase.toFixed(1)}`);
+      if (paceDiff !== null) adjParts.push(`pace ${paceAdj > 0 ? '+' : ''}${paceAdj.toFixed(1)}`);
+      if (homeInjAdj !== 0) adjParts.push(`inj.dom ${homeInjAdj.toFixed(1)}`);
+      if (awayInjAdj !== 0) adjParts.push(`inj.ext ${awayInjAdj.toFixed(1)}`);
+      const adjNote = adjParts.length > 0 ? ` (${adjParts.join(', ')})` : '';
+      const noteBase = `Projection ${Math.round(projectedTotal)} pts${adjNote} · ligne ${ouLine}`;
+
+      // Toujours ajouter Over ET Under avec motor_prob calculé.
+      // has_value = true seulement si edge suffisant — mais motor_prob toujours affiché.
+      for (const [side, motorProb] of [['OVER', motorProbOver], ['UNDER', motorProbUnder]]) {
+        const bestBook = getBestBookOdds(marketOdds, side, 'totals');
+        if (!bestBook) continue;
+        const impliedProb = decimalToProb(bestBook.decimalOdds);
+        if (impliedProb === null) continue;
+        const edge     = motorProb - impliedProb;
+        const hasValue = edge >= EDGE_THRESHOLDS.OVER_UNDER;
+
+        recs.push({
+          type: 'OVER_UNDER', label: 'Total de points', side,
+          odds_line: bestBook.odds, odds_decimal: bestBook.decimalOdds, odds_source: bestBook.bookmaker,
+          ou_line:          ouLine,
+          motor_prob:       Math.round(motorProb * 100),
+          implied_prob:     Math.round(impliedProb * 100),
+          predicted_total:  Math.round(projectedTotal),
+          market_total:     ouLine,
+          home_last5_avg:   homeLast5Raw,
+          away_last5_avg:   awayLast5Raw,
+          edge:       Math.round(edge * 100),
+          confidence: hasValue ? edgeToConfidence(edge) : null,
+          has_value:  hasValue,
+          note:       noteBase,
+          kelly_stake: hasValue ? computeKelly(motorProb, bestBook.odds) : null,
+        });
       }
     }
   }
 
   recs.sort((a, b) => b.edge - a.edge);
   const validRecs = recs.filter(r => r.has_value);
+  // Pour l'O/U : inclure aussi les recs sans valeur pour que l'UI affiche
+  // la prob moteur sur les deux côtés (Over ET Under). Sans ça, le côté sans
+  // edge affiche '—' au lieu de sa prob réelle.
+  const ouNoValue = recs.filter(r => r.type === 'OVER_UNDER' && !r.has_value);
+  const allRecs   = [...validRecs, ...ouNoValue];
   return {
-    recommendations:        validRecs,
+    recommendations:        allRecs,
     best:                   isCriticalDivergence ? null : (validRecs[0] ?? null),
     computed_at:            new Date().toISOString(),
     market_divergence_flag: marketDivergence?.flag ?? 'low',

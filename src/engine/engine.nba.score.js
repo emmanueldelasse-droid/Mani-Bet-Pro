@@ -106,17 +106,17 @@ export function explainSignal(varId, normalized, contribution) {
             : 'neutre';
   const int = Math.abs(normalized) > 0.6 ? 'fort' : Math.abs(normalized) > 0.3 ? 'modéré' : 'faible';
   const labels = {
-    net_rating_diff:  `Net Rating différentiel ${int} ${dir} — NBA Stats API`,
-    efg_diff:         `Efficacité tir (eFG%) ${int} ${dir} — ESPN`,
-    ts_diff:          `Efficacité globale (TS%) ${int} ${dir} — ESPN`,
+    net_rating_diff:  `Niveau général ${int} ${dir} — NBA Stats API`,
+    efg_diff:         `Efficacité au tir ${int} ${dir} — ESPN`,
+    ts_diff:          `Efficacité offensive ${int} ${dir} — ESPN`,
     win_pct_diff:     `Bilan saison ${int} ${dir} — ESPN`,
-    home_away_split:  `Contexte dom/ext ${int} ${dir} — ESPN`,
+    home_away_split:  `Avantage terrain ${int} ${dir} — ESPN`,
     recent_form_ema:  `Forme récente (EMA) ${int} ${dir} — BallDontLie`,
-    absences_impact:  `Impact absences ${int} ${dir} — NBA PDF officiel`,
+    absences_impact:  `Blessures ${int} ${dir} — NBA PDF officiel`,
     avg_pts_diff:     `Différentiel scoring ${int} ${dir} — ESPN`,
-    defensive_diff:   `Défense adverse ${int} ${dir} — Tank01`,
-    back_to_back:     `Back-to-back ${int} ${dir} — ESPN`,
-    rest_days_diff:   `Jours de repos ${int} ${dir} — ESPN`,
+    defensive_diff:   `Défense ${int} ${dir} — Tank01`,
+    back_to_back:     `Fatigue (match consécutif) ${int} ${dir} — ESPN`,
+    rest_days_diff:   `Repos ${int} ${dir} — ESPN`,
   };
   return labels[varId] ?? `Variable ${varId} — signal ${int} ${dir}`;
 }
