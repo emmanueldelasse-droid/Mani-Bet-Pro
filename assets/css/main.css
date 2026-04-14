@@ -785,152 +785,218 @@ body.theme-light .chip--active,
 .match-card {
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border-subtle);
+  border-left: 3px solid transparent;
   border-radius: var(--radius-lg);
   padding: var(--space-4);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  transition: border-color var(--transition-fast);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  cursor: default;
 }
 
-.match-card:hover { border-color: var(--color-border-default); }
+.match-card:hover {
+  border-color: var(--color-border-default);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+}
 
+/* ── HEADER ── */
 .match-card__header {
   display: flex;
   align-items: center;
   gap: var(--space-2);
 }
 
-.match-card__time         { font-size: 12px; }
 .match-card__status-badge { margin-left: auto; }
 
-.match-card__teams { display: flex; align-items: center; gap: var(--space-3); }
+/* ── ÉQUIPES v5 ── */
+.mc-teams {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: start;
+  gap: 0;
+}
 
-.match-card__team {
-  flex: 1;
+.mc-team {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.match-card__team--away { text-align: right; align-items: flex-end; }
-
-.match-card__team-abbr {
-  font-family: var(--font-mono);
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--color-text-primary);
-  letter-spacing: 0.02em;
+.mc-team--away {
+  align-items: flex-end;
+  text-align: right;
 }
 
-.match-card__team-name   { font-size: 12px; color: var(--color-text-secondary); max-width: 100px; }
-.match-card__team-record { font-size: 10px; display: block; margin-top: 2px; }
-
-.match-card__vs {
+.mc-team__abbr {
   font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--color-text-muted);
-  letter-spacing: 0.1em;
-}
-
-.match-card__proba {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  gap: var(--space-2);
-  align-items: center;
-  padding: var(--space-2) 0;
-}
-
-.match-card__proba-side { display: flex; flex-direction: column; gap: 2px; }
-.match-card__proba-side--away { text-align: right; align-items: flex-end; }
-
-.match-card__proba-motor {
-  font-family: var(--font-mono);
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--color-text-primary);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   line-height: 1;
+  color: var(--color-text-primary);
 }
 
-.match-card__proba-motor--fav { color: var(--color-signal); }
-
-.match-card__proba-market {
+.mc-team__name {
   font-size: 11px;
-  color: var(--color-text-muted);
-  font-family: var(--font-mono);
+  font-weight: 400;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 112px;
 }
 
-.match-card__proba-sep { text-align: center; }
+.mc-team__record {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
 
-.match-card__edge {
+.mc-team__odds {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 700;
+  margin-top: 6px;
+  line-height: 1;
+  color: var(--color-text-primary);
+  transition: color var(--transition-fast);
+}
+
+.mc-team__odds-src {
+  font-size: 9px;
+  font-weight: 400;
+  color: var(--color-text-muted);
+  display: block;
+  margin-top: 1px;
+}
+
+.mc-team__prob {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+.mc-team__prob--fav {
+  color: var(--color-signal);
+}
+
+/* Séparateur central */
+.mc-vs {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 3px;
+  padding: 0 10px;
+  min-width: 48px;
+  padding-top: 3px;
+}
+
+.mc-vs__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  letter-spacing: 0.12em;
+}
+
+.mc-vs__score {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  text-align: center;
+  line-height: 1.3;
+}
+
+/* Barre de probabilité v5 */
+.mc-proba-bar {
+  height: 3px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--color-border-default);
+}
+
+.mc-proba-bar__fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--color-signal) 0%, var(--color-signal-light) 100%);
+  transition: width 0.7s cubic-bezier(0.4,0,0.2,1);
+}
+
+/* Niveau */
+.mc-level {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  align-self: flex-start;
+}
+
+.mc-level__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+/* Meilleure recommandation */
+.mc-best-rec {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: var(--space-2) var(--space-3);
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: 6px;
   background: var(--color-bg-elevated);
-  border-radius: var(--radius-sm);
-  font-size: 11px;
+  border: 1px solid var(--color-border-default);
 }
 
-.match-card__edge-value { font-family: var(--font-mono); font-weight: 700; }
-.match-card__scores     { display: flex; flex-direction: column; gap: var(--space-2); }
-.match-card__rejection  { font-size: 11px; padding-top: var(--space-1); }
-.match-card__cta        { width: 100%; margin-top: var(--space-1); }
-
-.match-card__stats-inline {
-  margin-top: var(--space-1);
-  padding-top: var(--space-1);
-  border-top: 1px solid var(--color-border-subtle);
+.mc-best-rec--value {
+  border-color: rgba(34,197,94,0.25);
+  background: rgba(34,197,94,0.05);
 }
 
+.mc-best-rec--warn {
+  border-color: rgba(245,158,11,0.20);
+  background: rgba(245,158,11,0.04);
+}
+
+.mc-best-rec__star { font-size: 10px; flex-shrink: 0; color: var(--color-success); }
+.mc-best-rec__label { font-size: 10px; color: var(--color-text-muted); flex-shrink: 0; text-transform: uppercase; letter-spacing: 0.04em; }
+.mc-best-rec__side { font-size: 12px; font-weight: 700; color: var(--color-text-primary); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-best-rec__odds { font-family: var(--font-mono); font-size: 13px; font-weight: 700; color: var(--color-text-primary); flex-shrink: 0; }
+.mc-best-rec__edge { font-family: var(--font-mono); font-size: 11px; font-weight: 700; flex-shrink: 0; min-width: 38px; text-align: right; }
+
+/* Recs supplémentaires */
 .match-card__recs {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 8px 0 4px;
-  border-top: 1px solid var(--color-border);
-  margin-top: 4px;
+  gap: 3px;
 }
 
 .match-card__rec {
   display: grid;
-  grid-template-columns: 60px 1fr auto auto auto;
+  grid-template-columns: 52px 1fr auto auto;
   align-items: center;
   gap: 6px;
   font-size: 11px;
   padding: 2px 0;
+  color: var(--color-text-secondary);
 }
 
-.match-card__rec-type {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
+.match-card__rec-type { font-size: 10px; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.match-card__rec-side { font-weight: 600; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.match-card__rec-odds { font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: var(--color-text-primary); }
+.match-card__rec-edge { font-family: var(--font-mono); font-size: 10px; font-weight: 700; text-align: right; }
 
-.match-card__rec-side {
-  font-weight: 600;
-  font-size: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.match-card__rec-odds {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--color-text);
-}
-
-.match-card__rec-source { font-size: 9px; opacity: 0.6; }
-
-.match-card__rec-edge {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  text-align: right;
-}
+.match-card__rejection { font-size: 11px; color: var(--color-text-muted); }
+.match-card__cta { width: auto; padding: 5px 12px; font-size: 11px; }
 
 /* ============================================================
    FICHE MATCH
