@@ -9,12 +9,12 @@
  *   4. H2H + tendance O/U
  *   5. Joueurs absents triés par PPG
  *
- * Note : ESPN_TO_TANK01_ABV supprimé — remplacé par getNBAAbvFromEspn()
- * depuis sports.config.js (centralisé en v3.9, refactor mappings équipes).
+ * Note : ESPN_TO_TANK01_ABV supprimé — centralisé dans sports.config.js (NBA_TEAMS v6.4).
+ * L'import getNBAAbvFromEspn n'est pas nécessaire ici car les abréviations viennent
+ * directement des données match (match.home_team.abbreviation) fournies par l'orchestrateur.
  */
 
-import { Logger }            from '../utils/utils.logger.js';
-import { getNBAAbvFromEspn } from '../config/sports.config.js';
+import { Logger } from '../utils/utils.logger.js';
 import {
   resolveLatestAnalysisForMatch,
 } from './ui.match-detail.helpers.js';
