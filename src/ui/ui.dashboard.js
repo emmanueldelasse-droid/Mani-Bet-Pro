@@ -166,7 +166,11 @@ export async function render(container, storeInstance) {
   _bindFilterEvents(container, storeInstance);
   _bindDateSelector(container, storeInstance, selectedDate, async (newDate) => {
     selectedDate = newDate;
-    storeInstance.set({ 'dashboardFilters.selectedDate': newDate });
+    storeInstance.set({
+      'dashboardFilters.selectedDate': newDate,
+      dashboardCacheDate: null,   // invalide le cache pour forcer le rechargement
+      dashboardCacheAt:   0,
+    });
     await _loadAndDisplay(container, storeInstance, newDate);
   });
 
@@ -203,7 +207,9 @@ async function _loadAndDisplay(container, storeInstance, date, options = {}) {
     // ── Cache : si analyses déjà chargées pour cette date, réutiliser ──
     const cachedAnalyses = storeInstance.get('analyses') ?? {};
     const cachedMatches  = storeInstance.get('matches')  ?? {};
-    const cachedDate     = storeInstance.get('dashboardFilters')?.selectedDate;
+    // Lire la date depuis le paramètre `date` — pas depuis le store qui peut ne pas
+    // encore être mis à jour quand onDateChange est appelé (ex: bouton Demain).
+    const cachedDate     = storeInstance.get('dashboardCacheDate');
 
     const cachedAt  = storeInstance.get('dashboardCacheAt') ?? 0;
     const cacheAge  = Date.now() - cachedAt;
@@ -252,8 +258,8 @@ async function _loadAndDisplay(container, storeInstance, date, options = {}) {
       return;
     }
 
-    // Stocker le timestamp de chargement pour le TTL cache
-    storeInstance.set({ dashboardCacheAt: Date.now() });
+    // Stocker le timestamp et la date de chargement pour le TTL cache
+    storeInstance.set({ dashboardCacheAt: Date.now(), dashboardCacheDate: date });
 
     const analysisIndex = _buildAnalysisIndex(result.analyses);
 
@@ -1080,7 +1086,11 @@ function _formatRejection(reason) {
 }
 
 function _getTodayDate() {
-  return new Date().toISOString().slice(0, 10);
+  // Utilise l'heure locale Paris (Europe/Paris) pour éviter le décalage UTC.
+  // Sans ça, après minuit heure de Paris mais avant 2h UTC, la date retournée
+  // est celle d'hier → les matchs NBA de la nuit restent affichés au lieu de ceux du lendemain.
+  return new Date().toLocaleDateString('fr-CA', { timeZone: 'Europe/Paris' });
+  // fr-CA retourne le format YYYY-MM-DD nativement
 }
 
 function _offsetDate(dateStr, days) {
