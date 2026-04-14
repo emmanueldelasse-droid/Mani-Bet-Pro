@@ -229,6 +229,9 @@ export function renderBlocParis(analysis, match) {
         : `L'analyse projette un match serré et défensif. La ligne de ${r.ou_line} pts semble trop haute.`;
     }
 
+    // Explication de l'écart moteur/book
+    const gapHtml = _buildGapExplanation(r, analysis, match);
+
     return `
       <div style="background:var(--color-bg);border-radius:10px;padding:14px;margin-bottom:10px;border:1px solid ${isBest ? 'var(--color-success)' : 'var(--color-border)'}">
         ${isBest ? '<div style="font-size:10px;color:var(--color-success);font-weight:700;margin-bottom:8px;letter-spacing:0.05em">★ MEILLEUR PARI</div>' : ''}
@@ -249,7 +252,8 @@ export function renderBlocParis(analysis, match) {
             ${kellyEuros ? `<div style="font-size:10px;color:var(--color-muted)">Mise conseillée : ${kellyEuros}€</div>` : ''}
           </div>
         </div>
-        <div style="font-size:12px;color:var(--color-muted);line-height:1.6;padding:8px 10px;background:var(--color-card);border-radius:6px;margin-bottom:10px">${whyText}</div>
+        <div style="font-size:12px;color:var(--color-muted);line-height:1.6;padding:8px 10px;background:var(--color-card);border-radius:6px;margin-bottom:${gapHtml ? '6px' : '10px'}">${whyText}</div>
+        ${gapHtml}
         <button class="btn btn--primary paper-bet-btn" style="width:100%;padding:10px;font-size:13px;font-weight:600"
           data-market="${r.type}" data-side="${r.side}" data-side-label="${sideDisplay}"
           data-odds="${r.odds_line}" data-edge="${r.edge}" data-motor-prob="${r.motor_prob}"
@@ -420,6 +424,106 @@ function _getSignalDetail(signal, vars, match, isHome, homeName, awayName) {
     case 'defensive_diff': return val !== null ? `${favTeam} encaisse moins de points par match que ${othTeam} — meilleure défense.` : null;
     default: return null;
   }
+}
+
+// ── EXPLICATION ÉCART MOTEUR / BOOK ──────────────────────────────────────────
+
+/**
+ * Construit un bloc HTML expliquant POURQUOI l'écart entre l'analyse et le book existe.
+ * Ne réduit pas l'écart — l'explique pour aider à décider si la valeur est réelle.
+ *
+ * Priorité des explications :
+ *   1. Star absente (signal le plus fort — book peut ne pas avoir intégré)
+ *   2. Trend O/U last10 qui contredit la ligne (book en retard sur tendance)
+ *   3. Divergence marché flaggée high/critical (argent sharp qui contredit)
+ *   4. Écart > 10% sur ML sans raison claire (avertissement)
+ */
+function _buildGapExplanation(rec, analysis, match) {
+  const divergence   = analysis?.market_divergence ?? null;
+  const starModifier = analysis?.star_absence_modifier ?? null;
+  const keySignals   = analysis?.key_signals ?? [];
+  const homeName     = match?.home_team?.name ?? 'DOM';
+  const awayName     = match?.away_team?.name ?? 'EXT';
+  const homeAbsr     = match?.home_team?.abbreviation ?? 'DOM';
+  const awayAbbr     = match?.away_team?.abbreviation ?? 'EXT';
+
+  const reasons = [];
+
+  // 1. Star absente — modificateur actif
+  if (starModifier !== null && Math.abs(starModifier) > 0.03) {
+    const homeInj  = match?.home_injuries ?? [];
+    const awayInj  = match?.away_injuries ?? [];
+    const allInj   = [...homeInj, ...awayInj];
+    const stars    = allInj
+      .filter(p => (p.status === 'Out' || p.status === 'Doubtful') && (p.ppg ?? 0) >= 20)
+      .slice(0, 2)
+      .map(p => `${p.name} (${p.ppg} pts/m)`);
+    if (stars.length > 0) {
+      reasons.push({
+        icon: '🏥',
+        color: '#ef4444',
+        label: 'Blessure star',
+        detail: `${stars.join(', ')} — impact non encore intégré par le book.`,
+      });
+    }
+  }
+
+  // 2. Trend O/U fort (over ou under) — pertinent pour O/U recs
+  if (rec.type === 'OVER_UNDER' && rec.home_last5_avg !== null && rec.away_last5_avg !== null) {
+    const projTotal  = rec.predicted_total;
+    const line       = rec.ou_line;
+    const diffPts    = Math.abs(projTotal - line);
+    if (diffPts >= 5) {
+      const dir = rec.side === 'OVER' ? 'au-dessus' : 'en-dessous';
+      reasons.push({
+        icon: '📈',
+        color: '#22c55e',
+        label: 'Tendance récente',
+        detail: `Les 5 derniers matchs projettent ${projTotal} pts — ${diffPts} pts ${dir} de la ligne ${line}.`,
+      });
+    }
+  }
+
+  // 3. Divergence marché flaggée — argent sharp qui contredit l'analyse
+  if (divergence?.flag === 'high' || divergence?.flag === 'critical') {
+    const mktHome = Math.round((divergence.market_implied_home ?? 0) * 100);
+    const mktAway = Math.round((divergence.market_implied_away ?? 0) * 100);
+    const isCritical = divergence.flag === 'critical';
+    reasons.push({
+      icon: isCritical ? '⚠️' : '📊',
+      color: isCritical ? '#f97316' : '#eab308',
+      label: isCritical ? 'Divergence forte' : 'Divergence marché',
+      detail: `Le book donne ${mktHome}% ${homeAbsr} / ${mktAway}% ${awayAbbr} — écart de ${divergence.divergence_pts} pts avec l'analyse. ${isCritical ? 'Vérifier manuellement avant de miser.' : ''}`,
+    });
+  }
+
+  // 4. Écart ML > 10% sans raison identifiée — avertissement simple
+  if (rec.type === 'MONEYLINE' && Math.abs(rec.edge) >= 10 && reasons.length === 0) {
+    const motorSide = rec.side === 'HOME' ? homeName : awayName;
+    reasons.push({
+      icon: '⚠️',
+      color: '#f97316',
+      label: 'Écart important',
+      detail: `+${Math.abs(rec.edge)}% d'écart avec le book sur ${motorSide}. Le book a probablement des infos supplémentaires (rotations, market flow). À vérifier avant de miser.`,
+    });
+  }
+
+  if (!reasons.length) return '';
+
+  const items = reasons.map(r => `
+    <div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--color-border)">
+      <span style="flex-shrink:0;font-size:13px">${r.icon}</span>
+      <div style="min-width:0">
+        <span style="font-size:11px;font-weight:700;color:${r.color}">${r.label}</span>
+        <span style="font-size:11px;color:var(--color-muted);margin-left:6px">${r.detail}</span>
+      </div>
+    </div>`).join('');
+
+  return `
+    <div style="padding:8px 10px;background:rgba(255,165,0,0.05);border:1px solid rgba(255,165,0,0.2);border-radius:6px;margin-bottom:10px">
+      <div style="font-size:10px;font-weight:700;color:var(--color-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em">Pourquoi cet écart ?</div>
+      ${items}
+    </div>`;
 }
 
 // ── BLOC TOUS LES PARIS ───────────────────────────────────────────────────────
