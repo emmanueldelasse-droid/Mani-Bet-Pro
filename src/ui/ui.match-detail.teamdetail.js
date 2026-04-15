@@ -42,7 +42,7 @@ export async function loadAndRenderTeamDetail(container, match, storeInstance) {
 
     detailEl.innerHTML = renderBlocTeamDetail(match, teamDetail, injReport);
     // Activer les clics sur les lignes last10 avec boxscore
-    _bindLast10Clicks(detailEl, teamDetail);
+    bindLast10Clicks(detailEl, teamDetail);
 
   } catch (err) {
     Logger.warn('TEAM_DETAIL_RENDER_FAILED', { message: err.message });
