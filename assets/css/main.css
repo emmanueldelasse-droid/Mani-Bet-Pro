@@ -871,6 +871,9 @@ body.theme-light .chip--active,
   margin-top: 1px;
 }
 
+.mc-team__odds--home { color: var(--color-success); }
+.mc-team__odds--away { color: var(--color-danger); }
+
 .mc-team__prob {
   font-size: 10px;
   font-weight: 600;
