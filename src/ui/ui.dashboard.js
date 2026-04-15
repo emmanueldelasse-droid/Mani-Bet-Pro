@@ -545,6 +545,10 @@ function _renderMatchCards(list, matches, storeInstance) {
 }
 
 function _createMatchCard(match) {
+  const card           = document.createElement('div');
+  card.className       = 'match-card';
+  card.dataset.matchId = match.id;
+
   const time         = match.datetime
     ? new Date(match.datetime).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
     : '—';
