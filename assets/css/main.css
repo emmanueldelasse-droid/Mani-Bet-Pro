@@ -874,12 +874,24 @@ body.theme-light .chip--active,
 /* ── Section O/U ── */
 .mc-ou {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 5px;
   padding: 7px 10px;
   background: var(--color-bg-elevated);
   border-radius: var(--radius-sm);
   border: 1px solid var(--color-border-subtle);
+}
+
+.mc-ou__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mc-ou__row--spread {
+  border-top: 1px solid var(--color-border-subtle);
+  padding-top: 5px;
+  margin-top: 2px;
 }
 
 .mc-ou__label {
@@ -972,14 +984,15 @@ body.theme-light .chip--active,
 
 /* Niveau */
 .mc-level {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 8px;
+  padding: 4px 8px;
   border-radius: 4px;
   font-size: 10px;
   font-weight: 600;
-  align-self: flex-start;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .mc-level__dot {
