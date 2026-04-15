@@ -94,9 +94,7 @@ function renderShell(match, analysis, storeInstance) {
       ${renderBlocProbas(analysis, match)}
       ${renderBlocTousLesParis(analysis, match)}
       <div id="team-detail-container">${renderBlocTeamDetailSkeleton()}</div>
-      ${renderBlocFiabilite(analysis)}
-      ${renderBlocSources(analysis)}
-      ${renderBlocIA(analysis, match)}
+      ${renderBlocFiabiliteEtSynthese(analysis, match)}
     </div>
   `;
 }
@@ -539,10 +537,14 @@ function renderBlocTousLesParis(analysis, match) {
   const betting    = analysis?.betting_recommendations;
   const bankroll   = (PaperEngine.load().current_bankroll) ?? 500;
 
-  const _probPill = (prob) => {
-    if (prob === null) return '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--color-border);flex-shrink:0"></span>';
-    let bg = prob < 50 ? '#ef4444' : prob < 60 ? '#f97316' : prob < 75 ? '#22c55e' : '#16a34a';
-    return `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${bg};flex-shrink:0;box-shadow:0 0 4px ${bg}44"></span>`;
+  const _probPill = (prob, rec) => {
+    // Point vert uniquement si edge réel > 7% + qualité > 80% + pas contrarian
+    const quality  = analysis?.data_quality_score ?? 0;
+    const divFlag  = analysis?.market_divergence?.flag ?? 'low';
+    const isGood   = rec && rec.edge >= 7 && quality >= 0.80 && divFlag !== 'critical' && !rec.is_contrarian;
+    const isOk     = rec && rec.edge >= 5 && rec.edge < 7;
+    const bg = isGood ? '#22c55e' : isOk ? '#f97316' : 'var(--color-border)';
+    return `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${bg};flex-shrink:0"></span>`;
   };
 
   const _edgeColor = (edge) => edge >= 8 ? '#22c55e' : edge >= 4 ? '#f97316' : edge > 0 ? 'var(--color-muted)' : '#ef4444';
@@ -572,7 +574,7 @@ function renderBlocTousLesParis(analysis, match) {
     return `
       <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:8px;align-items:center;padding:9px 10px;background:${isBest ? 'rgba(34,197,94,0.06)' : 'var(--color-bg)'};border-radius:8px;border:1px solid ${isBest ? 'rgba(34,197,94,0.3)' : 'transparent'};margin-bottom:6px">
         <div style="display:flex;align-items:center;gap:7px;min-width:0">
-          ${_probPill(prob)}
+          ${_probPill(prob, rec)}
           <div style="min-width:0">
             <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${label}</div>
             <div style="font-size:10px;color:var(--color-muted)">${prob !== null ? prob + '% analyse' : '—'} · book ${impliedProb}%</div>
@@ -587,7 +589,7 @@ function renderBlocTousLesParis(analysis, match) {
           ${kellyEuros ? `<div style="font-size:9px;color:var(--color-muted)">${kellyEuros}€</div>` : ''}
         </div>
         <div>
-          <button class="paper-bet-btn" ${betData} style="font-size:10px;padding:4px 8px;border-radius:6px;border:1px solid var(--color-border);background:var(--color-card);color:var(--color-text);cursor:pointer;white-space:nowrap">📋</button>
+          <button class="paper-bet-btn" ${betData} style="font-size:12px;padding:8px 12px;border-radius:8px;border:1px solid var(--color-border);background:var(--color-card);color:var(--color-text);cursor:pointer;white-space:nowrap;min-width:40px">📋</button>
         </div>
       </div>`;
   };
@@ -621,18 +623,31 @@ function renderBlocTousLesParis(analysis, match) {
   const validRows = rows.filter(Boolean);
   if (!validRows.length) return '';
 
+  // Séparer par type de marché
+  const mlRows     = validRows.filter(r => r.includes('MONEYLINE'));
+  const sprdRows   = validRows.filter(r => r.includes('"SPREAD"'));
+  const ouRows     = validRows.filter(r => r.includes('OVER_UNDER'));
+
+  const section = (title, rowsArr) => rowsArr.length ? `
+    <div style="font-size:9px;font-weight:700;color:var(--color-muted);text-transform:uppercase;letter-spacing:0.06em;padding:6px 10px 2px">${title}</div>
+    ${rowsArr.join('')}` : '';
+
   return `
     <div class="card match-detail__bloc">
       <div class="bloc-header" style="margin-bottom:var(--space-2)">
-        <span class="bloc-header__title">Tous les marchés</span>
-        <span class="text-muted" style="font-size:10px">● % analyse · book = probabilité bookmaker</span>
+        <span class="bloc-header__title">Marchés</span>
+        <span class="text-muted" style="font-size:10px">% analyse · book = prob. bookmaker</span>
       </div>
-      <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:4px;padding:6px 10px;margin-bottom:4px">
-        <div style="font-size:10px;color:var(--color-muted)">Pari</div>
+      <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:4px;padding:0 10px 4px">
+        <div></div>
         <div style="font-size:10px;color:var(--color-muted);text-align:center">Cote</div>
-        <div style="font-size:10px;color:var(--color-muted);text-align:center">Cote sous-évaluée</div>
+        <div style="font-size:10px;color:var(--color-muted);text-align:center">Cote s/évaluée</div>
         <div></div>
       </div>
+      ${section('Vainqueur', mlRows)}
+      ${section('Handicap', sprdRows)}
+      ${section('Total de points', ouRows)}
+    </div>`;
       ${validRows.join('')}
     </div>`;
 }
@@ -796,112 +811,100 @@ export function renderBlocAbsences(analysis, match, storeInstance) {
     </div>`;
 }
 
-// ── BLOC FIABILITÉ ────────────────────────────────────────────────────────────
+// ── BLOC FIABILITÉ + SOURCES + SYNTHÈSE (fusionné) ───────────────────────────
 
-function renderBlocFiabilite(analysis) {
+function renderBlocFiabiliteEtSynthese(analysis, match) {
   const rob   = analysis?.robustness_score;
   const qual  = analysis?.data_quality_score;
   const score = rob !== null && qual !== null ? Math.round(((rob + qual) / 2) * 100) : null;
 
-  let label, color;
-  if (score === null)   { label = '—';       color = 'var(--color-muted)'; }
-  else if (score >= 80) { label = 'Élevée';  color = 'var(--color-success)'; }
-  else if (score >= 60) { label = 'Moyenne'; color = 'var(--color-warning)'; }
-  else                  { label = 'Faible';  color = 'var(--color-danger)'; }
+  let fiabLabel, fiabColor;
+  if (score === null)   { fiabLabel = '—';       fiabColor = 'var(--color-muted)'; }
+  else if (score >= 80) { fiabLabel = 'Élevée';  fiabColor = 'var(--color-success)'; }
+  else if (score >= 60) { fiabLabel = 'Moyenne'; fiabColor = 'var(--color-warning)'; }
+  else                  { fiabLabel = 'Faible';  fiabColor = 'var(--color-danger)'; }
 
   const missingSimple = (analysis?.missing_variables ?? []).map(v => SIGNAL_LABELS[v] ?? v).slice(0, 2);
 
+  // Synthèse en paragraphe fluide
+  const synthese = _buildSynthese(analysis, match);
+
+  // Sources — toujours visibles sous forme de tags compacts
+  const sourcesList = ['ESPN', 'BallDontLie', 'Tank01', 'Pinnacle'];
+
   return `
     <div class="card match-detail__bloc">
-      <div class="bloc-header" style="margin-bottom:var(--space-3)">
-        <span class="bloc-header__title">Fiabilité de l'analyse</span>
-        ${score !== null ? `<span style="font-weight:700;color:${color}">${label}</span>` : ''}
+      <!-- Fiabilité -->
+      <div class="bloc-header" style="margin-bottom:var(--space-2)">
+        <span class="bloc-header__title">Fiabilité</span>
+        ${score !== null ? `<span style="font-weight:700;color:${fiabColor}">${fiabLabel}</span>` : ''}
       </div>
       ${score !== null ? `
-        <div style="height:8px;border-radius:4px;overflow:hidden;background:var(--color-border);margin-bottom:8px">
-          <div style="height:100%;width:${score}%;background:${color};border-radius:4px;transition:width 0.5s ease"></div>
+        <div style="height:6px;border-radius:3px;overflow:hidden;background:var(--color-border);margin-bottom:6px">
+          <div style="height:100%;width:${score}%;background:${fiabColor};border-radius:3px"></div>
         </div>
-        <div style="font-size:12px;color:var(--color-muted);margin-bottom:${missingSimple.length ? '10px' : '0'}">
-          ${score >= 80 && missingSimple.length === 0 ? "Données complètes et cohérentes. L'analyse est fiable."
-            : score >= 80 ? 'Analyse fiable malgré quelques données manquantes.'
-            : score >= 60 ? 'Quelques données manquantes. L\'analyse reste valable.'
-            : 'Données insuffisantes. À prendre avec précaution.'}
-        </div>
-        ${missingSimple.length ? `<div style="font-size:11px;color:var(--color-warning);padding:6px 10px;background:rgba(255,165,0,0.08);border-radius:6px;border-left:2px solid var(--color-warning)">⚠ Données manquantes : ${missingSimple.join(' · ')}</div>` : ''}
-      ` : `<div class="text-muted" style="font-size:12px">Non calculée.</div>`}
+        ${missingSimple.length ? `<div style="font-size:11px;color:var(--color-warning);padding:5px 8px;background:rgba(255,165,0,0.08);border-radius:5px;margin-bottom:10px">⚠ Données manquantes : ${missingSimple.join(' · ')}</div>` : ''}
+      ` : ''}
+
+      <!-- Sources visibles -->
+      <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:14px">
+        ${sourcesList.map(s => `<span style="font-size:10px;padding:2px 8px;border-radius:10px;background:var(--color-bg);border:1px solid var(--color-border);color:var(--color-muted)">${s}</span>`).join('')}
+      </div>
+
+      <!-- Séparateur -->
+      <div style="height:1px;background:var(--color-border);margin-bottom:12px"></div>
+
+      <!-- Synthèse -->
+      <div class="bloc-header" style="margin-bottom:var(--space-2)">
+        <span class="bloc-header__title">Synthèse</span>
+      </div>
+      <div style="font-size:13px;line-height:1.8;color:var(--color-text)">${synthese}</div>
+      <div style="font-size:10px;color:var(--color-muted);margin-top:8px">Analyse locale · pas d'IA utilisée ici</div>
     </div>`;
 }
 
-// ── BLOC SOURCES ──────────────────────────────────────────────────────────────
+function _buildSynthese(analysis, match) {
+  if (!analysis) return '<span style="color:var(--color-muted)">Analyse non disponible.</span>';
 
-function renderBlocSources(analysis) {
-  const breakdown = analysis?.data_quality_breakdown?.breakdown ?? {};
-  const fields    = Object.entries(breakdown);
-
-  const QUALITY_LABELS = { VERIFIED: 'Vérifié', WEIGHTED: 'Pondéré (Tank01)', PARTIAL: 'Partiel', ESTIMATED: 'Estimé', LOW_SAMPLE: 'Faible échantillon', UNCALIBRATED: 'Non calibré', INSUFFICIENT_SAMPLE: 'Insuffisant', MISSING: 'Absent' };
-  const QUALITY_COLORS = { VERIFIED: 'var(--color-success)', WEIGHTED: 'var(--color-success)', PARTIAL: 'var(--color-warning)', ESTIMATED: 'var(--color-warning)', LOW_SAMPLE: 'var(--color-warning)', UNCALIBRATED: 'var(--color-muted)', INSUFFICIENT_SAMPLE: 'var(--color-danger)', MISSING: 'var(--color-danger)' };
-
-  return `
-    <div class="card match-detail__bloc">
-      <div class="collapsible" id="sources-collapsible">
-        <div class="collapsible__header" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;padding:2px 0">
-          <span class="bloc-header__title">Sources des données</span>
-          <span class="collapsible__arrow text-muted" style="font-size:12px">▾ Voir</span>
-        </div>
-        <div class="collapsible__body" style="display:none;margin-top:var(--space-3)">
-          ${!fields.length ? `<div class="text-muted" style="font-size:12px">Non disponibles.</div>` : `
-            <div style="display:grid;gap:6px">
-              ${fields.map(([varId, d]) => {
-                const lbl   = _simplifyLabel(d.label, varId);
-                const q     = QUALITY_LABELS[d.quality] ?? d.quality;
-                const color = QUALITY_COLORS[d.quality] ?? 'var(--color-muted)';
-                return `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px"><span>${lbl}</span><span style="color:${color};font-size:11px">${q}</span></div>`;
-              }).join('')}
-            </div>`}
-        </div>
-      </div>
-    </div>`;
-}
-
-// ── BLOC IA ───────────────────────────────────────────────────────────────────
-
-function renderBlocIA(analysis, match) {
-  const summary = _buildLocalAIStyleSummary(analysis, match);
-  return `
-    <div class="card match-detail__bloc">
-      <div class="bloc-header" style="margin-bottom:var(--space-3)">
-        <span class="bloc-header__title">Lecture simple</span>
-      </div>
-      <div id="ai-content">
-        <div id="ai-response" style="font-size:13px;line-height:1.8">${summary}</div>
-        <div class="text-muted" style="font-size:10px;margin-top:var(--space-2)">Analyse locale · pas d'IA utilisée ici</div>
-      </div>
-    </div>`;
-}
-
-function _buildLocalAIStyleSummary(analysis, match) {
-  if (!analysis) return '<div class="text-muted">Analyse non disponible.</div>';
-  const home       = match.home_team?.name ?? 'Domicile';
-  const away       = match.away_team?.name ?? 'Extérieur';
+  const home       = match?.home_team?.name ?? 'Domicile';
+  const away       = match?.away_team?.name ?? 'Extérieur';
   const predictive = analysis.predictive_score != null ? Math.round(analysis.predictive_score * 100) : null;
-  const robustness = analysis.robustness_score  != null ? Math.round(analysis.robustness_score  * 100) : null;
-  const quality    = analysis.data_quality_score != null ? Math.round(analysis.data_quality_score * 100) : null;
   const keySignals = (analysis.key_signals ?? []).slice(0, 2).map(s => _simplifyLabel(s.label, s.variable)).filter(Boolean);
   const best       = analysis.betting_recommendations?.best ?? null;
 
-  let line1 = 'Match équilibré ou lecture insuffisante.';
-  if (predictive != null) {
-    if (predictive > 52)      line1 = `${home} ressort légèrement devant (${predictive}%).`;
-    else if (predictive < 48) line1 = `${away} ressort légèrement devant (${100 - predictive}%).`;
-    else                      line1 = `L'analyse voit un match serré.`;
+  // Phrase 1 — favori
+  let phrase1;
+  if (predictive == null)        phrase1 = 'Données insuffisantes pour déterminer un favori.';
+  else if (predictive > 55)      phrase1 = `${home} ressort favori à ${predictive}% de probabilité.`;
+  else if (predictive < 45)      phrase1 = `${away} ressort favori à ${100 - predictive}% de probabilité.`;
+  else                           phrase1 = 'Match très serré — les deux équipes sont à niveau comparable.';
+
+  // Phrase 2 — signaux + raison
+  const signalStr = keySignals.length ? keySignals.join(' et ') : 'les données disponibles';
+  const phrase2   = `Le signal dominant est ${signalStr}.`;
+
+  // Phrase 3 — recommandation avec raison
+  let phrase3;
+  if (!best) {
+    phrase3 = 'Aucune cote sous-évaluée détectée sur ce match.';
+  } else {
+    const typeLabel = best.type === 'MONEYLINE' ? 'la victoire' : best.type === 'SPREAD' ? 'le handicap' : 'le total de points';
+    const sideLabel = best.side === 'HOME' ? home : best.side === 'AWAY' ? away : best.side === 'OVER' ? 'Over' : 'Under';
+    // Chercher la raison principale de l'edge
+    const starMod   = analysis.star_absence_modifier;
+    let reason = '';
+    if (starMod !== null && Math.abs(starMod - 1) > 0.03) reason = 'une absence importante non encore pricée par le book';
+    else if (keySignals.length)                             reason = `un avantage en ${keySignals[0].toLowerCase()}`;
+    phrase3 = `Valeur détectée sur ${typeLabel} (${sideLabel}, cote sous-évaluée de ${best.edge}%)${reason ? ` — ${reason}` : ''}.`;
   }
 
-  const line2 = keySignals.length ? `Signal principal : ${keySignals.join(' · ')}.` : 'Aucun signal majeur clairement exploitable.';
-  const line3 = best ? `Valeur détectée : ${best.label ?? best.side} cote sous-évaluée de ${best.edge ?? '—'}%.` : 'Pas de valeur claire détectée pour parier maintenant.';
-  const line4 = `Robustesse ${robustness ?? '—'}% · qualité des données ${quality ?? '—'}%.`;
-
-  return `<div>${escapeHtml(line1)}</div><div style="margin-top:8px">${escapeHtml(line2)}</div><div style="margin-top:8px">${escapeHtml(line3)}</div><div style="margin-top:8px">${escapeHtml(line4)}</div>`;
+  return `${escapeHtml(phrase1)} ${escapeHtml(phrase2)} ${escapeHtml(phrase3)}`;
 }
+
+// Anciennes fonctions conservées pour compatibilité interne (non utilisées dans le shell)
+function renderBlocFiabilite(analysis) { return renderBlocFiabiliteEtSynthese(analysis, null); }
+function renderBlocSources(analysis) { return ''; }
+function renderBlocIA(analysis, match) { return ''; }
 
 // ── COTES MULTI-BOOKS ─────────────────────────────────────────────────────────
 

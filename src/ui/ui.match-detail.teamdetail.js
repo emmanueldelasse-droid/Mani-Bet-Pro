@@ -1,17 +1,16 @@
 /**
- * MANI BET PRO — ui.match-detail.teamdetail.js v1.0
+ * MANI BET PRO — ui.match-detail.teamdetail.js v2.0
  *
- * Extrait depuis ui.match-detail.js v3.8 (refactor v3.9).
- * Responsabilité : rendu du bloc Team Detail (5 sections).
- *   1. Stats équipes côte à côte
- *   2. Top 10 scoreurs avec onglets
- *   3. 10 derniers matchs avec scores
- *   4. H2H + tendance O/U
- *   5. Joueurs absents triés par PPG
- *
- * Note : ESPN_TO_TANK01_ABV supprimé — centralisé dans sports.config.js (NBA_TEAMS v6.4).
- * L'import getNBAAbvFromEspn n'est pas nécessaire ici car les abréviations viennent
- * directement des données match (match.home_team.abbreviation) fournies par l'orchestrateur.
+ * AMÉLIORATIONS v2.0 :
+ *   - Nouvelle disposition : Absences remonte avant Top 10 scoreurs
+ *   - Stats équipes : griser valeurs identiques (< 3% écart), "Moy. 5 derniers" au lieu de "Pts/m last5"
+ *   - Absences : PPG affiché à côté de chaque joueur
+ *   - Last10 : scores avec deux équipes nommées (PHI 126 – MIL 106)
+ *   - H2H : dates en format français (9 jan.)
+ *   - O/U : légende repositionnée pour mobile
+ *   - Top 10 scoreurs : L5 simplifiée sans flèche (23.0 · -5.3)
+ *   - Modal équipe : stats saison + playoffs + forme (panneau bas)
+ *   - Titre : 📈 Stats équipes (au lieu de 📊)
  */
 
 import { Logger } from '../utils/utils.logger.js';
@@ -41,12 +40,11 @@ export async function loadAndRenderTeamDetail(container, match, storeInstance) {
     }
 
     detailEl.innerHTML = renderBlocTeamDetail(match, teamDetail, injReport);
-    // Activer les clics sur les lignes last10 avec boxscore
     bindLast10Clicks(detailEl, teamDetail);
+    _bindTeamNameClicks(detailEl, match, teamDetail, injReport);
 
   } catch (err) {
     Logger.warn('TEAM_DETAIL_RENDER_FAILED', { message: err.message });
-    // Fallback : message simple pour éviter la dépendance circulaire avec ui.match-detail.js
     detailEl.innerHTML = `
       <div class="card match-detail__bloc">
         <div style="font-size:12px;color:var(--color-muted);padding:8px 0">
@@ -58,11 +56,8 @@ export async function loadAndRenderTeamDetail(container, match, storeInstance) {
 
 export function renderBlocTeamDetailSkeleton() {
   return `
-    <div class="card match-detail__bloc" style="text-align:center;padding:24px 0">
-      <div style="display:inline-flex;align-items:center;gap:8px;color:var(--color-muted);font-size:13px">
-        <div style="width:14px;height:14px;border:2px solid var(--color-muted);border-top-color:var(--color-signal);border-radius:50%;animation:spin 0.8s linear infinite"></div>
-        Chargement stats avancées…
-      </div>
+    <div class="card match-detail__bloc" id="team-detail-skeleton" style="padding:20px;text-align:center">
+      <div style="font-size:12px;color:var(--color-muted)">Chargement des stats équipes…</div>
     </div>`;
 }
 
@@ -70,12 +65,13 @@ export function renderBlocTeamDetail(match, teamDetail, injReport) {
   if (!teamDetail) {
     return `<div class="card match-detail__bloc"><div class="text-muted" style="font-size:12px;padding:8px 0">Stats avancées indisponibles pour ce match.</div></div>`;
   }
+  // Nouvelle disposition : Absences remonte avant Top 10
   return [
     _renderTDStats(match, teamDetail),
+    _renderTDAbsents(match, injReport),        // ← remonté
     _renderTDTop10(match, teamDetail, injReport),
     _renderTDLast10(match, teamDetail),
     _renderTDH2H_OU(match, teamDetail),
-    _renderTDAbsents(match, injReport),
   ].join('');
 }
 
@@ -87,12 +83,13 @@ function _resultBadge(result) {
   return `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:${color};color:#fff;font-size:10px;font-weight:700;flex-shrink:0">${letter}</span>`;
 }
 
-function _trendArrow(season, last5) {
-  if (!season || !last5) return '';
-  const diff = last5 - season;
-  if (diff > 1.5)  return `<span style="color:#22c55e;font-size:11px;font-weight:700">↑+${diff.toFixed(1)}</span>`;
-  if (diff < -1.5) return `<span style="color:#ef4444;font-size:11px;font-weight:700">↓${diff.toFixed(1)}</span>`;
-  return `<span style="color:var(--color-muted);font-size:11px">→${diff >= 0 ? '+' : ''}${diff.toFixed(1)}</span>`;
+// L5 simplifiée sans flèche — ex: 23.0 (-5.3)
+function _l5Display(season, last5) {
+  if (last5 === null || last5 === undefined) return '—';
+  const diff = last5 - (season ?? 0);
+  const sign = diff >= 0 ? '+' : '';
+  const color = diff > 1.5 ? '#22c55e' : diff < -1.5 ? '#ef4444' : 'var(--color-muted)';
+  return `${last5.toFixed(1)} <span style="color:${color};font-size:10px">(${sign}${diff.toFixed(1)})</span>`;
 }
 
 function _restBadge(days) {
@@ -110,46 +107,70 @@ function _momentumBadge(momentum) {
   return `<span style="color:var(--color-muted);font-size:11px">→ ${last3W}/3 derniers</span>`;
 }
 
+// Format date français : YYYYMMDD → "9 jan."
+function _fmtDateFR(dateStr) {
+  if (!dateStr) return '';
+  const MOIS = ['jan.','fév.','mars','avr.','mai','juin','juil.','août','sep.','oct.','nov.','déc.'];
+  const m = parseInt(dateStr.slice(4,6)) - 1;
+  const d = parseInt(dateStr.slice(6,8));
+  return `${d} ${MOIS[m] ?? ''}`;
+}
+
 // ── SECTION 1 : STATS ÉQUIPES ─────────────────────────────────────────────────
 
 function _renderTDStats(match, teamDetail) {
-  const homeAbv = match?.home_team?.abbreviation ?? 'DOM';
-  const awayAbv = match?.away_team?.abbreviation ?? 'EXT';
-  const hStats  = match?.home_season_stats ?? {};
-  const aStats  = match?.away_season_stats ?? {};
-  const hDetail = teamDetail?.home ?? {};
-  const aDetail = teamDetail?.away ?? {};
+  const homeAbv  = match?.home_team?.abbreviation ?? 'DOM';
+  const awayAbv  = match?.away_team?.abbreviation ?? 'EXT';
+  const homeName = match?.home_team?.name ?? homeAbv;
+  const awayName = match?.away_team?.name ?? awayAbv;
+  const hStats   = match?.home_season_stats ?? {};
+  const aStats   = match?.away_season_stats ?? {};
+  const hDetail  = teamDetail?.home ?? {};
+  const aDetail  = teamDetail?.away ?? {};
 
   const rows = [
-    { label: 'Pts/match',     hVal: hStats.avg_pts?.toFixed(1),          aVal: aStats.avg_pts?.toFixed(1),          better: 'high' },
-    { label: 'Pts encaissés', hVal: hDetail.avgTotal != null ? (hDetail.avgTotal - (hStats.avg_pts ?? 0)).toFixed(1) : null,
-                               aVal: aDetail.avgTotal != null ? (aDetail.avgTotal - (aStats.avg_pts ?? 0)).toFixed(1) : null, better: 'low' },
-    { label: 'Net Rating',    hVal: hStats.net_rating != null ? (hStats.net_rating > 0 ? '+' : '') + hStats.net_rating?.toFixed(1) : null,
-                               aVal: aStats.net_rating != null ? (aStats.net_rating > 0 ? '+' : '') + aStats.net_rating?.toFixed(1) : null, better: 'high', raw: true },
-    { label: 'Win %',         hVal: hStats.win_pct != null ? Math.round(hStats.win_pct * 100) + '%' : null,
-                               aVal: aStats.win_pct != null ? Math.round(aStats.win_pct * 100) + '%' : null, better: 'high', raw: true },
-    { label: 'Moy. total',    hVal: hDetail.avgTotal?.toFixed(1),        aVal: aDetail.avgTotal?.toFixed(1),        better: null },
-    { label: 'Pts/m last5',   hVal: hDetail.last5ScoringAvg?.toFixed(1), aVal: aDetail.last5ScoringAvg?.toFixed(1), better: 'high' },
+    { label: 'Pts/match',      hVal: hStats.avg_pts?.toFixed(1),      aVal: aStats.avg_pts?.toFixed(1),      better: 'high' },
+    { label: 'Pts encaissés',  hVal: hDetail.avgTotal != null ? (hDetail.avgTotal - (hStats.avg_pts ?? 0)).toFixed(1) : null,
+                                aVal: aDetail.avgTotal != null ? (aDetail.avgTotal - (aStats.avg_pts ?? 0)).toFixed(1) : null, better: 'low' },
+    { label: 'Win %',          hVal: hStats.win_pct != null ? Math.round(hStats.win_pct * 100) + '%' : null,
+                                aVal: aStats.win_pct != null ? Math.round(aStats.win_pct * 100) + '%' : null, better: 'high',
+                                hRaw: hStats.win_pct, aRaw: aStats.win_pct },
+    { label: 'Moy. total',     hVal: hDetail.avgTotal?.toFixed(1),    aVal: aDetail.avgTotal?.toFixed(1),    better: null,
+                                hRaw: hDetail.avgTotal, aRaw: aDetail.avgTotal },
+    { label: 'Moy. 5 derniers',hVal: hDetail.last5ScoringAvg?.toFixed(1), aVal: aDetail.last5ScoringAvg?.toFixed(1), better: 'high' },
   ];
 
   const rowsHtml = rows.map(r => {
     if (!r.hVal && !r.aVal) return '';
     const hNum = parseFloat(r.hVal);
     const aNum = parseFloat(r.aVal);
-    const hBetter = r.better === 'high' ? hNum > aNum : r.better === 'low' ? hNum < aNum : false;
-    const aBetter = r.better === 'high' ? aNum > hNum : r.better === 'low' ? aNum < hNum : false;
+
+    // Griser si écart < 3% (ou < 3 points pour totaux)
+    const hRaw   = r.hRaw ?? hNum;
+    const aRaw   = r.aRaw ?? aNum;
+    const avg    = (Math.abs(hRaw) + Math.abs(aRaw)) / 2;
+    const ecart  = avg > 0 ? Math.abs(hRaw - aRaw) / avg : 0;
+    const tooClose = ecart < 0.03;
+
+    const hBetter = !tooClose && (r.better === 'high' ? hNum > aNum : r.better === 'low' ? hNum < aNum : false);
+    const aBetter = !tooClose && (r.better === 'high' ? aNum > hNum : r.better === 'low' ? aNum < hNum : false);
+
+    const hColor = tooClose ? 'var(--color-muted)' : hBetter ? 'var(--color-text)' : 'var(--color-muted)';
+    const aColor = tooClose ? 'var(--color-muted)' : aBetter ? 'var(--color-text)' : 'var(--color-muted)';
+
     return `
       <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:6px;align-items:center;padding:5px 0;border-bottom:1px solid var(--color-border)">
-        <div style="font-size:12px;font-weight:${hBetter ? '700' : '400'};color:${hBetter ? 'var(--color-text)' : 'var(--color-muted)'}">${r.hVal ?? '—'}</div>
-        <div style="font-size:10px;color:var(--color-muted);text-align:center;white-space:nowrap">${r.label}</div>
-        <div style="font-size:12px;font-weight:${aBetter ? '700' : '400'};color:${aBetter ? 'var(--color-text)' : 'var(--color-muted)'};text-align:right">${r.aVal ?? '—'}</div>
+        <div style="font-size:12px;font-weight:${hBetter ? '700' : '400'};color:${hColor}">${r.hVal ?? '—'}</div>
+        <div style="font-size:10px;color:${tooClose ? 'var(--color-border)' : 'var(--color-muted)'};text-align:center;white-space:nowrap">${r.label}</div>
+        <div style="font-size:12px;font-weight:${aBetter ? '700' : '400'};color:${aColor};text-align:right">${r.aVal ?? '—'}</div>
       </div>`;
   }).join('');
 
+  // Noms cliquables → modal équipe
   return `
     <div class="card match-detail__bloc">
       <div class="bloc-header" style="margin-bottom:var(--space-3)">
-        <span class="bloc-header__title">📊 Stats équipes</span>
+        <span class="bloc-header__title">📈 Stats équipes</span>
         <div style="display:flex;gap:6px;align-items:center;font-size:11px">
           <strong>${homeAbv}</strong>${_restBadge(hDetail.restDays)}
           <span style="color:var(--color-muted)">vs</span>
@@ -157,9 +178,11 @@ function _renderTDStats(match, teamDetail) {
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:4px;align-items:center;margin-bottom:8px">
-        <div style="font-size:11px;font-weight:700;color:var(--color-signal)">${homeAbv}</div>
+        <button class="team-name-btn" data-team-side="home"
+          style="font-size:12px;font-weight:700;color:var(--color-signal);background:none;border:none;cursor:pointer;text-align:left;padding:0;text-decoration:underline dotted">${homeName}</button>
         <div style="font-size:9px;color:var(--color-muted);text-align:center">Saison</div>
-        <div style="font-size:11px;font-weight:700;color:var(--color-signal);text-align:right">${awayAbv}</div>
+        <button class="team-name-btn" data-team-side="away"
+          style="font-size:12px;font-weight:700;color:var(--color-signal);background:none;border:none;cursor:pointer;text-align:right;padding:0;text-decoration:underline dotted">${awayName}</button>
       </div>
       ${rowsHtml}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
@@ -177,7 +200,73 @@ function _renderTDStats(match, teamDetail) {
     </div>`;
 }
 
-// ── SECTION 2 : TOP 10 SCOREURS ───────────────────────────────────────────────
+// ── SECTION 2 : ABSENCES (remontée) ──────────────────────────────────────────
+
+function _renderTDAbsents(match, injReport) {
+  const homeAbv  = match?.home_team?.abbreviation ?? 'DOM';
+  const awayAbv  = match?.away_team?.abbreviation ?? 'EXT';
+  const homeName = match?.home_team?.name ?? '';
+  const awayName = match?.away_team?.name ?? '';
+
+  const STATUS_COLORS = { 'Out': '#ef4444', 'Doubtful': '#f97316', 'Day-To-Day': '#eab308', 'Questionable': '#eab308', 'Limited': '#a78bfa' };
+  const STATUS_LABELS = { 'Out': 'Absent', 'Doubtful': 'Incertain', 'Day-To-Day': 'DTD', 'Questionable': 'Douteux', 'Limited': 'Limité' };
+
+  const buildList = (teamName) => {
+    if (!injReport?.by_team?.[teamName]) return [];
+    return (injReport.by_team[teamName] ?? [])
+      .filter(p => ['Out', 'Doubtful', 'Day-To-Day', 'Questionable', 'Limited'].includes(p.status))
+      .sort((a, b) => (parseFloat(b.ppg) || 0) - (parseFloat(a.ppg) || 0));
+  };
+
+  const renderList = (players) => {
+    if (!players.length) return `<div style="font-size:11px;color:#22c55e">✅ Effectif au complet</div>`;
+    return players.map(p => {
+      const color = STATUS_COLORS[p.status] ?? 'var(--color-muted)';
+      const label = STATUS_LABELS[p.status] ?? p.status;
+      const ppg   = parseFloat(p.ppg);
+      const star  = ppg >= 20;
+      return `
+        <div style="display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;border-left:3px solid ${color};background:var(--color-bg);margin-bottom:4px">
+          <div style="flex:1;min-width:0">
+            <span style="font-size:12px;font-weight:600">${star ? '⭐ ' : ''}${p.name}</span>
+            ${ppg > 0 ? `<span style="font-size:11px;font-weight:700;color:${star ? '#f97316' : 'var(--color-muted)'};margin-left:5px">${ppg.toFixed(1)} pts/m</span>` : ''}
+          </div>
+          <span style="font-size:10px;font-weight:700;color:${color};border:1px solid ${color};border-radius:4px;padding:1px 5px;flex-shrink:0">${label}</span>
+        </div>`;
+    }).join('');
+  };
+
+  const homeList = buildList(homeName);
+  const awayList = buildList(awayName);
+
+  if (!homeList.length && !awayList.length) {
+    return `
+      <div class="card match-detail__bloc">
+        <div class="bloc-header" style="margin-bottom:var(--space-2)"><span class="bloc-header__title">🏥 Absences</span></div>
+        <div style="font-size:12px;color:#22c55e">✅ Aucune absence signalée pour ce match</div>
+      </div>`;
+  }
+
+  return `
+    <div class="card match-detail__bloc">
+      <div class="bloc-header" style="margin-bottom:var(--space-3)">
+        <span class="bloc-header__title">🏥 Absences</span>
+        <span style="font-size:10px;color:var(--color-muted)">triées par PPG</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--color-muted);margin-bottom:6px;text-transform:uppercase">${homeAbv}</div>
+          ${renderList(homeList)}
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--color-muted);margin-bottom:6px;text-transform:uppercase">${awayAbv}</div>
+          ${renderList(awayList)}
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── SECTION 3 : TOP 10 SCOREURS ───────────────────────────────────────────────
 
 function _renderTDTop10(match, teamDetail, injReport) {
   const homeAbv  = match?.home_team?.abbreviation ?? 'DOM';
@@ -186,8 +275,6 @@ function _renderTDTop10(match, teamDetail, injReport) {
   const awayName = match?.away_team?.name ?? '';
   const uid      = 'top10_' + (match?.id ?? Date.now());
 
-  // Construire une Map nom→statut PAR ÉQUIPE — affiche le bon badge (OUT/DTD/etc.)
-  // au lieu d'un générique OUT pour tous les joueurs listés dans les absences.
   const buildAbsentMap = (teamName) => {
     const map = new Map();
     const players = injReport?.by_team?.[teamName] ?? [];
@@ -233,7 +320,7 @@ function _renderTDTop10(match, teamDetail, injReport) {
                   ${star ? '⭐ ' : ''}${p.name ?? '—'}${absent ? ` <span style="font-size:9px;color:${badge.color};font-weight:700">${badge.label}</span>` : ''}
                 </td>
                 <td style="padding:6px 4px;text-align:center;font-weight:600">${p.pts?.toFixed(1) ?? '—'}</td>
-                <td style="padding:6px 4px;text-align:center">${p.last5pts !== null && p.last5pts !== undefined ? p.last5pts.toFixed(1) + ' ' + _trendArrow(p.pts, p.last5pts) : '—'}</td>
+                <td style="padding:6px 4px;text-align:center;font-size:10px">${_l5Display(p.pts, p.last5pts)}</td>
                 <td style="padding:6px 4px;text-align:center;color:var(--color-muted)">${p.reb?.toFixed(1) ?? '—'}</td>
                 <td style="padding:6px 4px;text-align:center;color:var(--color-muted)">${p.ast?.toFixed(1) ?? '—'}</td>
                 <td style="padding:6px 4px;text-align:center;color:var(--color-muted)">${p.stl?.toFixed(1) ?? '—'}</td>
@@ -268,7 +355,7 @@ function _renderTDTop10(match, teamDetail, injReport) {
     </div>`;
 }
 
-// ── SECTION 3 : 10 DERNIERS MATCHS ───────────────────────────────────────────
+// ── SECTION 4 : 10 DERNIERS MATCHS ───────────────────────────────────────────
 
 function _renderTDLast10(match, teamDetail) {
   const homeAbv  = match?.home_team?.abbreviation ?? 'DOM';
@@ -279,23 +366,27 @@ function _renderTDLast10(match, teamDetail) {
   const renderTimeline = (games, teamAbv, teamName, boxScores) => {
     if (!games?.length) return `<div style="font-size:11px;color:var(--color-muted)">Données indisponibles</div>`;
     return games.map(g => {
-      const dateStr    = g.date ? `${g.date.slice(4,6)}/${g.date.slice(6,8)}` : '';
-      const locIcon    = g.homeAway === 'home' ? '🏠' : '✈️';
-      const won        = g.result === 'W';
-      const color      = won ? '#22c55e' : '#ef4444';
+      const dateStr     = _fmtDateFR(g.date);
+      const locIcon     = g.homeAway === 'home' ? '🏠' : '✈️';
+      const won         = g.result === 'W';
+      const color       = won ? '#22c55e' : '#ef4444';
       const hasBoxscore = (boxScores ?? []).some(b => b.gameID === g.gameID);
-      const clickable  = hasBoxscore;
+      // Score avec deux équipes nommées
+      const scoreStr = (g.teamPts != null && g.oppPts != null)
+        ? (g.homeAway === 'home'
+            ? `${teamAbv} <strong>${g.teamPts}</strong> – <strong>${g.oppPts}</strong> ${g.opponent}`
+            : `${g.opponent} <strong>${g.oppPts}</strong> – <strong>${g.teamPts}</strong> ${teamAbv}`)
+        : '—';
 
       return `
-        <div class="game-row${clickable ? ' game-row--clickable' : ''}"
-          style="display:flex;align-items:center;gap:6px;padding:5px 7px;border-radius:6px;background:var(--color-bg);margin-bottom:4px;border-left:3px solid ${color};${clickable ? 'cursor:pointer' : ''}"
-          ${clickable ? `data-game-id="${g.gameID}" data-team-abv="${teamAbv}" data-team-name="${escapeAttr(teamName)}"` : ''}>
+        <div class="game-row${hasBoxscore ? ' game-row--clickable' : ''}"
+          style="display:flex;align-items:center;gap:6px;padding:5px 7px;border-radius:6px;background:var(--color-bg);margin-bottom:4px;border-left:3px solid ${color};${hasBoxscore ? 'cursor:pointer' : ''}"
+          ${hasBoxscore ? `data-game-id="${g.gameID}" data-team-abv="${teamAbv}" data-team-name="${_escapeAttr(teamName)}"` : ''}>
           <span style="font-size:9px;font-weight:700;color:${color};width:12px">${won ? 'V' : 'D'}</span>
-          <span style="font-size:10px;color:var(--color-muted);width:28px">${dateStr}</span>
-          <span style="font-size:11px;font-weight:600;min-width:26px">${g.opponent ?? '?'}</span>
+          <span style="font-size:10px;color:var(--color-muted);width:38px;flex-shrink:0">${dateStr}</span>
           <span style="font-size:10px">${locIcon}</span>
-          <span style="font-size:11px;color:var(--color-muted);margin-left:auto;font-variant-numeric:tabular-nums">${g.score ?? '—'}</span>
-          ${clickable ? `<span style="font-size:9px;color:var(--color-signal);margin-left:4px">▸</span>` : ''}
+          <span style="font-size:11px;color:var(--color-muted);margin-left:auto;font-variant-numeric:tabular-nums">${scoreStr}</span>
+          ${hasBoxscore ? `<span style="font-size:9px;color:var(--color-signal);margin-left:4px">▸</span>` : ''}
         </div>`;
     }).join('');
   };
@@ -303,7 +394,7 @@ function _renderTDLast10(match, teamDetail) {
   return `
     <div class="card match-detail__bloc" id="last10-bloc">
       <div class="bloc-header" style="margin-bottom:var(--space-3)">
-        <span class="bloc-header__title">📅 10 derniers matchs</span>
+        <span class="bloc-header__title">📅 Forme récente</span>
         <span style="font-size:10px;color:var(--color-muted)">▸ = boxscore disponible</span>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
@@ -319,11 +410,107 @@ function _renderTDLast10(match, teamDetail) {
     </div>`;
 }
 
-function escapeAttr(str) {
-  return String(str ?? '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+// ── SECTION 5 : H2H + O/U ────────────────────────────────────────────────────
+
+function _renderTDH2H_OU(match, teamDetail) {
+  const homeAbv = match?.home_team?.abbreviation ?? 'DOM';
+  const awayAbv = match?.away_team?.abbreviation ?? 'EXT';
+  const h2h     = teamDetail?.home?.h2h ?? [];
+  const ouLine  = parseFloat(match?.odds?.over_under ?? match?.market_odds?.total_line ?? 0);
+
+  const calcOU = (games) => {
+    if (!ouLine || !games?.length) return null;
+    const withTotal = games.filter(g => g.total !== null && g.total !== undefined);
+    if (!withTotal.length) return null;
+    const over  = withTotal.filter(g => g.total > ouLine).length;
+    const under = withTotal.filter(g => g.total < ouLine).length;
+    const avg   = (withTotal.reduce((s, g) => s + g.total, 0) / withTotal.length).toFixed(1);
+    return { over, under, total: withTotal.length, avg };
+  };
+
+  const ouBar = (ou, label) => {
+    if (!ou) return `<div style="font-size:11px;color:var(--color-muted)">${label} : ligne O/U indisponible</div>`;
+    const overPct  = Math.round((ou.over  / ou.total) * 100);
+    const underPct = Math.round((ou.under / ou.total) * 100);
+    return `
+      <div style="margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+          <span style="font-size:10px;font-weight:700;color:var(--color-muted)">${label}</span>
+          <span style="font-size:10px;color:var(--color-muted)">${ou.total} matchs · moy. ${ou.avg} pts</span>
+        </div>
+        <div style="height:8px;border-radius:4px;overflow:hidden;background:var(--color-border)">
+          <div style="width:${overPct}%;height:100%;background:#22c55e;float:left"></div>
+          <div style="width:${underPct}%;height:100%;background:#ef4444;float:left;margin-left:1px"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:10px;margin-top:3px;clear:both">
+          <span style="color:#22c55e;font-weight:600">Over ${ou.over}/${ou.total} (${overPct}%)</span>
+          <span style="color:#ef4444;font-weight:600">Under ${ou.under}/${ou.total} (${underPct}%)</span>
+        </div>
+      </div>`;
+  };
+
+  const h2hHtml = h2h.length
+    ? h2h.slice(0, 5).map(g => {
+        const dateStr = _fmtDateFR(g.date);
+        const won     = g.result === 'W';
+        const color   = won ? '#22c55e' : '#ef4444';
+        const venue   = g.homeAway === 'home' ? '🏠' : '✈️';
+        const teamPts = g.teamPts ?? '—';
+        const oppPts  = g.oppPts  ?? '—';
+        const ecart   = (typeof teamPts === 'number' && typeof oppPts === 'number')
+          ? (won ? `+${teamPts - oppPts}` : `${teamPts - oppPts}`) : '';
+
+        return `
+          <div style="display:grid;grid-template-columns:auto 1fr auto;gap:6px;align-items:center;padding:6px 8px;border-radius:6px;background:var(--color-bg);margin-bottom:4px;border-left:3px solid ${color}">
+            <div style="display:flex;align-items:center;gap:4px">
+              <span style="font-size:9px;font-weight:700;color:${color};width:12px">${won ? 'V' : 'D'}</span>
+              <span style="font-size:10px;color:var(--color-muted)">${dateStr}</span>
+              <span style="font-size:10px">${venue}</span>
+            </div>
+            <div style="font-size:11px;font-weight:600;text-align:center">
+              <span style="color:${won ? 'var(--color-success)' : 'var(--color-muted)'}">${homeAbv}</span>
+              <span style="color:var(--color-muted);margin:0 4px">·</span>
+              <span style="font-weight:700">${teamPts} – ${oppPts}</span>
+              <span style="color:var(--color-muted);margin:0 4px">·</span>
+              <span style="color:${won ? 'var(--color-muted)' : 'var(--color-danger)'}">${g.opponent ?? awayAbv}</span>
+            </div>
+            <div style="font-size:9px;color:${color};font-weight:700;text-align:right;min-width:28px">${ecart}</div>
+          </div>`;
+      }).join('')
+    : `<div style="font-size:11px;color:var(--color-muted)">Pas de confrontation cette saison</div>`;
+
+  const h2hWins  = h2h.filter(g => g.result === 'W').length;
+  const h2hTotal = Math.min(h2h.length, 5);
+  const h2hBilan = h2hTotal > 0
+    ? `<div style="font-size:11px;color:var(--color-muted);margin-bottom:8px">${homeAbv} : <strong style="color:var(--color-text)">${h2hWins}V / ${h2hTotal - h2hWins}D</strong> cette saison</div>`
+    : '';
+
+  return `
+    <div class="card match-detail__bloc">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <div class="bloc-header" style="margin-bottom:var(--space-2)">
+            <span class="bloc-header__title">🔁 H2H saison</span>
+          </div>
+          ${h2hBilan}
+          ${h2hHtml}
+        </div>
+        <div>
+          <div class="bloc-header" style="margin-bottom:var(--space-3)">
+            <span class="bloc-header__title">📈 O/U${ouLine ? ` · ${ouLine}` : ''}</span>
+          </div>
+          ${ouBar(calcOU(teamDetail?.home?.last10), homeAbv)}
+          ${ouBar(calcOU(teamDetail?.away?.last10), awayAbv)}
+        </div>
+      </div>
+    </div>`;
 }
 
-// ── MODAL BOXSCORE ────────────────────────────────────────────────────────────
+// ── BOXSCORE MODAL ────────────────────────────────────────────────────────────
+
+function _escapeAttr(str) {
+  return String(str ?? '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 
 export function bindLast10Clicks(container, teamDetail) {
   const bloc = container.querySelector('#last10-bloc');
@@ -337,19 +524,12 @@ export function bindLast10Clicks(container, teamDetail) {
     const teamName = row.dataset.teamName;
     if (!gameID || !teamAbv) return;
 
-    // Chercher le boxscore dans home ou away
     const boxScores = [
       ...(teamDetail?.home?.boxScores ?? []),
       ...(teamDetail?.away?.boxScores ?? []),
     ];
-    const box = boxScores.find(b => b.gameID === gameID);
+    const box  = boxScores.find(b => b.gameID === gameID);
     if (!box) return;
-
-    // Trouver les infos du match depuis last10
-    const allGames = [
-      ...(teamDetail?.home?.last10 ?? []).map(g => ({ ...g, _teamAbv: teamAbv })),
-      ...(teamDetail?.away?.last10 ?? []).map(g => ({ ...g, _teamAbv: teamAbv })),
-    ];
     const game = [...(teamDetail?.home?.last10 ?? []), ...(teamDetail?.away?.last10 ?? [])]
       .find(g => g.gameID === gameID);
 
@@ -358,33 +538,29 @@ export function bindLast10Clicks(container, teamDetail) {
 }
 
 function _openGameModal(gameID, teamAbv, teamName, box, game) {
-  // Extraire les joueurs du boxscore pour cette équipe
   const allPlayers = Object.values(box?.playerStats ?? {});
   const teamPlayers = allPlayers
     .filter(p => String(p?.teamAbv ?? '').toUpperCase() === teamAbv.toUpperCase())
     .map(p => ({
-      name:   p.longName ?? p.name ?? '—',
-      min:    p.mins ?? p.min ?? '—',
-      pts:    parseInt(p.pts ?? 0) || 0,
-      reb:    parseInt(p.reb ?? p.treb ?? 0) || 0,
-      ast:    parseInt(p.ast ?? 0) || 0,
-      stl:    parseInt(p.stl ?? 0) || 0,
-      blk:    parseInt(p.blk ?? 0) || 0,
-      tov:    parseInt(p.TOV ?? p.tov ?? 0) || 0,
-      fgm:    parseInt(p.fgm ?? 0) || 0,
-      fga:    parseInt(p.fga ?? 0) || 0,
-      tpm:    parseInt(p.tpm ?? p['3pm'] ?? 0) || 0,
+      name: p.longName ?? p.name ?? '—',
+      min:  p.mins ?? p.min ?? '—',
+      pts:  parseInt(p.pts ?? 0) || 0,
+      reb:  parseInt(p.reb ?? p.treb ?? 0) || 0,
+      ast:  parseInt(p.ast ?? 0) || 0,
+      stl:  parseInt(p.stl ?? 0) || 0,
+      blk:  parseInt(p.blk ?? 0) || 0,
+      tov:  parseInt(p.TOV ?? p.tov ?? 0) || 0,
+      fgm:  parseInt(p.fgm ?? 0) || 0,
+      fga:  parseInt(p.fga ?? 0) || 0,
+      tpm:  parseInt(p.tpm ?? p['3pm'] ?? 0) || 0,
     }))
     .filter(p => (p.min && p.min !== '0' && p.min !== '—') || p.pts > 0)
     .sort((a, b) => b.pts - a.pts);
 
-  const dateStr  = game?.date
-    ? `${game.date.slice(0,4)}-${game.date.slice(4,6)}-${game.date.slice(6,8)}`
-    : '';
+  const dateStr  = game?.date ? _fmtDateFR(game.date) : '';
   const won      = game?.result === 'W';
   const score    = game ? `${game.teamPts ?? '—'} – ${game.oppPts ?? '—'}` : '—';
   const venue    = game?.homeAway === 'home' ? '🏠 Domicile' : '✈️ Extérieur';
-  const result   = won ? '✓ Victoire' : '✗ Défaite';
   const resColor = won ? '#22c55e' : '#ef4444';
 
   const rows = teamPlayers.map(p => {
@@ -413,7 +589,7 @@ function _openGameModal(gameID, teamAbv, teamName, box, game) {
         <div>
           <div style="font-size:14px;font-weight:700">${teamName} · ${dateStr}</div>
           <div style="display:flex;gap:10px;margin-top:4px">
-            <span style="font-size:12px;font-weight:700;color:${resColor}">${result}</span>
+            <span style="font-size:12px;font-weight:700;color:${resColor}">${won ? '✓ Victoire' : '✗ Défaite'}</span>
             <span style="font-size:12px;color:var(--color-muted)">${score}</span>
             <span style="font-size:11px;color:var(--color-muted)">${venue}</span>
           </div>
@@ -441,7 +617,7 @@ function _openGameModal(gameID, teamAbv, teamName, box, game) {
           </table>
         </div>
         <div style="font-size:10px;color:var(--color-muted);margin-top:8px">Source : Tank01 · 5 derniers matchs uniquement</div>
-      ` : `<div style="font-size:12px;color:var(--color-muted);padding:16px 0">Boxscore non disponible pour ce match.</div>`}
+      ` : `<div style="font-size:12px;color:var(--color-muted);padding:16px 0">Boxscore non disponible.</div>`}
     </div>`;
 
   document.body.appendChild(modal);
@@ -449,166 +625,120 @@ function _openGameModal(gameID, teamAbv, teamName, box, game) {
   modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
 }
 
-// ── SECTION 4 : H2H + O/U TREND ──────────────────────────────────────────────
+// ── MODAL ÉQUIPE (clic sur nom d'équipe) ──────────────────────────────────────
 
-function _renderTDH2H_OU(match, teamDetail) {
-  const homeAbv = match?.home_team?.abbreviation ?? 'DOM';
-  const awayAbv = match?.away_team?.abbreviation ?? 'EXT';
-  const h2h     = teamDetail?.home?.h2h ?? [];
-  const ouLine  = parseFloat(match?.odds?.over_under ?? match?.market_odds?.total_line ?? 0);
+function _bindTeamNameClicks(container, match, teamDetail, injReport) {
+  container.querySelectorAll('.team-name-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const side     = btn.dataset.teamSide;
+      const isHome   = side === 'home';
+      const teamAbv  = isHome ? (match?.home_team?.abbreviation ?? '') : (match?.away_team?.abbreviation ?? '');
+      const teamName = isHome ? (match?.home_team?.name ?? teamAbv) : (match?.away_team?.name ?? teamAbv);
+      const record   = isHome ? (match?.home_team?.record ?? '') : (match?.away_team?.record ?? '');
+      const stats    = isHome ? (match?.home_season_stats ?? {}) : (match?.away_season_stats ?? {});
+      const detail   = isHome ? (teamDetail?.home ?? {}) : (teamDetail?.away ?? {});
+      const top10    = isHome ? (teamDetail?.home?.top10scorers ?? []) : (teamDetail?.away?.top10scorers ?? []);
+      const last10   = isHome ? (teamDetail?.home?.last10 ?? []) : (teamDetail?.away?.last10 ?? []);
+      const injList  = isHome
+        ? (injReport?.by_team?.[match?.home_team?.name ?? ''] ?? [])
+        : (injReport?.by_team?.[match?.away_team?.name ?? ''] ?? []);
 
-  const calcOU = (games) => {
-    if (!ouLine || !games?.length) return null;
-    const withTotal = games.filter(g => g.total !== null && g.total !== undefined);
-    if (!withTotal.length) return null;
-    const over  = withTotal.filter(g => g.total > ouLine).length;
-    const under = withTotal.filter(g => g.total < ouLine).length;
-    const avg   = (withTotal.reduce((s, g) => s + g.total, 0) / withTotal.length).toFixed(1);
-    return { over, under, total: withTotal.length, avg };
-  };
-
-  const ouBar = (ou, label) => {
-    if (!ou) return `<div style="font-size:11px;color:var(--color-muted)">${label} : ligne O/U indisponible</div>`;
-    const overPct  = Math.round((ou.over  / ou.total) * 100);
-    const underPct = Math.round((ou.under / ou.total) * 100);
-    return `
-      <div style="margin-bottom:8px">
-        <div style="font-size:10px;color:var(--color-muted);margin-bottom:3px">${label} · ${ou.total} matchs · moy. ${ou.avg} pts</div>
-        <div style="display:flex;height:7px;border-radius:4px;overflow:hidden;background:var(--color-border)">
-          <div style="width:${overPct}%;background:#22c55e"></div>
-          <div style="width:${underPct}%;background:#ef4444;margin-left:1px"></div>
-        </div>
-        <div style="display:flex;justify-content:space-between;font-size:10px;margin-top:2px">
-          <span style="color:#22c55e">Over ${ou.over}/${ou.total} (${overPct}%)</span>
-          <span style="color:#ef4444">Under ${ou.under}/${ou.total} (${underPct}%)</span>
-        </div>
-      </div>`;
-  };
-
-  const h2hHtml = h2h.length
-    ? h2h.slice(0, 5).map(g => {
-        const dateStr  = g.date ? `${g.date.slice(4,6)}/${g.date.slice(6,8)}` : '';
-        const won      = g.result === 'W';
-        const color    = won ? '#22c55e' : '#ef4444';
-        const isHome   = g.homeAway === 'home';
-        const venue    = isHome ? '🏠' : '✈️';
-        // Score affiché comme : DOM XXX - YYY EXT
-        // L'équipe "home" dans ce contexte = l'équipe qu'on analyse (home_team du match affiché)
-        const teamPts  = g.teamPts ?? '—';
-        const oppPts   = g.oppPts  ?? '—';
-        // En H2H, g.result = résultat pour homeAbv (l'équipe domicile du match affiché)
-        const winnerAbv = won ? homeAbv : (g.opponent ?? awayAbv);
-
-        return `
-          <div style="display:grid;grid-template-columns:auto 1fr auto;gap:6px;align-items:center;padding:6px 8px;border-radius:6px;background:var(--color-bg);margin-bottom:4px;border-left:3px solid ${color}">
-            <div style="display:flex;align-items:center;gap:4px">
-              <span style="font-size:9px;font-weight:700;color:${color};width:14px">${won ? 'V' : 'D'}</span>
-              <span style="font-size:10px;color:var(--color-muted)">${dateStr}</span>
-              <span style="font-size:10px">${venue}</span>
-            </div>
-            <div style="font-size:11px;font-weight:600;text-align:center">
-              <span style="color:${won ? 'var(--color-success)' : 'var(--color-muted)'}">${homeAbv}</span>
-              <span style="color:var(--color-muted);margin:0 4px">·</span>
-              <span style="font-weight:700">${teamPts} – ${oppPts}</span>
-              <span style="color:var(--color-muted);margin:0 4px">·</span>
-              <span style="color:${won ? 'var(--color-muted)' : 'var(--color-danger)'}">${g.opponent ?? awayAbv}</span>
-            </div>
-            <div style="font-size:9px;color:${color};font-weight:700;text-align:right;min-width:28px">
-              ${won ? `+${teamPts - oppPts}` : `${teamPts - oppPts}`}
-            </div>
-          </div>`;
-      }).join('')
-    : `<div style="font-size:11px;color:var(--color-muted)">Pas de confrontation cette saison</div>`;
-
-  // Bilan H2H rapide
-  const h2hWins   = h2h.filter(g => g.result === 'W').length;
-  const h2hTotal  = Math.min(h2h.length, 5);
-  const h2hBilan  = h2hTotal > 0
-    ? `<div style="font-size:11px;color:var(--color-muted);margin-bottom:8px">${homeAbv} : <strong style="color:var(--color-text)">${h2hWins}V / ${h2hTotal - h2hWins}D</strong> cette saison</div>`
-    : '';
-
-  return `
-    <div class="card match-detail__bloc">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-        <div>
-          <div class="bloc-header" style="margin-bottom:var(--space-2)">
-            <span class="bloc-header__title">🔁 H2H saison</span>
-          </div>
-          ${h2hBilan}
-          ${h2hHtml}
-        </div>
-        <div>
-          <div class="bloc-header" style="margin-bottom:var(--space-3)">
-            <span class="bloc-header__title">📈 O/U${ouLine ? ` · ${ouLine}` : ''}</span>
-          </div>
-          ${ouBar(calcOU(teamDetail?.home?.last10), homeAbv)}
-          ${ouBar(calcOU(teamDetail?.away?.last10), awayAbv)}
-        </div>
-      </div>
-    </div>`;
+      _openTeamModal(teamAbv, teamName, record, stats, detail, top10, last10, injList);
+    });
+  });
 }
 
-// ── SECTION 5 : JOUEURS ABSENTS ───────────────────────────────────────────────
+function _openTeamModal(teamAbv, teamName, record, stats, detail, top10, last10, injList) {
+  const winPct   = stats.win_pct != null ? Math.round(stats.win_pct * 100) + '%' : '—';
+  const avgPts   = stats.avg_pts?.toFixed(1) ?? '—';
+  const netRating = stats.net_rating != null ? (stats.net_rating > 0 ? '+' : '') + stats.net_rating.toFixed(1) : '—';
+  const efg      = stats.efg_pct != null ? (stats.efg_pct * 100).toFixed(1) + '%' : '—';
+  const avgTotal = detail.avgTotal?.toFixed(1) ?? '—';
+  const encaisse = detail.avgTotal != null && stats.avg_pts != null
+    ? (detail.avgTotal - stats.avg_pts).toFixed(1) : '—';
 
-function _renderTDAbsents(match, injReport) {
-  const homeAbv  = match?.home_team?.abbreviation ?? 'DOM';
-  const awayAbv  = match?.away_team?.abbreviation ?? 'EXT';
-  const homeName = match?.home_team?.name ?? '';
-  const awayName = match?.away_team?.name ?? '';
+  // Forme récente — 10 pastilles V/D
+  const formeHtml = last10.slice(0, 10).map(g => {
+    const won   = g.result === 'W';
+    const color = won ? '#22c55e' : '#ef4444';
+    return `<span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:4px;background:${color}22;border:1px solid ${color}44;font-size:9px;font-weight:700;color:${color}">${won ? 'V' : 'D'}</span>`;
+  }).join('');
 
-  const STATUS_COLORS = { 'Out': '#ef4444', 'Doubtful': '#f97316', 'Day-To-Day': '#eab308', 'Questionable': '#eab308', 'Limited': '#a78bfa' };
-  const STATUS_LABELS = { 'Out': 'Absent', 'Doubtful': 'Incertain', 'Day-To-Day': 'DTD', 'Questionable': 'Douteux', 'Limited': 'Limité' };
-
-  const buildList = (teamName) => {
-    if (!injReport?.by_team?.[teamName]) return [];
-    return (injReport.by_team[teamName] ?? [])
-      .filter(p => ['Out', 'Doubtful', 'Day-To-Day', 'Questionable', 'Limited'].includes(p.status))
-      .sort((a, b) => (parseFloat(b.ppg) || 0) - (parseFloat(a.ppg) || 0));
-  };
-
-  const renderList = (players) => {
-    if (!players.length) return `<div style="font-size:11px;color:#22c55e">✅ Effectif au complet</div>`;
-    return players.map(p => {
-      const color = STATUS_COLORS[p.status] ?? 'var(--color-muted)';
-      const label = STATUS_LABELS[p.status] ?? p.status;
-      const star  = parseFloat(p.ppg) >= 20;
-      return `
-        <div style="display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;border-left:3px solid ${color};background:var(--color-bg);margin-bottom:4px">
-          <div style="flex:1;min-width:0">
-            <span style="font-size:12px;font-weight:600">${star ? '⭐ ' : ''}${p.name}</span>
-            ${p.ppg ? `<span style="font-size:10px;color:var(--color-muted);margin-left:4px">${p.ppg} pts/m</span>` : ''}
-          </div>
-          <span style="font-size:10px;font-weight:700;color:${color};border:1px solid ${color};border-radius:4px;padding:1px 5px;flex-shrink:0">${label}</span>
-        </div>`;
-    }).join('');
-  };
-
-  const homeList = buildList(homeName);
-  const awayList = buildList(awayName);
-
-  if (!homeList.length && !awayList.length) {
+  // Top 5 scoreurs
+  const top5Html = top10.slice(0, 5).map(p => {
+    const inj = injList.find(i => i.name?.toLowerCase() === p.name?.toLowerCase());
+    const injBadge = inj
+      ? `<span style="font-size:9px;color:#ef4444;font-weight:700;margin-left:4px">${inj.status === 'Out' ? 'OUT' : 'DTD'}</span>`
+      : '';
     return `
-      <div class="card match-detail__bloc">
-        <div class="bloc-header" style="margin-bottom:var(--space-3)"><span class="bloc-header__title">🏥 Absences</span></div>
-        <div style="font-size:12px;color:#22c55e">✅ Aucune absence signalée pour ce match</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--color-border)">
+        <span style="font-size:12px">${p.pts >= 20 ? '⭐ ' : ''}${p.name}${injBadge}</span>
+        <span style="font-size:12px;font-weight:700;color:var(--color-signal)">${p.pts?.toFixed(1)} pts</span>
       </div>`;
-  }
+  }).join('');
 
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,0.75);display:flex;align-items:flex-end;justify-content:center;padding:0';
+  modal.innerHTML = `
+    <div style="background:var(--color-card);border-radius:16px 16px 0 0;width:100%;max-width:600px;max-height:90vh;overflow-y:auto;padding:20px">
+
+      <!-- Header -->
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
+        <div>
+          <div style="font-size:28px;font-weight:800;font-family:var(--font-mono);color:var(--color-signal)">${teamAbv}</div>
+          <div style="font-size:14px;font-weight:600;color:var(--color-text)">${teamName}</div>
+          <div style="font-size:12px;color:var(--color-muted);margin-top:2px">${record} · ${winPct} win</div>
+        </div>
+        <button id="close-team-modal" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--color-muted);padding:0">✕</button>
+      </div>
+
+      <!-- Stats saison -->
+      <div style="background:var(--color-bg);border-radius:10px;padding:12px;margin-bottom:14px">
+        <div style="font-size:10px;font-weight:700;color:var(--color-muted);text-transform:uppercase;margin-bottom:8px">Saison régulière 2025-26</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          ${_statPill('Pts marqués', avgPts)}
+          ${_statPill('Pts encaissés', encaisse)}
+          ${_statPill('Net Rating', netRating)}
+          ${_statPill('eFG%', efg)}
+          ${_statPill('Moy. total', avgTotal)}
+          ${_statPill('Win %', winPct)}
+        </div>
+      </div>
+
+      <!-- Playoffs -->
+      <div style="background:var(--color-bg);border-radius:10px;padding:12px;margin-bottom:14px">
+        <div style="font-size:10px;font-weight:700;color:var(--color-muted);text-transform:uppercase;margin-bottom:8px">🏆 Playoffs 2026</div>
+        <div style="font-size:12px;color:var(--color-muted)">
+          ${detail.playoffRecord
+            ? `<strong style="color:var(--color-text)">${detail.playoffRecord}</strong>`
+            : 'Pas encore commencé · débute le 18 avril'}
+        </div>
+      </div>
+
+      <!-- Forme récente -->
+      <div style="margin-bottom:14px">
+        <div style="font-size:10px;font-weight:700;color:var(--color-muted);text-transform:uppercase;margin-bottom:6px">Forme récente (10 derniers)</div>
+        <div style="display:flex;gap:3px;flex-wrap:wrap">${formeHtml || '<span style="font-size:11px;color:var(--color-muted)">Données indisponibles</span>'}</div>
+      </div>
+
+      <!-- Top 5 scoreurs -->
+      <div>
+        <div style="font-size:10px;font-weight:700;color:var(--color-muted);text-transform:uppercase;margin-bottom:6px">Top scoreurs</div>
+        ${top5Html || '<div style="font-size:11px;color:var(--color-muted)">Données indisponibles</div>'}
+      </div>
+
+      <div style="font-size:10px;color:var(--color-muted);margin-top:12px;text-align:center">Source : Tank01 · ESPN · données saison en cours</div>
+    </div>`;
+
+  document.body.appendChild(modal);
+  modal.querySelector('#close-team-modal')?.addEventListener('click', () => modal.remove());
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+}
+
+function _statPill(label, value) {
   return `
-    <div class="card match-detail__bloc">
-      <div class="bloc-header" style="margin-bottom:var(--space-3)">
-        <span class="bloc-header__title">🏥 Absences</span>
-        <span style="font-size:10px;color:var(--color-muted)">triées par PPG</span>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-        <div>
-          <div style="font-size:10px;font-weight:700;color:var(--color-muted);margin-bottom:6px;text-transform:uppercase">${homeAbv}</div>
-          ${renderList(homeList)}
-        </div>
-        <div>
-          <div style="font-size:10px;font-weight:700;color:var(--color-muted);margin-bottom:6px;text-transform:uppercase">${awayAbv}</div>
-          ${renderList(awayList)}
-        </div>
-      </div>
+    <div style="text-align:center;padding:8px;background:var(--color-card);border-radius:8px">
+      <div style="font-size:16px;font-weight:700;color:var(--color-text)">${value}</div>
+      <div style="font-size:9px;color:var(--color-muted);margin-top:2px">${label}</div>
     </div>`;
 }
