@@ -221,6 +221,69 @@ function _injectStyles() {
       background: var(--color-signal);
     }
 
+    /* ── MARCHÉ O/U + SPREAD (Option B) ── */
+    .mc-markets {
+      display: flex; flex-direction: column; gap: 4px;
+      padding: 8px 0 2px;
+      border-top: 1px solid var(--color-border-default);
+      margin-top: 8px;
+    }
+    .mc-market-row {
+      display: flex; align-items: center; gap: 6px;
+    }
+    .mc-market-row__label {
+      font-family: var(--font-mono);
+      font-size: 10px; font-weight: 700;
+      color: var(--color-text-muted);
+      text-transform: uppercase; letter-spacing: 0.05em;
+      min-width: 42px; flex-shrink: 0;
+    }
+    .mc-market-pills { display: flex; gap: 4px; flex-wrap: wrap; }
+    .mc-pill {
+      display: inline-flex; align-items: center; gap: 3px;
+      padding: 2px 7px; border-radius: 20px;
+      font-size: 10px; font-weight: 600;
+      background: var(--color-bg-elevated);
+      border: 1px solid var(--color-border-default);
+      color: var(--color-text-secondary);
+      white-space: nowrap;
+    }
+    .mc-pill__side { color: var(--color-text-muted); font-weight: 400; }
+    .mc-pill__val  { font-family: var(--font-mono); font-weight: 700; color: var(--color-text-primary); }
+    .mc-pill--line {
+      background: transparent; border-color: transparent; padding-left: 0;
+      font-size: 11px; font-weight: 700; color: var(--color-text-primary);
+    }
+    .mc-source {
+      display: inline-flex; align-items: center;
+      font-size: 9px; font-weight: 600;
+      color: var(--color-text-muted);
+      background: var(--color-bg-elevated);
+      border: 1px solid var(--color-border-default);
+      border-radius: 3px; padding: 1px 5px;
+      letter-spacing: 0.03em; margin-left: auto; flex-shrink: 0;
+    }
+    .mc-header-date {
+      font-size: 11px; color: var(--color-text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .mc-footer {
+      display: flex; align-items: center;
+      justify-content: space-between;
+      margin-top: 8px; gap: 8px;
+    }
+    .mc-footer__arrow {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 11px; font-weight: 600;
+      color: var(--color-signal);
+      background: rgba(59,130,246,0.07);
+      border: 1px solid rgba(59,130,246,0.18);
+      border-radius: 6px; padding: 5px 12px;
+      cursor: pointer; transition: background 0.15s;
+      flex-shrink: 0; white-space: nowrap;
+    }
+    .mc-footer__arrow:hover { background: rgba(59,130,246,0.14); }
+
     /* IDs cachés hérités — maintenus pour _updateMatchCard */
     #proba-placeholder { display: none !important; }
   `;
@@ -602,11 +665,11 @@ function _createMatchCard(match) {
     <!-- ── HEADER ── -->
     <div class="match-card__header" style="display:flex;align-items:center;gap:6px">
       <span class="sport-tag ${isTennis ? 'sport-tag--tennis' : 'sport-tag--nba'}">${isTennis ? 'Tennis' : 'NBA'}</span>
-      <span style="font-size:11px;color:var(--color-text-muted)">${isFinal ? 'Terminé' : time}</span>
       ${!isFinal ? countdownHtml : ''}
-      <span style="margin-left:auto" class="match-card__status-badge badge badge--inconclusive" id="badge-${match.id}">
+      <span class="match-card__status-badge badge badge--inconclusive" id="badge-${match.id}">
         ${isFinal ? 'Final' : 'Analyse…'}
       </span>
+      <span class="mc-header-date" style="margin-left:auto">${isFinal ? 'Terminé' : time}</span>
     </div>
 
     <!-- ── ÉQUIPES ── -->
@@ -617,11 +680,9 @@ function _createMatchCard(match) {
         <span class="mc-team__abbr">${match.home_team?.abbreviation ?? '—'}</span>
         <span class="mc-team__name">${match.home_team?.name ?? '—'}</span>
         <span class="mc-team__record">${homeRecord}</span>
-        <!-- cote ML décimale -->
         <span class="mc-team__odds" id="odds-home-${match.id}">
           ${homeDec ? `<strong>${homeDec}</strong>` : '—'}
         </span>
-        <!-- prob moteur injectée par _updateMatchCard -->
         <span class="mc-team__prob" id="motor-home-${match.id}" style="display:none"></span>
         <span style="display:none" id="market-home-${match.id}"></span>
       </div>
@@ -632,7 +693,7 @@ function _createMatchCard(match) {
           ? `<div class="mc-vs__score">${homeScore}<br><span style="font-size:10px;color:var(--color-text-muted)">–</span><br>${awayScore}</div>`
           : `<span class="mc-vs__label">VS</span>`
         }
-        ${oddsSource ? `<span style="font-size:9px;color:var(--color-text-muted);margin-top:4px">${oddsSource}</span>` : ''}
+        ${oddsSource ? `<span class="mc-source">${oddsSource}</span>` : ''}
       </div>
 
       <!-- Équipe extérieure -->
@@ -640,7 +701,6 @@ function _createMatchCard(match) {
         <span class="mc-team__abbr">${match.away_team?.abbreviation ?? '—'}</span>
         <span class="mc-team__name">${match.away_team?.name ?? '—'}</span>
         <span class="mc-team__record">${awayRecord}</span>
-        <!-- cote ML décimale -->
         <span class="mc-team__odds" id="odds-away-${match.id}">
           ${awayDec ? `<strong>${awayDec}</strong>` : '—'}
         </span>
@@ -658,17 +718,18 @@ function _createMatchCard(match) {
       </div>
     </div>
 
-    <!-- ── O/U + SPREAD ── -->
+    <!-- ── MARCHÉS EN PILLS (Option B) ── -->
     ${ou != null ? `
-    <div class="mc-ou" id="ou-${match.id}">
-      <div class="mc-ou__row">
-        <span class="mc-ou__label">O/U ${ou}</span>
-        <div class="mc-ou__odds">
-          ${ouOverFmt  ? `<span class="mc-ou__item"><span class="mc-ou__side">Over</span><span class="mc-ou__val">${ouOverFmt}</span></span>` : ''}
-          ${ouUnderFmt ? `<span class="mc-ou__item"><span class="mc-ou__side">Under</span><span class="mc-ou__val">${ouUnderFmt}</span></span>` : ''}
+    <div class="mc-markets" id="ou-${match.id}">
+      <div class="mc-market-row">
+        <span class="mc-market-row__label">O/U</span>
+        <div class="mc-market-pills">
+          <span class="mc-pill mc-pill--line">${ou}</span>
+          ${ouOverFmt  ? `<span class="mc-pill"><span class="mc-pill__side">Over</span> <span class="mc-pill__val">${ouOverFmt}</span></span>`  : ''}
+          ${ouUnderFmt ? `<span class="mc-pill"><span class="mc-pill__side">Under</span> <span class="mc-pill__val">${ouUnderFmt}</span></span>` : ''}
         </div>
       </div>
-      <div id="spread-row-${match.id}" style="display:none" class="mc-ou__row mc-ou__row--spread"></div>
+      <div id="spread-row-${match.id}" style="display:none" class="mc-market-row mc-market-row--spread"></div>
     </div>` : ''}
 
     <!-- Nœuds hérités compatibilité -->
@@ -688,11 +749,10 @@ function _createMatchCard(match) {
     <div id="recs-${match.id}" class="match-card__recs" style="display:none"></div>
 
     <!-- Footer -->
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;gap:8px">
+    <div class="mc-footer">
       <div id="bet-indicator-${match.id}"></div>
-      <button class="btn btn--primary match-card__cta" data-match-id="${match.id}" data-analysis-id=""
-        style="margin-top:0;width:auto;padding:8px 18px;font-size:13px;font-weight:600;flex-shrink:0">
-        → Voir analyse
+      <button class="mc-footer__arrow match-card__cta" data-match-id="${match.id}" data-analysis-id="">
+        Voir l'analyse →
       </button>
     </div>
   `;
@@ -828,16 +888,10 @@ function _updateMatchCard(list, matchId, analysis, match, ptState) {
         : `${awayAbv} -${spreadLine}`;
 
       spreadRowEl.innerHTML = `
-        <span class="mc-ou__label">Spread</span>
-        <div class="mc-ou__odds">
-          <span class="mc-ou__item">
-            <span class="mc-ou__side">${homeSprdFmt}</span>
-            ${homeSprdDec ? `<span class="mc-ou__val">${Number(homeSprdDec).toFixed(2)}</span>` : ''}
-          </span>
-          <span class="mc-ou__item">
-            <span class="mc-ou__side">${awaySprdFmt}</span>
-            ${awaySprdDec ? `<span class="mc-ou__val">${Number(awaySprdDec).toFixed(2)}</span>` : ''}
-          </span>
+        <span class="mc-market-row__label">Hcap</span>
+        <div class="mc-market-pills">
+          <span class="mc-pill"><span class="mc-pill__side">${homeSprdFmt}</span>${homeSprdDec ? ` <span class="mc-pill__val">${Number(homeSprdDec).toFixed(2)}</span>` : ''}</span>
+          <span class="mc-pill"><span class="mc-pill__side">${awaySprdFmt}</span>${awaySprdDec ? ` <span class="mc-pill__val">${Number(awaySprdDec).toFixed(2)}</span>` : ''}</span>
         </div>`;
       spreadRowEl.style.display = '';
     }
