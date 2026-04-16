@@ -40,7 +40,10 @@ export class PaperSettler {
           const awayScore = result.away_team?.score ?? null;
           const betHomeIsHome = result.home_team?.name === bet.home;
 
-          await PaperEngine.settleBet(bet.bet_id, outcome, null, {
+          // Fetch closing odds depuis Pinnacle pour calculer la CLV
+          const closingOdds = await _fetchClosingOdds(bet, date);
+
+          await PaperEngine.settleBet(bet.bet_id, outcome, closingOdds, {
             home_score: betHomeIsHome ? homeScore : awayScore,
             away_score: betHomeIsHome ? awayScore : homeScore,
           });
@@ -121,6 +124,73 @@ function _determineOutcome(bet, result) {
 
     default:
       return null;
+  }
+}
+
+/**
+ * Récupère la cote de fermeture Pinnacle pour un pari donné.
+ * Utilisé au moment du settlement pour calculer la CLV.
+ * Retourne la cote en format américain, ou null si indisponible.
+ */
+async function _fetchClosingOdds(bet, date) {
+  try {
+    const response = await fetch(`${WORKER}/nba/odds/comparison`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    if (!data?.available || !data?.matches?.length) return null;
+
+    // Trouver le match correspondant au pari
+    const match = data.matches.find(m =>
+      (m.home_team === bet.home && m.away_team === bet.away) ||
+      (m.home_team === bet.away && m.away_team === bet.home)
+    );
+    if (!match) return null;
+
+    const isSwapped = match.home_team !== bet.home;
+
+    // Prendre Pinnacle en priorité
+    const PRIORITY = ['pinnacle', 'betclic', 'unibet_eu', 'bet365'];
+    let book = null;
+    for (const key of PRIORITY) {
+      book = match.bookmakers?.find(b => b.key === key);
+      if (book) break;
+    }
+    if (!book) book = match.bookmakers?.[0];
+    if (!book) return null;
+
+    const _decToAm = d => d >= 2
+      ? Math.round((d - 1) * 100)
+      : Math.round(-100 / (d - 1));
+
+    // Retourner la cote correspondant au côté parié
+    if (bet.market === 'MONEYLINE') {
+      const betOnHome = bet.side === 'HOME';
+      const decOdds = (betOnHome && !isSwapped) || (!betOnHome && isSwapped)
+        ? book.home_ml
+        : book.away_ml;
+      return decOdds ? _decToAm(decOdds) : null;
+    }
+
+    if (bet.market === 'SPREAD') {
+      const betOnHome = bet.side === 'HOME';
+      const decOdds = (betOnHome && !isSwapped) || (!betOnHome && isSwapped)
+        ? book.home_spread
+        : book.away_spread;
+      return decOdds ? _decToAm(decOdds) : null;
+    }
+
+    if (bet.market === 'OVER_UNDER') {
+      const decOdds = bet.side === 'OVER' ? book.over_total : book.under_total;
+      return decOdds ? _decToAm(decOdds) : null;
+    }
+
+    return null;
+  } catch (err) {
+    Logger.warn('PAPER_CLOSING_ODDS_FETCH_ERROR', { message: err.message });
+    return null;
   }
 }
 
