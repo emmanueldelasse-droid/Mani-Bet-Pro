@@ -668,11 +668,11 @@ function renderBlocTousLesParis(analysis, match) {
   }
 
   const ou = odds?.over_under ?? marketOdds?.ou_line;
+  const altTotals = marketOdds?.alt_totals ?? [];
   if (ou != null) {
     const overOdds   = getOdds('OVER', 'OVER'), underOdds = getOdds('UNDR', 'UNDER');
     const recOver    = findRec('OVER_UNDER', 'OVER');
     const recUnder   = findRec('OVER_UNDER', 'UNDER');
-    // motor_prob depuis les recs moteur — toujours calculé depuis v5.14
     if (overOdds)  rows.push(buildRow(`Plus de ${ou} pts`,  'OVER_UNDER', 'OVER',  recOver?.motor_prob  ?? null, overOdds,  recOver,  null, ou));
     if (underOdds) rows.push(buildRow(`Moins de ${ou} pts`, 'OVER_UNDER', 'UNDER', recUnder?.motor_prob ?? null, underOdds, recUnder, null, ou));
   }
@@ -689,6 +689,40 @@ function renderBlocTousLesParis(analysis, match) {
     <div style="font-size:9px;font-weight:700;color:var(--color-muted);text-transform:uppercase;letter-spacing:0.06em;padding:6px 10px 2px">${title}</div>
     ${rowsArr.join('')}` : '';
 
+  // ── Sélecteur de lignes O/U alternatives (v6.34) ─────────────────────────
+  const ouSelectorHtml = (() => {
+    if (!altTotals || altTotals.length <= 1) return '';
+    const mainLine = ou != null ? Number(ou) : null;
+    // Générer les boutons — la ligne principale est active par défaut
+    const buttons = altTotals.map(alt => {
+      const isActive = mainLine !== null && Math.abs(alt.line - mainLine) < 0.1;
+      return `<button
+        class="ou-alt-btn${isActive ? ' ou-alt-btn--active' : ''}"
+        data-line="${alt.line}"
+        data-over="${alt.over}"
+        data-under="${alt.under}"
+        data-motor-over="${findRec('OVER_UNDER', 'OVER')?.motor_prob ?? ''}"
+        data-motor-under="${findRec('OVER_UNDER', 'UNDER')?.motor_prob ?? ''}"
+        style="font-size:10px;font-weight:${isActive ? '700' : '500'};
+               padding:3px 8px;border-radius:12px;cursor:pointer;white-space:nowrap;
+               border:1px solid ${isActive ? 'var(--color-signal)' : 'var(--color-border)'};
+               background:${isActive ? 'rgba(59,130,246,0.1)' : 'var(--color-bg)'};
+               color:${isActive ? 'var(--color-signal)' : 'var(--color-text-muted)'}"
+      >${alt.line}</button>`;
+    }).join('');
+
+    return `
+      <div style="padding:8px 10px 4px;border-top:1px solid var(--color-border);margin-top:4px">
+        <div style="font-size:9px;font-weight:700;color:var(--color-muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">
+          Lignes alternatives O/U
+        </div>
+        <div class="ou-alt-selector" style="display:flex;flex-wrap:wrap;gap:4px">
+          ${buttons}
+        </div>
+        <div id="ou-alt-rows" style="margin-top:6px"></div>
+      </div>`;
+  })();
+
   return `
     <div class="card match-detail__bloc">
       <div class="bloc-header" style="margin-bottom:var(--space-2)">
@@ -704,6 +738,7 @@ function renderBlocTousLesParis(analysis, match) {
       ${section('Vainqueur', mlRows)}
       ${section('Handicap', sprdRows)}
       ${section('Total de points', ouRows)}
+      ${ouSelectorHtml}
     </div>`;
 }
 
@@ -1065,6 +1100,73 @@ function bindEvents(container, storeInstance, match, analysis) {
   container.querySelectorAll('.paper-bet-btn').forEach(btn => {
     btn.addEventListener('click', () => _openBetModal(btn, match, analysis, storeInstance));
   });
+
+  // ── Sélecteur lignes O/U alternatives (v6.34) ────────────────────────────
+  container.querySelectorAll('.ou-alt-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      // Désactiver tous les boutons
+      container.querySelectorAll('.ou-alt-btn').forEach(b => {
+        b.classList.remove('ou-alt-btn--active');
+        b.style.fontWeight    = '500';
+        b.style.borderColor   = 'var(--color-border)';
+        b.style.background    = 'var(--color-bg)';
+        b.style.color         = 'var(--color-text-muted)';
+      });
+      // Activer le bouton cliqué
+      btn.classList.add('ou-alt-btn--active');
+      btn.style.fontWeight  = '700';
+      btn.style.borderColor = 'var(--color-signal)';
+      btn.style.background  = 'rgba(59,130,246,0.1)';
+      btn.style.color       = 'var(--color-signal)';
+
+      const line       = parseFloat(btn.dataset.line);
+      const overOdds   = parseFloat(btn.dataset.over);
+      const underOdds  = parseFloat(btn.dataset.under);
+      const motorOver  = btn.dataset.motorOver  ? parseFloat(btn.dataset.motorOver)  : null;
+      const motorUnder = btn.dataset.motorUnder ? parseFloat(btn.dataset.motorUnder) : null;
+
+      // Recalculer edge
+      const impliedOver  = Math.round((1 / overOdds)  * 100);
+      const impliedUnder = Math.round((1 / underOdds)  * 100);
+      const edgeOver     = motorOver  !== null ? motorOver  - impliedOver  : null;
+      const edgeUnder    = motorUnder !== null ? motorUnder - impliedUnder : null;
+
+      const edgeColor = (e) => e >= 8 ? '#22c55e' : e >= 4 ? '#f97316' : e > 0 ? 'var(--color-muted)' : '#ef4444';
+
+      const rowHtml = (label, odds, impliedProb, edge, motorProb) => `
+        <div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;
+                    padding:8px 10px;background:var(--color-bg);border-radius:8px;
+                    border:1px solid transparent;margin-bottom:4px">
+          <div style="min-width:0">
+            <div style="font-size:12px;font-weight:600">${label}</div>
+            <div style="font-size:10px;color:var(--color-muted)">
+              ${motorProb !== null ? motorProb + '% analyse' : '—'} · book ${impliedProb}%
+            </div>
+          </div>
+          <div style="text-align:center;min-width:42px">
+            <div style="font-size:14px;font-weight:700;color:var(--color-signal)">${odds.toFixed(2)}</div>
+            <div style="font-size:9px;color:var(--color-muted)">Pinnacle</div>
+          </div>
+          <div style="text-align:center;min-width:52px">
+            ${edge !== null
+              ? `<div style="font-size:15px;font-weight:800;color:${edgeColor(edge)}">${edge > 0 ? '+' : ''}${edge}%</div>`
+              : '<div style="color:var(--color-muted);font-size:11px">—</div>'
+            }
+          </div>
+        </div>`;
+
+      const ouAltRows = container.querySelector('#ou-alt-rows');
+      if (ouAltRows) {
+        ouAltRows.innerHTML =
+          rowHtml(`Plus de ${line} pts`,  overOdds,  impliedOver,  edgeOver,  motorOver) +
+          rowHtml(`Moins de ${line} pts`, underOdds, impliedUnder, edgeUnder, motorUnder);
+      }
+    });
+  });
+
+  // Afficher la ligne principale par défaut dans #ou-alt-rows si alt présentes
+  const activeAltBtn = container.querySelector('.ou-alt-btn--active');
+  if (activeAltBtn) activeAltBtn.click();
 }
 
 // ── MODAL PAPER TRADING ───────────────────────────────────────────────────────
