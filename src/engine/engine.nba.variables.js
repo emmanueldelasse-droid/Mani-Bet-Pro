@@ -15,7 +15,7 @@ const CONFIG    = SPORTS_CONFIG.NBA;
 const MIN_GAMES = CONFIG.rejection_thresholds.min_games_sample ?? 10;
 
 // Modificateur star absente — constantes partagées avec engine.nba.js
-export const STAR_PPG_THRESHOLD    = 20;
+export const STAR_PPG_THRESHOLD    = 18;  // v1.1 : 20 → 18 pour capturer plus de stars impactants
 export const STAR_FACTOR           = 1.55;
 export const STAR_MAX_REDUCTION    = 0.45;
 export const STAR_TEAM_PPG_FALLBACK = 110;
@@ -146,8 +146,8 @@ export function computeAbsencesImpact(homeInj, awayInj) {
 }
 
 export function computeStarAbsenceModifier(homeInjuries, awayInjuries, homeTeamPpg = null, awayTeamPpg = null, isPlayoff = false) {
-  const STAR_STATUSES = new Set(['Out', 'Doubtful', 'Limited']);
-  const STATUS_WEIGHT = { 'Out': 1.0, 'Doubtful': 0.75, 'Limited': 0.45 };
+  const STAR_STATUSES = new Set(['Out', 'Doubtful', 'Day-To-Day', 'Limited']);
+  const STATUS_WEIGHT = { 'Out': 1.0, 'Doubtful': 0.75, 'Day-To-Day': 0.50, 'Limited': 0.45 };
 
   // Facteurs renforcés en playoffs — rotations courtes (~8 joueurs), star irremplaçable
   const starFactor    = isPlayoff ? 2.0  : STAR_FACTOR;        // 1.55 → 2.0
@@ -165,16 +165,17 @@ export function computeStarAbsenceModifier(homeInjuries, awayInjuries, homeTeamP
       if (ppg === null || ppg <= STAR_PPG_THRESHOLD) continue;
       majorCount += 1;
       if (player.status === 'Out') outCount += 1;
+      else if (player.status === 'Day-To-Day') outCount += 0.5; // DTD = demi-absence pour le multiplier
       const sw = STATUS_WEIGHT[player.status] ?? 0.75;
       totalReduction += (ppg / denom) * sw * starFactor;
     }
 
     let multiplier = 1;
-    if (outCount === 1)      multiplier = 1.35;
-    else if (outCount === 2) multiplier = 2.10;
-    else if (outCount >= 3)  multiplier = 3.00;
-    else if (majorCount === 2) multiplier = 1.20;
-    else if (majorCount >= 3)  multiplier = 1.40;
+    if      (outCount >= 3)   multiplier = 3.00;
+    else if (outCount >= 2)   multiplier = 2.10;
+    else if (outCount >= 1)   multiplier = 1.35;  // couvre 1 OUT ou 2 DTD (0.5+0.5=1)
+    else if (majorCount >= 3) multiplier = 1.40;
+    else if (majorCount >= 2) multiplier = 1.20;
 
     return { reduction: Math.min(totalReduction * multiplier, maxReduction), majorCount, outCount };
   };

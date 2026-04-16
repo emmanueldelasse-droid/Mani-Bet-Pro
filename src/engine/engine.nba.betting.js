@@ -137,8 +137,10 @@ export function computeBettingRecommendations(score, odds, matchData, variables,
 
     const isLiveData = (homeAvgPtsRaw != null && (homeAvgPtsRaw < 60 || homeAvgPtsRaw > 140))
                     || (awayAvgPtsRaw != null && (awayAvgPtsRaw < 60 || awayAvgPtsRaw > 140));
-    const homeAvgPts = isLiveData ? null : homeAvgPtsRaw;
-    const awayAvgPts = isLiveData ? null : awayAvgPtsRaw;
+    // Priorité : BDL last5 (5 derniers matchs, réactif) > ESPN avg_pts saison
+    // BDL last5 est calculé dans l'orchestrateur depuis recentForms
+    const homeAvgPts = isLiveData ? null : (homeLast5Raw ?? homeAvgPtsRaw);
+    const awayAvgPts = isLiveData ? null : (awayLast5Raw ?? awayAvgPtsRaw);
 
     if (homeAvgPts != null && awayAvgPts != null) {
       const ouLine     = normalizedOdds.over_under;
