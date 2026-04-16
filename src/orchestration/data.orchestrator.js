@@ -523,6 +523,17 @@ function _getClaudeWindowKey(nowParis) {
 
 function _mergeBatchAiPlayers(target, players, homeAbv, awayAbv) {
   if (!Array.isArray(players)) return;
+  // Normalisation des statuts worker (majuscules) → format ESPN (mixed case)
+  // requis par STAR_STATUSES dans computeStarAbsenceModifier
+  const _normalizeStatus = (s) => {
+    const u = String(s || '').toUpperCase();
+    if (u === 'OUT')      return 'Out';
+    if (u === 'DOUBTFUL') return 'Doubtful';
+    if (u === 'DAY-TO-DAY' || u === 'DTD') return 'Day-To-Day';
+    if (u === 'LIMITED')  return 'Limited';
+    if (u === 'QUESTIONABLE') return 'Questionable';
+    return 'Out'; // fallback
+  };
   players.forEach(function(p) {
     if (!p || !p.name) return;
     const teamAbv = String(p.team || '').toUpperCase() || null;
@@ -531,13 +542,22 @@ function _mergeBatchAiPlayers(target, players, homeAbv, awayAbv) {
     if (!target[espnTeamName]) target[espnTeamName] = [];
     const exists = target[espnTeamName].some(function(existing) { return existing.name === p.name; });
     if (exists) return;
+    const normalizedStatus = _normalizeStatus(p.status);
+    const sw = normalizedStatus === 'Out' ? 1.0
+             : normalizedStatus === 'Doubtful' ? 0.75
+             : normalizedStatus === 'Day-To-Day' ? 0.50
+             : normalizedStatus === 'Limited' ? 0.40
+             : 0.30;
+    const TEAM_PPG_FALLBACK = 108;
+    const ppg = p.ppg ?? null;
     target[espnTeamName].push({
-      name: p.name,
-      team: teamAbv,
-      status: p.status || 'Out',
-      ppg: p.ppg ?? null,
-      source: p.source || 'claude_web_search',
-      note: p.note || null,
+      name:          p.name,
+      team:          teamAbv,
+      status:        normalizedStatus,
+      ppg,
+      impact_weight: ppg ? Math.round((ppg / TEAM_PPG_FALLBACK) * sw * 1000) / 1000 : Math.round(0.125 * sw * 1000) / 1000,
+      source:        p.source || 'claude_web_search',
+      note:          p.note || null,
     });
   });
 }
