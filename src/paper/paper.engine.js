@@ -162,12 +162,17 @@ export class PaperEngine {
     const byStrategy  = _computeByStrategy(settled);
     const streak      = _computeStreak(bets);
 
+    const totalEV      = Math.round(settled.reduce((s, b) => s + ((b.edge ?? 0) / 100) * b.stake, 0) * 100) / 100;
+    const evPerBet     = total > 0 ? Math.round(totalEV / total * 100) / 100 : null;
+    const sharpe       = _computeSharpe(settled);
+
     return {
       total_bets: total, won: won.length,
       lost: settled.filter(b => b.result === 'LOSS').length,
       push: settled.filter(b => b.result === 'PUSH').length,
       hit_rate: hitRate, total_staked: Math.round(totalStaked * 100) / 100,
       total_pnl: Math.round(totalPnl * 100) / 100, roi,
+      total_ev: totalEV, ev_per_bet: evPerBet, sharpe,
       avg_clv: avgClv, brier_score: brierScore,
       hit_by_edge: hitByEdge, bias: biasDetection,
       by_strategy: byStrategy, streak,
@@ -264,6 +269,7 @@ function _emptyMetrics() {
   return {
     total_bets: 0, won: 0, lost: 0, push: 0,
     hit_rate: null, total_staked: 0, total_pnl: 0, roi: null,
+    total_ev: 0, ev_per_bet: null, sharpe: null,
     avg_clv: null, brier_score: null,
     hit_by_edge: { '5-8%': null, '8-12%': null, '>12%': null },
     bias: { insufficient_data: true, min_required: 10 },
@@ -333,4 +339,22 @@ function _computeStreak(bets) {
     if (b.result === 'LOSS') { tmp++; maxLoss = Math.max(maxLoss, tmp); } else tmp = 0;
   }
   return { current, type, max_loss: maxLoss };
+}
+
+/**
+ * Sharpe ratio simplifié sur les ROI par pari.
+ * Sharpe = moyenne(roi_par_pari) / écart-type(roi_par_pari)
+ * Retourne null si moins de 5 paris settled (pas significatif).
+ */
+function _computeSharpe(settled) {
+  if (settled.length < 5) return null;
+  const rois = settled
+    .filter(b => b.stake > 0)
+    .map(b => (b.pnl ?? 0) / b.stake);
+  if (rois.length < 5) return null;
+  const mean = rois.reduce((s, r) => s + r, 0) / rois.length;
+  const variance = rois.reduce((s, r) => s + Math.pow(r - mean, 2), 0) / rois.length;
+  const std = Math.sqrt(variance);
+  if (std === 0) return null;
+  return Math.round(mean / std * 100) / 100;
 }
