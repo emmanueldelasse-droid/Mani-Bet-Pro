@@ -278,8 +278,30 @@ function _renderTDTop10(match, teamDetail, injReport) {
   const buildAbsentMap = (teamName) => {
     const map = new Map();
     const players = injReport?.by_team?.[teamName] ?? [];
-    players.forEach(p => { if (p?.name) map.set(p.name.toLowerCase(), p.status ?? 'Out'); });
-    return map;
+
+    const _norm = name => String(name ?? '').toLowerCase().trim()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/\./g, '').replace(/'/g, '')
+      .replace(/\s+/g, ' ').trim();
+
+    // Indexer les joueurs blessés par nom normalisé
+    const injured = players
+      .filter(p => p?.name)
+      .map(p => ({ normName: _norm(p.name), status: p.status ?? 'Out' }));
+
+    // Pour chaque joueur du top10, chercher un match exact ou par préfixe
+    return {
+      get: (rawName) => {
+        const n = _norm(rawName);
+        for (const inj of injured) {
+          if (inj.normName === n) return inj.status;
+          // Préfixe : "jimmy butler" match "jimmy butler iii" (min 8 chars)
+          if (n.length >= 8 && inj.normName.startsWith(n + ' ')) return inj.status;
+          if (inj.normName.length >= 8 && n.startsWith(inj.normName + ' ')) return inj.status;
+        }
+        return null;
+      },
+    };
   };
   const homeAbsentMap = buildAbsentMap(homeName);
   const awayAbsentMap = buildAbsentMap(awayName);
@@ -316,8 +338,8 @@ function _renderTDTop10(match, teamDetail, injReport) {
             const bg      = absent ? 'rgba(239,68,68,0.06)' : i % 2 === 0 ? '' : 'var(--color-bg)';
             return `
               <tr style="background:${bg};border-bottom:1px solid var(--color-border);${absent ? 'opacity:0.65' : ''}">
-                <td style="padding:6px 6px;color:${absent ? badge.color : 'var(--color-text)'};white-space:nowrap;overflow:hidden;max-width:110px;text-overflow:ellipsis">
-                  ${star ? '⭐ ' : ''}${p.name ?? '—'}${absent ? ` <span style="font-size:9px;color:${badge.color};font-weight:700">${badge.label}</span>` : ''}
+                <td style="padding:6px 6px;color:var(--color-text);white-space:nowrap;overflow:hidden;max-width:110px;text-overflow:ellipsis">
+                  ${star ? '⭐ ' : ''}${p.name ?? '—'}${absent ? ` <span style="font-size:9px;color:${badge.color};font-weight:700;margin-left:3px">${badge.label}</span>` : ''}
                 </td>
                 <td style="padding:6px 4px;text-align:center;font-weight:600">${p.pts?.toFixed(1) ?? '—'}</td>
                 <td style="padding:6px 4px;text-align:center;font-size:10px">${_l5Display(p.pts, p.last5pts)}</td>
