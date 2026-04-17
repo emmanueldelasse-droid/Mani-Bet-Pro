@@ -1,0 +1,518 @@
+/**
+ * MANI BET PRO — ui.bot.js v1.0
+ *
+ * Onglet Bot — tableau de bord de calibration du moteur NBA.
+ * Affiche les analyses automatiques du bot, les résultats post-match,
+ * et les stats de calibration (hit rate, Brier score, avg edge).
+ *
+ * Données : GET /bot/logs (Cloudflare KV)
+ * Settlement : POST /bot/settle-logs
+ * Run manuel : POST /bot/run
+ */
+
+import { API_CONFIG } from '../config/api.config.js';
+
+const WORKER = API_CONFIG.WORKER_BASE_URL;
+
+// ── POINT D'ENTRÉE ────────────────────────────────────────────────────────────
+
+export async function render(container, storeInstance) {
+  await _renderPage(container, storeInstance);
+}
+
+// ── RENDU PRINCIPAL ───────────────────────────────────────────────────────────
+
+async function _renderPage(container, storeInstance) {
+  container.innerHTML = _renderShell();
+  _bindEvents(container, storeInstance);
+  await _loadAndRender(container);
+}
+
+function _renderShell() {
+  return `
+    <div class="view-bot">
+      <div class="view-header">
+        <div class="view-header__meta">MANI BET PRO</div>
+        <h1 class="view-header__title">Bot — Calibration</h1>
+        <div class="view-header__sub">Analyses automatiques · Tous les matchs NBA</div>
+      </div>
+
+      <div class="bot-toolbar">
+        <div class="bot-toolbar__filters">
+          <button class="bot-filter-btn active" data-filter="all">Tous</button>
+          <button class="bot-filter-btn" data-filter="pending">En attente</button>
+          <button class="bot-filter-btn" data-filter="settled">Settléd</button>
+          <button class="bot-filter-btn" data-filter="edge">Edge ≥5%</button>
+        </div>
+        <div class="bot-toolbar__actions">
+          <button class="bot-action-btn" id="bot-settle-btn" title="Enrichir avec résultats ESPN">
+            ⟳ Settler
+          </button>
+          <button class="bot-action-btn bot-action-btn--primary" id="bot-run-btn" title="Lancer une analyse manuelle">
+            ▶ Run
+          </button>
+        </div>
+      </div>
+
+      <div id="bot-stats-container"></div>
+      <div id="bot-logs-container">
+        <div class="bot-loading">Chargement des analyses…</div>
+      </div>
+    </div>
+
+    <style>
+      .view-bot { padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-4); }
+
+      /* Toolbar */
+      .bot-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+      .bot-toolbar__filters { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+      .bot-filter-btn {
+        font-size: 12px; padding: 5px 12px; border-radius: 20px;
+        border: 1px solid var(--color-border-default);
+        background: var(--color-card); color: var(--color-text-secondary);
+        cursor: pointer; transition: all 0.15s;
+      }
+      .bot-filter-btn.active { background: var(--color-signal); color: #fff; border-color: var(--color-signal); }
+      .bot-toolbar__actions { display: flex; gap: var(--space-2); }
+      .bot-action-btn {
+        font-size: 12px; padding: 6px 14px; border-radius: 8px;
+        border: 1px solid var(--color-border-default);
+        background: var(--color-card); color: var(--color-text-secondary);
+        cursor: pointer; transition: all 0.15s;
+      }
+      .bot-action-btn--primary { background: var(--color-signal); color: #fff; border-color: var(--color-signal); }
+      .bot-action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+      /* Stats */
+      .bot-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: var(--space-3); }
+      .bot-stat-card {
+        background: var(--color-card); border: 1px solid var(--color-border);
+        border-radius: 10px; padding: 14px 16px; text-align: center;
+      }
+      .bot-stat-card__val { font-size: 22px; font-weight: 700; color: var(--color-text-primary); }
+      .bot-stat-card__lbl { font-size: 11px; color: var(--color-muted); margin-top: 4px; }
+
+      /* Logs */
+      .bot-logs { display: flex; flex-direction: column; gap: var(--space-3); }
+      .bot-log-card {
+        background: var(--color-card); border: 1px solid var(--color-border);
+        border-radius: 10px; overflow: hidden; cursor: pointer;
+        transition: border-color 0.15s;
+      }
+      .bot-log-card:hover { border-color: var(--color-border-strong); }
+      .bot-log-card--edge { border-left: 3px solid var(--color-signal); }
+      .bot-log-card--right { border-left: 3px solid var(--color-success); }
+      .bot-log-card--wrong { border-left: 3px solid var(--color-danger); }
+
+      .bot-log-header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 12px 16px; gap: var(--space-3);
+      }
+      .bot-log-matchup { font-size: 14px; font-weight: 700; color: var(--color-text-primary); }
+      .bot-log-date { font-size: 11px; color: var(--color-muted); }
+      .bot-log-badges { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+
+      .bot-badge {
+        font-size: 10px; font-weight: 700; padding: 2px 8px;
+        border-radius: 4px; text-transform: uppercase; letter-spacing: 0.05em;
+      }
+      .bot-badge--high     { background: rgba(34,197,94,0.15);  color: var(--color-success); }
+      .bot-badge--medium   { background: rgba(249,115,22,0.15); color: var(--color-robust-mid); }
+      .bot-badge--low      { background: rgba(239,68,68,0.15);  color: var(--color-danger); }
+      .bot-badge--inconc   { background: rgba(107,114,128,0.15);color: var(--color-inconclusive); }
+      .bot-badge--edge     { background: rgba(59,130,246,0.15); color: var(--color-signal); }
+      .bot-badge--right    { background: rgba(34,197,94,0.15);  color: var(--color-success); }
+      .bot-badge--wrong    { background: rgba(239,68,68,0.15);  color: var(--color-danger); }
+      .bot-badge--pending  { background: rgba(107,114,128,0.15);color: var(--color-muted); }
+      .bot-badge--phase    { background: rgba(168,85,247,0.15); color: var(--color-volatility); }
+
+      .bot-log-body { padding: 0 16px 14px; display: flex; flex-direction: column; gap: 10px; }
+
+      /* Probas */
+      .bot-probas { display: flex; align-items: center; gap: var(--space-3); }
+      .bot-proba-bar { flex: 1; height: 6px; background: var(--color-border-default); border-radius: 3px; overflow: hidden; }
+      .bot-proba-fill { height: 100%; border-radius: 3px; background: var(--color-signal); transition: width 0.3s; }
+      .bot-proba-label { font-size: 12px; color: var(--color-text-secondary); min-width: 36px; text-align: right; }
+
+      /* Signaux */
+      .bot-signals { display: flex; flex-wrap: wrap; gap: 6px; }
+      .bot-signal {
+        font-size: 11px; padding: 3px 8px; border-radius: 4px;
+        background: var(--color-bg-elevated); color: var(--color-text-secondary);
+        display: flex; align-items: center; gap: 4px;
+      }
+      .bot-signal--pos { color: var(--color-success); }
+      .bot-signal--neg { color: var(--color-danger); }
+
+      /* Résultat */
+      .bot-result {
+        display: flex; align-items: center; justify-content: space-between;
+        background: var(--color-bg-elevated); border-radius: 6px; padding: 8px 12px;
+        font-size: 12px; color: var(--color-text-secondary);
+      }
+      .bot-result__score { font-weight: 700; color: var(--color-text-primary); font-size: 14px; }
+      .bot-result__clv   { font-size: 11px; color: var(--color-muted); }
+
+      /* Absences */
+      .bot-absences {
+        font-size: 11px; color: var(--color-text-secondary);
+        background: var(--color-bg-elevated); border-radius: 6px; padding: 6px 10px;
+      }
+
+      /* Détail dépliable */
+      .bot-log-detail { display: none; padding: 0 16px 14px; }
+      .bot-log-detail.open { display: block; }
+      .bot-detail-section { margin-bottom: 12px; }
+      .bot-detail-title { font-size: 11px; font-weight: 700; color: var(--color-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+      .bot-detail-row { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; border-bottom: 1px solid var(--color-border); color: var(--color-text-secondary); }
+      .bot-detail-row:last-child { border-bottom: none; }
+      .bot-detail-row__val { color: var(--color-text-primary); font-weight: 600; }
+
+      /* Empty / loading */
+      .bot-loading { text-align: center; padding: 48px; color: var(--color-muted); font-size: 14px; }
+      .bot-empty   { text-align: center; padding: 48px; color: var(--color-muted); font-size: 14px; }
+      .bot-error   { text-align: center; padding: 32px; color: var(--color-danger); font-size: 13px; }
+    </style>
+  `;
+}
+
+// ── CHARGEMENT ────────────────────────────────────────────────────────────────
+
+async function _loadAndRender(container, filter = 'all') {
+  const logsEl = container.querySelector('#bot-logs-container');
+  const statsEl = container.querySelector('#bot-stats-container');
+  if (!logsEl) return;
+
+  try {
+    const resp = await fetch(`${WORKER}/bot/logs`, { headers: { Accept: 'application/json' } });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    const allLogs = data.logs ?? [];
+    const stats   = data.stats ?? {};
+
+    // Stats globales
+    statsEl.innerHTML = _renderStats(stats, allLogs);
+
+    // Filtrer
+    const filtered = _filterLogs(allLogs, filter);
+
+    if (!filtered.length) {
+      logsEl.innerHTML = `<div class="bot-empty">
+        ${filter === 'all' ? 'Aucune analyse enregistrée pour le moment.<br>Le bot tourne automatiquement 1h avant les matchs.' : 'Aucun résultat pour ce filtre.'}
+      </div>`;
+      return;
+    }
+
+    logsEl.innerHTML = `<div class="bot-logs">${filtered.map(_renderLogCard).join('')}</div>`;
+    _bindLogCards(logsEl);
+
+  } catch (err) {
+    logsEl.innerHTML = `<div class="bot-error">Impossible de charger les logs : ${err.message}</div>`;
+  }
+}
+
+function _filterLogs(logs, filter) {
+  switch (filter) {
+    case 'pending':  return logs.filter(l => l.motor_was_right === null);
+    case 'settled':  return logs.filter(l => l.motor_was_right !== null);
+    case 'edge':     return logs.filter(l => l.best_edge && l.best_edge >= 5);
+    default:         return logs;
+  }
+}
+
+// ── STATS GLOBALES ────────────────────────────────────────────────────────────
+
+function _renderStats(stats, logs) {
+  const edgeCount = logs.filter(l => l.best_edge && l.best_edge >= 5).length;
+  const highConf  = logs.filter(l => l.confidence_level === 'HIGH').length;
+
+  return `<div class="bot-stats">
+    <div class="bot-stat-card">
+      <div class="bot-stat-card__val">${stats.total_analyzed ?? 0}</div>
+      <div class="bot-stat-card__lbl">Matchs analysés</div>
+    </div>
+    <div class="bot-stat-card">
+      <div class="bot-stat-card__val" style="color:var(--color-signal)">${edgeCount}</div>
+      <div class="bot-stat-card__lbl">Edges ≥5%</div>
+    </div>
+    <div class="bot-stat-card">
+      <div class="bot-stat-card__val" style="color:var(--color-success)">${stats.hit_rate != null ? stats.hit_rate + '%' : '—'}</div>
+      <div class="bot-stat-card__lbl">Hit rate</div>
+    </div>
+    <div class="bot-stat-card">
+      <div class="bot-stat-card__val">${stats.avg_edge != null ? '+' + stats.avg_edge + '%' : '—'}</div>
+      <div class="bot-stat-card__lbl">Edge moyen</div>
+    </div>
+    <div class="bot-stat-card">
+      <div class="bot-stat-card__val" style="color:var(--color-data-quality)">${stats.brier_score ?? '—'}</div>
+      <div class="bot-stat-card__lbl">Brier Score</div>
+    </div>
+    <div class="bot-stat-card">
+      <div class="bot-stat-card__val" style="color:var(--color-volatility)">${highConf}</div>
+      <div class="bot-stat-card__lbl">Conf. HIGH</div>
+    </div>
+  </div>`;
+}
+
+// ── CARTE LOG ─────────────────────────────────────────────────────────────────
+
+function _renderLogCard(log) {
+  const motorProb  = log.motor_prob ?? null;
+  const conf       = log.confidence_level ?? 'INCONCLUSIVE';
+  const phase      = log.nba_phase ?? null;
+  const isSettled  = log.motor_was_right !== null;
+  const hasEdge    = log.best_edge && log.best_edge >= 5;
+
+  // Classe carte
+  let cardClass = 'bot-log-card';
+  if (hasEdge && !isSettled) cardClass += ' bot-log-card--edge';
+  if (isSettled && log.motor_was_right)  cardClass += ' bot-log-card--right';
+  if (isSettled && !log.motor_was_right) cardClass += ' bot-log-card--wrong';
+
+  // Date formatée
+  const d = log.date ?? '';
+  const dateFmt = d.length === 8 ? `${d.slice(6,8)}/${d.slice(4,6)}` : d;
+  const timeFmt = log.datetime ? new Date(log.datetime).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : null;
+
+  return `
+    <div class="${cardClass}" data-match-id="${log.match_id}">
+      <div class="bot-log-header">
+        <div>
+          <div class="bot-log-matchup">${log.away ?? '?'} @ ${log.home ?? '?'}</div>
+          <div class="bot-log-date">${dateFmt}${timeFmt ? ' · ' + timeFmt : ''}</div>
+        </div>
+        <div class="bot-log-badges">
+          ${phase ? `<span class="bot-badge bot-badge--phase">${phase}</span>` : ''}
+          ${_renderConfBadge(conf)}
+          ${hasEdge ? `<span class="bot-badge bot-badge--edge">Edge +${log.best_edge}%</span>` : ''}
+          ${isSettled
+            ? log.motor_was_right
+              ? `<span class="bot-badge bot-badge--right">✓ Correct</span>`
+              : `<span class="bot-badge bot-badge--wrong">✗ Raté</span>`
+            : `<span class="bot-badge bot-badge--pending">En attente</span>`}
+        </div>
+      </div>
+
+      <div class="bot-log-body">
+        ${motorProb != null ? _renderProbaBar(log) : ''}
+        ${_renderTopSignals(log)}
+        ${_renderAbsencesLine(log)}
+        ${isSettled ? _renderResultLine(log) : ''}
+      </div>
+
+      <div class="bot-log-detail" id="detail-${log.match_id}">
+        ${_renderDetailPanel(log)}
+      </div>
+    </div>
+  `;
+}
+
+function _renderConfBadge(conf) {
+  const map = { HIGH: 'high', MEDIUM: 'medium', LOW: 'low', INCONCLUSIVE: 'inconc' };
+  const cls = map[conf] ?? 'inconc';
+  return `<span class="bot-badge bot-badge--${cls}">${conf}</span>`;
+}
+
+function _renderProbaBar(log) {
+  const prob     = log.motor_prob ?? 50;
+  const homeName = (log.home ?? '').split(' ').pop();
+  const awayName = (log.away ?? '').split(' ').pop();
+  return `
+    <div class="bot-probas">
+      <span class="bot-proba-label" style="text-align:left;min-width:50px;font-size:11px">${awayName}</span>
+      <div class="bot-proba-bar">
+        <div class="bot-proba-fill" style="width:${prob}%;background:${prob >= 60 ? 'var(--color-success)' : prob <= 40 ? 'var(--color-danger)' : 'var(--color-signal)'}"></div>
+      </div>
+      <span class="bot-proba-label">${homeName} ${prob}%</span>
+    </div>
+  `;
+}
+
+function _renderTopSignals(log) {
+  const signals = (log.signals ?? []).slice(0, 4);
+  if (!signals.length) return '';
+  return `<div class="bot-signals">
+    ${signals.map(s => {
+      const cls = s.direction === 'POSITIVE' ? 'bot-signal--pos' : s.direction === 'NEGATIVE' ? 'bot-signal--neg' : '';
+      const arrow = s.direction === 'POSITIVE' ? '▲' : s.direction === 'NEGATIVE' ? '▼' : '·';
+      const label = _shortSignalLabel(s.variable);
+      return `<span class="bot-signal ${cls}">${arrow} ${label} ${s.raw_value != null ? '(' + _fmtVal(s.variable, s.raw_value) + ')' : ''}</span>`;
+    }).join('')}
+  </div>`;
+}
+
+function _renderAbsencesLine(log) {
+  const snap = log.absences_snapshot;
+  if (!snap || (snap.home_out === 0 && snap.away_out === 0 && snap.value === null)) return '';
+  const quality = snap.is_weighted ? '🏀 weighted' : '⚠️ estimé';
+  const val     = snap.value != null ? `impact: ${snap.value > 0 ? '+' : ''}${Math.round(snap.value * 100)}%` : '';
+  return `<div class="bot-absences">
+    🏥 Absences — dom: ${snap.home_out ?? '?'} out · ext: ${snap.away_out ?? '?'} out
+    ${val ? '· ' + val : ''} · ${quality}
+  </div>`;
+}
+
+function _renderResultLine(log) {
+  const score = `${log.result_away_score ?? '?'} – ${log.result_home_score ?? '?'}`;
+  const winner = log.result_winner === 'HOME' ? log.home : log.away;
+  const clv    = log.clv_post_match != null ? `CLV: ${log.clv_post_match > 0 ? '+' : ''}${log.clv_post_match}%` : '';
+  return `<div class="bot-result">
+    <div>Résultat : <span class="bot-result__score">${score}</span> · ${winner} gagne</div>
+    <div class="bot-result__clv">${clv}</div>
+  </div>`;
+}
+
+function _renderDetailPanel(log) {
+  const vars    = log.variables_used ?? {};
+  const missing = log.missing_variables ?? [];
+  const recs    = log.betting_recommendations?.recommendations ?? [];
+
+  return `
+    <div class="bot-detail-section">
+      <div class="bot-detail-title">Toutes les variables</div>
+      ${Object.entries(vars).map(([k, v]) => `
+        <div class="bot-detail-row">
+          <span>${_shortSignalLabel(k)}</span>
+          <span class="bot-detail-row__val">
+            ${v.value != null ? _fmtVal(k, v.value) : '—'}
+            <span style="font-size:10px;color:var(--color-muted);font-weight:400"> ${v.quality ?? ''}</span>
+          </span>
+        </div>`).join('')}
+    </div>
+
+    ${missing.length ? `<div class="bot-detail-section">
+      <div class="bot-detail-title">Variables manquantes</div>
+      <div style="font-size:12px;color:var(--color-danger)">${missing.map(_shortSignalLabel).join(', ')}</div>
+    </div>` : ''}
+
+    ${log.market_divergence ? `<div class="bot-detail-section">
+      <div class="bot-detail-title">Divergence marché</div>
+      <div class="bot-detail-row"><span>Divergence</span><span class="bot-detail-row__val">${log.market_divergence.divergence_pts ?? '—'} pts · ${log.market_divergence.flag}</span></div>
+      <div class="bot-detail-row"><span>Implied home</span><span class="bot-detail-row__val">${log.market_divergence.market_implied_home != null ? Math.round(log.market_divergence.market_implied_home * 100) + '%' : '—'}</span></div>
+    </div>` : ''}
+
+    ${recs.length ? `<div class="bot-detail-section">
+      <div class="bot-detail-title">Recommandations</div>
+      ${recs.map(r => `<div class="bot-detail-row">
+        <span>${r.type} ${r.side}</span>
+        <span class="bot-detail-row__val">Edge +${r.edge}% · ${r.motor_prob}% prob · cote ${r.odds_line > 0 ? '+' : ''}${r.odds_line}</span>
+      </div>`).join('')}
+    </div>` : ''}
+
+    ${log.star_absence_modifier != null && log.star_absence_modifier !== 1 ? `<div class="bot-detail-section">
+      <div class="bot-detail-title">Modificateur star absence</div>
+      <div style="font-size:12px;color:var(--color-warning)">× ${log.star_absence_modifier} appliqué au score</div>
+    </div>` : ''}
+
+    <div style="font-size:10px;color:var(--color-muted);padding-top:8px">
+      Analysé le ${log.logged_at ? new Date(log.logged_at).toLocaleString('fr-FR') : '—'}
+      · Score méthode : ${log.score_method ?? '—'}
+      · Phase : ${log.nba_phase ?? '—'}
+    </div>
+  `;
+}
+
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+
+function _shortSignalLabel(variable) {
+  const map = {
+    net_rating_diff: 'Net Rating',
+    efg_diff:        'eFG%',
+    recent_form_ema: 'Forme EMA',
+    home_away_split: 'Split dom/ext',
+    absences_impact: 'Absences',
+    win_pct_diff:    'Win%',
+    defensive_diff:  'Défense',
+    back_to_back:    'B2B',
+    rest_days_diff:  'Repos',
+    ts_diff:         'TS%',
+    avg_pts_diff:    'Pts/match',
+    pace_diff:       'Pace',
+  };
+  return map[variable] ?? variable;
+}
+
+function _fmtVal(variable, value) {
+  if (value == null) return '—';
+  const pct = ['efg_diff', 'ts_diff', 'win_pct_diff', 'home_away_split', 'absences_impact'];
+  if (pct.includes(variable)) return (value > 0 ? '+' : '') + Math.round(value * 1000) / 10 + '%';
+  return (value > 0 ? '+' : '') + (Math.round(value * 100) / 100);
+}
+
+// ── EVENTS ────────────────────────────────────────────────────────────────────
+
+function _bindEvents(container, storeInstance) {
+  // Filtres
+  container.addEventListener('click', async (e) => {
+    const filterBtn = e.target.closest('.bot-filter-btn');
+    if (filterBtn) {
+      container.querySelectorAll('.bot-filter-btn').forEach(b => b.classList.remove('active'));
+      filterBtn.classList.add('active');
+      await _loadAndRender(container, filterBtn.dataset.filter);
+      return;
+    }
+
+    // Settle
+    const settleBtn = e.target.closest('#bot-settle-btn');
+    if (settleBtn) {
+      settleBtn.disabled = true;
+      settleBtn.textContent = '⟳ Settlement…';
+      try {
+        const resp = await fetch(`${WORKER}/bot/settle-logs`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        const data = await resp.json();
+        settleBtn.textContent = `✓ ${data.settled ?? 0} settlés`;
+        setTimeout(() => {
+          settleBtn.textContent = '⟳ Settler';
+          settleBtn.disabled = false;
+        }, 2000);
+        const activeFilter = container.querySelector('.bot-filter-btn.active')?.dataset?.filter ?? 'all';
+        await _loadAndRender(container, activeFilter);
+      } catch (err) {
+        settleBtn.textContent = '✗ Erreur';
+        setTimeout(() => { settleBtn.textContent = '⟳ Settler'; settleBtn.disabled = false; }, 2000);
+      }
+      return;
+    }
+
+    // Run manuel
+    const runBtn = e.target.closest('#bot-run-btn');
+    if (runBtn) {
+      runBtn.disabled = true;
+      runBtn.textContent = '▶ Lancement…';
+      try {
+        await fetch(`${WORKER}/bot/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+        runBtn.textContent = '✓ Lancé';
+        setTimeout(() => {
+          runBtn.textContent = '▶ Run';
+          runBtn.disabled = false;
+        }, 3000);
+        // Recharger après 5s pour voir les résultats
+        setTimeout(async () => {
+          const activeFilter = container.querySelector('.bot-filter-btn.active')?.dataset?.filter ?? 'all';
+          await _loadAndRender(container, activeFilter);
+        }, 5000);
+      } catch (err) {
+        runBtn.textContent = '✗ Erreur';
+        setTimeout(() => { runBtn.textContent = '▶ Run'; runBtn.disabled = false; }, 2000);
+      }
+      return;
+    }
+  });
+}
+
+function _bindLogCards(logsEl) {
+  logsEl.querySelectorAll('.bot-log-card').forEach(card => {
+    card.addEventListener('click', (e) => {
+      // Ne pas toggler si clic sur un bouton
+      if (e.target.closest('button')) return;
+      const matchId  = card.dataset.matchId;
+      const detailEl = logsEl.querySelector(`#detail-${matchId}`);
+      if (detailEl) detailEl.classList.toggle('open');
+    });
+  });
+}
