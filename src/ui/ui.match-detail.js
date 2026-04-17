@@ -1256,6 +1256,17 @@ function _openBetModal(btn, match, analysis, storeInstance) {
       ? new Date(match.datetime).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
       : null;
 
+    // Snapshot des absences au moment du pari — pour analyse post-match
+    const absVar = analysis?.variables_used?.absences_impact ?? null;
+    const absences_snapshot = absVar ? {
+      value:       absVar.value   ?? null,
+      quality:     absVar.quality ?? null,
+      source:      absVar.source  ?? null,
+      home_out:    absVar.raw?.home_out  ?? null,
+      away_out:    absVar.raw?.away_out  ?? null,
+      is_weighted: absVar.raw?.is_weighted ?? false,
+    } : null;
+
     await PaperEngine.placeBet({
       match_id: match.id, date: match.date, sport: 'NBA',
       home: match.home_team?.name ?? '—', away: match.away_team?.name ?? '—',
@@ -1266,6 +1277,7 @@ function _openBetModal(btn, match, analysis, storeInstance) {
       confidence_level: analysis?.confidence_level ?? null,
       data_quality: analysis?.data_quality_score ?? null,
       decision_note: note, top_signal: topSignal, match_time: matchTime,
+      absences_snapshot,
     });
 
     modal.remove();
