@@ -75,7 +75,7 @@ function renderShell(match, analysis, storeInstance) {
           <div class="match-detail__team">
             <div class="match-detail__team-abbr">${match.home_team?.abbreviation ?? '—'}</div>
             <div class="match-detail__team-name">${match.home_team?.name ?? '—'}</div>
-            <div style="display:inline-flex;align-items:center;font-size:10px;font-weight:600;color:var(--color-text-secondary);background:var(--color-bg);border:1px solid var(--color-border);border-radius:4px;padding:1px 6px;margin-top:2px">🏠 Domicile</div>
+            <div style="display:inline-flex;align-items:center;font-size:10px;font-weight:600;color:var(--color-text-secondary);background:var(--color-bg);border:1px solid var(--color-border);border-radius:4px;padding:1px 6px;margin-top:2px">⌂ Domicile</div>
             <div class="text-muted mono" style="font-size:11px;margin-top:2px">${match.home_team?.record ?? ''}</div>
           </div>
           <div class="match-detail__separator">
@@ -84,7 +84,7 @@ function renderShell(match, analysis, storeInstance) {
           <div class="match-detail__team match-detail__team--away">
             <div class="match-detail__team-abbr">${match.away_team?.abbreviation ?? '—'}</div>
             <div class="match-detail__team-name">${match.away_team?.name ?? '—'}</div>
-            <div style="display:inline-flex;align-items:center;font-size:10px;font-weight:600;color:var(--color-text-secondary);background:var(--color-bg);border:1px solid var(--color-border);border-radius:4px;padding:1px 6px;margin-top:2px">✈️ Extérieur</div>
+            <div style="display:inline-flex;align-items:center;font-size:10px;font-weight:600;color:var(--color-text-secondary);background:var(--color-bg);border:1px solid var(--color-border);border-radius:4px;padding:1px 6px;margin-top:2px">↗ Extérieur</div>
             <div class="text-muted mono" style="font-size:11px;margin-top:2px">${match.away_team?.record ?? ''}</div>
           </div>
         </div>
@@ -139,7 +139,7 @@ function renderBlocSyntheseSummary(analysis, match) {
       : 'Moins de ' + (best.ou_line ?? '—') + ' pts';
   }
 
-  const decOdds  = best.odds_decimal ?? null;
+  const decOdds  = best.odds_decimal ?? _americanToDecimal(best.odds_line) ?? null;
   const fmtOdds  = decOdds ? Number(decOdds).toFixed(2) : '—';
   const edgeColor = best.edge >= 12 ? 'var(--color-success)' : best.edge >= 7 ? 'var(--color-warning)' : 'var(--color-muted)';
   const fiabHtml  = score !== null
