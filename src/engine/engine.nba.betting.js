@@ -288,7 +288,7 @@ export function computeKelly(p, americanOdds) {
 export function getBestBookOdds(marketOdds, side, market) {
   if (!marketOdds?.bookmakers?.length) return null;
 
-  const PRIORITY = ['winamax', 'pinnacle', 'betclic', 'unibet_eu', 'betsson', 'bet365'];
+  const PRIORITY = ['pinnacle', 'winamax', 'betclic', 'unibet_eu', 'betsson', 'bet365'];
 
   const _getOdds = (bk) => {
     if (market === 'h2h')    return side === 'HOME' ? bk.home_ml : bk.away_ml;
