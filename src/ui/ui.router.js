@@ -32,6 +32,10 @@ const ROUTES = {
     label: 'Historique',
     loader: () => import('./ui.history.js'),
   },
+  bot: {
+    label: 'Bot',
+    loader: () => import('./ui.bot.js'),
+  },
   lab: {
     label: 'Laboratoire',
     loader: () => import('./ui.lab.js'),
@@ -43,7 +47,7 @@ const ROUTES = {
 };
 
 // Routes accessibles depuis la nav bar (ordre affiché)
-const NAV_ROUTES = ['dashboard', 'history', 'lab', 'settings'];
+const NAV_ROUTES = ['dashboard', 'history', 'bot', 'lab', 'settings'];
 
 class Router {
 
@@ -205,6 +209,7 @@ class Router {
       dashboard: '◉',
       match:     '▦',
       history:   '◎',
+      bot:       '⟁',
       lab:       '⬡',
       settings:  '⚙',
     };
