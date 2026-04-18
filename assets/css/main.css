@@ -38,7 +38,7 @@ body {
 
   --color-text-primary:   #e8e8f0;
   --color-text-secondary: #8888a8;
-  --color-text-muted:     #8888a8;
+  --color-text-muted:     #55556a;
   --color-text-inverse:   #0a0a0f;
 
   --color-signal:         #3b82f6;
@@ -466,6 +466,7 @@ body.theme-light .btn--ghost:hover,
 
 .sport-tag--nba      { background: rgba(59,130,246,0.15); color: #60a5fa; }
 .sport-tag--tennis   { background: rgba(34,197,94,0.15);  color: #4ade80; }
+.sport-tag--mlb      { background: rgba(239,68,68,0.15);  color: #f87171; }
 .sport-tag--mlb      { background: rgba(245,158,11,0.15); color: #fbbf24; }
 .sport-tag--football { background: rgba(168,85,247,0.15); color: #c084fc; }
 .sport-tag--nfl      { background: rgba(239,68,68,0.15);  color: #f87171; }
