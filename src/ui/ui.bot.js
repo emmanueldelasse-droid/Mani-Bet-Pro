@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — ui.bot.js v1.0
+ * MANI BET PRO — ui.bot.js v1.1
  *
  * Onglet Bot — tableau de bord de calibration du moteur NBA.
  * Affiche les analyses automatiques du bot, les résultats post-match,
@@ -8,6 +8,9 @@
  * Données : GET /bot/logs (Cloudflare KV)
  * Settlement : POST /bot/settle-logs
  * Run manuel : POST /bot/run
+ *
+ * v1.1 : Migré vers les primitives ui.primitives.css
+ *   - page-shell, page-header, toolbar, stat-card, btn
  */
 
 import { API_CONFIG } from '../config/api.config.js';
@@ -30,25 +33,25 @@ async function _renderPage(container, storeInstance) {
 
 function _renderShell() {
   return `
-    <div class="view-bot">
-      <div class="view-header">
-        <div class="view-header__meta">MANI BET PRO</div>
-        <h1 class="view-header__title">Bot — Calibration</h1>
-        <div class="view-header__sub">Analyses automatiques · Tous les matchs NBA</div>
+    <div class="page-shell" style="padding:var(--space-4)">
+      <div class="page-header">
+        <div class="page-header__eyebrow">MANI BET PRO</div>
+        <div class="page-header__title">Bot — Calibration</div>
+        <div class="page-header__sub">Analyses automatiques · Tous les matchs NBA</div>
       </div>
 
-      <div class="bot-toolbar">
-        <div class="bot-toolbar__filters">
+      <div class="toolbar">
+        <div class="toolbar__filters">
           <button class="bot-filter-btn active" data-filter="all">Tous</button>
           <button class="bot-filter-btn" data-filter="pending">En attente</button>
-          <button class="bot-filter-btn" data-filter="settled">Settléd</button>
+          <button class="bot-filter-btn" data-filter="settled">Settlé</button>
           <button class="bot-filter-btn" data-filter="edge">Edge ≥5%</button>
         </div>
-        <div class="bot-toolbar__actions">
-          <button class="bot-action-btn" id="bot-settle-btn" title="Enrichir avec résultats ESPN">
+        <div class="toolbar__actions">
+          <button class="btn btn--ghost btn--sm" id="bot-settle-btn" title="Enrichir avec résultats ESPN">
             ⟳ Settler
           </button>
-          <button class="bot-action-btn bot-action-btn--primary" id="bot-run-btn" title="Lancer une analyse manuelle">
+          <button class="btn btn--primary btn--sm" id="bot-run-btn" title="Lancer une analyse manuelle">
             ▶ Run
           </button>
         </div>
@@ -61,11 +64,7 @@ function _renderShell() {
     </div>
 
     <style>
-      .view-bot { padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-4); }
-
-      /* Toolbar */
-      .bot-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
-      .bot-toolbar__filters { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+      /* Filtres pill — spécifiques bot */
       .bot-filter-btn {
         font-size: 12px; padding: 5px 12px; border-radius: 20px;
         border: 1px solid var(--color-border-default);
@@ -73,24 +72,12 @@ function _renderShell() {
         cursor: pointer; transition: all 0.15s;
       }
       .bot-filter-btn.active { background: var(--color-signal); color: #fff; border-color: var(--color-signal); }
-      .bot-toolbar__actions { display: flex; gap: var(--space-2); }
-      .bot-action-btn {
-        font-size: 12px; padding: 6px 14px; border-radius: 8px;
-        border: 1px solid var(--color-border-default);
-        background: var(--color-card); color: var(--color-text-secondary);
-        cursor: pointer; transition: all 0.15s;
-      }
-      .bot-action-btn--primary { background: var(--color-signal); color: #fff; border-color: var(--color-signal); }
-      .bot-action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-      /* Stats */
+      /* État désactivé — boutons toolbar */
+      .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+      /* Stats grid — utilise .stat-card de ui.primitives.css */
       .bot-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: var(--space-3); }
-      .bot-stat-card {
-        background: var(--color-card); border: 1px solid var(--color-border);
-        border-radius: 10px; padding: 14px 16px; text-align: center;
-      }
-      .bot-stat-card__val { font-size: 22px; font-weight: 700; color: var(--color-text-primary); }
-      .bot-stat-card__lbl { font-size: 11px; color: var(--color-muted); margin-top: 4px; }
 
       /* Logs */
       .bot-logs { display: flex; flex-direction: column; gap: var(--space-3); }
@@ -228,29 +215,29 @@ function _renderStats(stats, logs) {
   const highConf  = logs.filter(l => l.confidence_level === 'HIGH').length;
 
   return `<div class="bot-stats">
-    <div class="bot-stat-card">
-      <div class="bot-stat-card__val">${stats.total_analyzed ?? 0}</div>
-      <div class="bot-stat-card__lbl">Matchs analysés</div>
+    <div class="stat-card">
+      <div class="stat-card__value">${stats.total_analyzed ?? 0}</div>
+      <div class="stat-card__label">Matchs analysés</div>
     </div>
-    <div class="bot-stat-card">
-      <div class="bot-stat-card__val" style="color:var(--color-signal)">${edgeCount}</div>
-      <div class="bot-stat-card__lbl">Edges ≥5%</div>
+    <div class="stat-card">
+      <div class="stat-card__value" style="color:var(--color-signal)">${edgeCount}</div>
+      <div class="stat-card__label">Edges ≥5%</div>
     </div>
-    <div class="bot-stat-card">
-      <div class="bot-stat-card__val" style="color:var(--color-success)">${stats.hit_rate != null ? stats.hit_rate + '%' : '—'}</div>
-      <div class="bot-stat-card__lbl">Hit rate</div>
+    <div class="stat-card">
+      <div class="stat-card__value" style="color:var(--color-success)">${stats.hit_rate != null ? stats.hit_rate + '%' : '—'}</div>
+      <div class="stat-card__label">Hit rate</div>
     </div>
-    <div class="bot-stat-card">
-      <div class="bot-stat-card__val">${stats.avg_edge != null ? '+' + stats.avg_edge + '%' : '—'}</div>
-      <div class="bot-stat-card__lbl">Edge moyen</div>
+    <div class="stat-card">
+      <div class="stat-card__value">${stats.avg_edge != null ? '+' + stats.avg_edge + '%' : '—'}</div>
+      <div class="stat-card__label">Edge moyen</div>
     </div>
-    <div class="bot-stat-card">
-      <div class="bot-stat-card__val" style="color:var(--color-data-quality)">${stats.brier_score ?? '—'}</div>
-      <div class="bot-stat-card__lbl">Brier Score</div>
+    <div class="stat-card">
+      <div class="stat-card__value" style="color:var(--color-data-quality)">${stats.brier_score ?? '—'}</div>
+      <div class="stat-card__label">Brier Score</div>
     </div>
-    <div class="bot-stat-card">
-      <div class="bot-stat-card__val" style="color:var(--color-volatility)">${highConf}</div>
-      <div class="bot-stat-card__lbl">Conf. HIGH</div>
+    <div class="stat-card">
+      <div class="stat-card__value" style="color:var(--color-volatility)">${highConf}</div>
+      <div class="stat-card__label">Conf. HIGH</div>
     </div>
   </div>`;
 }
