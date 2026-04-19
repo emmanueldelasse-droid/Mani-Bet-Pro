@@ -1,5 +1,11 @@
 /**
- * MANI BET PRO — ui.match-detail.teamdetail.js v2.0
+ * MANI BET PRO — ui.match-detail.teamdetail.js v2.1
+ *
+ * AJOUTS v2.1 :
+ *   - Affichage du résumé du dernier match sous chaque équipe dans "📈 Stats équipes"
+ *   - Affichage d’un lien / titre média Basket USA si le worker renvoie latestMediaSummary
+ *   - Compatible avec /nba/team-detail enrichi : home.latestGame, away.latestGame,
+ *     home.latestMediaSummary, away.latestMediaSummary
  *
  * AMÉLIORATIONS v2.0 :
  *   - Nouvelle disposition : Absences remonte avant Top 10 scoreurs
@@ -116,6 +122,50 @@ function _fmtDateFR(dateStr) {
   return `${d} ${MOIS[m] ?? ''}`;
 }
 
+function _escapeHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function _renderLatestInfoBlock(teamData, teamAbv) {
+  const latestGame  = teamData?.latestGame ?? null;
+  const latestMedia = teamData?.latestMediaSummary ?? null;
+
+  if (!latestGame && !latestMedia) return '';
+
+  const gameHtml = latestGame
+    ? `
+      <div style="font-size:11px;line-height:1.45;color:var(--color-text);margin-top:5px">
+        <span style="font-weight:700;color:var(--color-text-secondary)">Dernier match :</span>
+        <span>${_escapeHtml(latestGame.summary_long ?? latestGame.summary_short ?? 'Résumé indisponible')}</span>
+      </div>`
+    : '';
+
+  const mediaTitle = latestMedia?.title ? _escapeHtml(latestMedia.title) : 'Article lié disponible';
+  const mediaUrl   = latestMedia?.url ? String(latestMedia.url) : null;
+  const mediaHtml = latestMedia
+    ? `
+      <div style="font-size:11px;line-height:1.45;color:var(--color-text);margin-top:4px">
+        <span style="font-weight:700;color:var(--color-text-secondary)">Basket USA :</span>
+        ${
+          mediaUrl
+            ? `<a href="${mediaUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--color-signal);text-decoration:underline">${mediaTitle}</a>`
+            : `<span>${mediaTitle}</span>`
+        }
+      </div>`
+    : '';
+
+  return `
+    <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--color-border)">
+      ${gameHtml}
+      ${mediaHtml}
+    </div>`;
+}
+
 // ── SECTION 1 : STATS ÉQUIPES ─────────────────────────────────────────────────
 
 function _renderTDStats(match, teamDetail) {
@@ -190,11 +240,13 @@ function _renderTDStats(match, teamDetail) {
           <div style="font-size:10px;color:var(--color-text-secondary);margin-bottom:3px">${homeAbv} — Dom/Ext</div>
           <div style="font-size:11px">🏠 ${hDetail.homeSplit ? `${hDetail.homeSplit.wins}-${hDetail.homeSplit.losses}` : '—'} · ✈️ ${hDetail.awaySplit ? `${hDetail.awaySplit.wins}-${hDetail.awaySplit.losses}` : '—'}</div>
           <div style="margin-top:3px">${_momentumBadge(hDetail.momentum)}</div>
+          ${_renderLatestInfoBlock(hDetail, homeAbv)}
         </div>
         <div style="background:var(--color-bg);border-radius:8px;padding:8px 10px">
           <div style="font-size:10px;color:var(--color-text-secondary);margin-bottom:3px">${awayAbv} — Dom/Ext</div>
           <div style="font-size:11px">🏠 ${aDetail.homeSplit ? `${aDetail.homeSplit.wins}-${aDetail.homeSplit.losses}` : '—'} · ✈️ ${aDetail.awaySplit ? `${aDetail.awaySplit.wins}-${aDetail.awaySplit.losses}` : '—'}</div>
           <div style="margin-top:3px">${_momentumBadge(aDetail.momentum)}</div>
+          ${_renderLatestInfoBlock(aDetail, awayAbv)}
         </div>
       </div>
     </div>`;
@@ -531,7 +583,7 @@ function _renderTDH2H_OU(match, teamDetail) {
 // ── BOXSCORE MODAL ────────────────────────────────────────────────────────────
 
 function _escapeAttr(str) {
-  return String(str ?? '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  return String(str ?? '').replace(/\"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 export function bindLast10Clicks(container, teamDetail) {
