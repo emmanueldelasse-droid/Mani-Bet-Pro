@@ -1,46 +1,20 @@
 /**
- * MANI BET PRO — ui.dashboard.js v5.0
+ * MANI BET PRO — ui.dashboard.js v5.1
  *
- * AJOUTS v4.7 :
- *   - Auto-refresh à 23h30 et 07h00 heure de Paris.
- *     23h30 : rapports blessures définitifs publiés, statuts Questionable confirmés.
- *     07h00 : blessures post-match captées pour les paris du lendemain.
- *     Le refresh invalide le cache dashboard (dashboardCacheAt = 0) puis relance _loadAndDisplay.
- *   - Bouton "Actualiser" dans le header pour forcer un refresh manuel.
- *
- * AJOUTS v4.6 :
- *   - TTL cache dashboard : 5 minutes. Si les données ont moins de 5 min,
- *     la navigation retour/dashboard est instantanée — zéro appel API.
- *     Le timestamp est stocké dans le store via 'dashboardCacheAt'.
- *
- * AJOUTS v4.5 :
- *   - Badge warning "Données partielles" quand weight_coverage < 0.75.
- *     Indique que des signaux importants manquent dans le calcul du score.
- *     Ex : forme récente absente = 20% des poids non couverts.
- *
- * AMÉLIORATIONS v3 :
- *   - Labels recommandations plus clairs : 'Vainqueur du match', 'Handicap (points)', 'Total de points'
- *   - Cotes décimales avec source intégrée et tooltip explicatif
- *   - Edge coloré en 3 niveaux : vert ≥12%, orange ≥7%, gris <7%
- *   - Meilleure opportunité : "Parier sur X · cote Y"
- *   - Net Rating affiché sur les cartes si disponible
- *
- * CORRECTIONS v2 :
- *   - Cartes affichent probabilité moteur en % (P_moteur vs P_marché)
- *   - Filtre O(1) : index par match_id
- *   - Badges alignés sur decision
- *   - Bordure carte selon décision
- *   - spread_line transmis au modal paper betting
+ * FIX v5.1 :
+ *   - Le sport devient un vrai sélecteur de chargement, plus un faux filtre local.
+ *   - Suppression du bouton "Tous" côté sport : le dashboard est mono-sport assumé.
+ *   - Le cache devient cohérent par date + sport.
+ *   - Le changement de date recharge le sport actif.
+ *   - _renderEmptyState() ne dépend plus d'un store hors scope.
  */
 
 import { router }           from './ui.router.js';
 import { DataOrchestrator } from '../orchestration/data.orchestrator.js';
-import { EngineCore }       from '../engine/engine.core.js';
 import { LoadingUI }        from './ui.loading.js';
 import { Logger }           from '../utils/utils.logger.js';
-import { americanToDecimal, formatEdge } from '../utils/utils.odds.js';
+import { americanToDecimal } from '../utils/utils.odds.js';
 
-// Injecter les styles dynamiques v5 (nouvelle carte)
 function _injectStyles() {
   if (document.querySelector('#mbp-dash-v5-styles')) return;
   const s = document.createElement('style');
@@ -54,7 +28,6 @@ function _injectStyles() {
       from { width: 50%; }
     }
 
-    /* ── COUNTDOWN ── */
     .mbp-countdown {
       font-size: 10px; font-weight: 700; letter-spacing: 0.03em;
       color: var(--color-warning);
@@ -65,7 +38,6 @@ function _injectStyles() {
     .mbp-countdown--live { color: var(--color-success); background: rgba(34,197,94,0.10); animation: mbp-live-pulse 2s ease-in-out infinite; }
     @keyframes mbp-live-pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
 
-    /* ── ZONE ÉQUIPES v5 ── */
     .mc-teams {
       display: grid;
       grid-template-columns: 1fr auto 1fr;
@@ -98,13 +70,6 @@ function _injectStyles() {
       font-size: 15px; font-weight: 700;
       margin-top: 5px; line-height: 1;
     }
-    .mc-team__odds--home { color: var(--color-text-primary); }
-    .mc-team__odds--away { color: var(--color-text-primary); }
-    .mc-team__odds-src {
-      font-size: 9px; font-weight: 400;
-      color: var(--color-text-muted);
-      display: block; margin-top: 1px;
-    }
     .mc-team__prob {
       font-size: 11px; font-weight: 700;
       color: var(--color-text-muted);
@@ -112,7 +77,6 @@ function _injectStyles() {
     }
     .mc-team__prob--fav { color: var(--color-signal); }
 
-    /* Séparateur central */
     .mc-vs {
       display: flex; flex-direction: column;
       align-items: center; justify-content: center;
@@ -132,7 +96,6 @@ function _injectStyles() {
       text-align: center; line-height: 1.3;
     }
 
-    /* Barre de probabilité v5 */
     .mc-proba-bar {
       height: 3px; border-radius: 2px; overflow: hidden;
       background: var(--color-border-default);
@@ -145,7 +108,6 @@ function _injectStyles() {
       animation: mbp-bar-in 0.7s cubic-bezier(0.4,0,0.2,1);
     }
 
-    /* ── NIVEAU / NET RATING ── */
     .mc-level {
       display: flex; align-items: center; gap: 5px;
       padding: 4px 8px; border-radius: 4px;
@@ -156,7 +118,6 @@ function _injectStyles() {
       background: currentColor; flex-shrink: 0;
     }
 
-    /* ── MEILLEURE REC ── */
     .mc-best-rec {
       display: flex; align-items: center; gap: 6px;
       padding: 7px 10px; border-radius: 6px;
@@ -196,7 +157,6 @@ function _injectStyles() {
       flex-shrink: 0; min-width: 36px; text-align: right;
     }
 
-    /* ── DONNÉES PARTIELLES ── */
     .mbp-weight-warning {
       display: inline-flex; align-items: center; gap: 4px;
       font-size: 10px; font-weight: 600;
@@ -206,7 +166,6 @@ function _injectStyles() {
       padding: 2px 7px; border-radius: 4px;
     }
 
-    /* ── PARIS EN COURS ── */
     .mbp-open-bet-indicator {
       display: flex; align-items: center; gap: 5px;
       font-size: 10px; font-weight: 600;
@@ -221,7 +180,6 @@ function _injectStyles() {
       background: var(--color-signal);
     }
 
-    /* ── MARCHÉ O/U + SPREAD (Option B) ── */
     .mc-markets {
       display: flex; flex-direction: column; gap: 4px;
       padding: 8px 0 2px;
@@ -282,36 +240,22 @@ function _injectStyles() {
     .mc-footer__cta:hover { background: rgba(59,130,246,0.14); }
     .mc-pill__sep { color: var(--color-border); font-weight: 400; font-size: 9px; }
 
-    /* IDs cachés hérités — maintenus pour _updateMatchCard */
     #proba-placeholder { display: none !important; }
   `;
   document.head.appendChild(s);
 }
 
-// ── AUTO-REFRESH ──────────────────────────────────────────────────────────
-
-/**
- * v4.7 : Planifie un refresh automatique à 23h30 et 07h00 heure de Paris.
- * Compare l'heure actuelle à la prochaine fenêtre de refresh.
- * Utilise un setTimeout unique — pas de setInterval qui accumulerait les appels.
- *
- * @returns {number} timeoutId — pour nettoyage via clearTimeout
- */
 function _scheduleNextRefresh(container, storeInstance) {
-  const REFRESH_HOURS_PARIS = [23 * 60 + 30, 7 * 60]; // 23h30 et 07h00 en minutes
-
-  const now       = new Date();
-  // Convertir en heure de Paris (UTC+2 en été, UTC+1 en hiver)
-  const utcOffset = now.getTimezoneOffset(); // en minutes, négatif pour Paris
-  const parisOffset = -120; // UTC+2 (CEST) — à ajuster si UTC+1 en hiver
+  const REFRESH_HOURS_PARIS = [23 * 60 + 30, 7 * 60];
+  const now = new Date();
+  const parisOffset = -120;
   const parisMinutes = (now.getUTCHours() * 60 + now.getUTCMinutes()) + (-parisOffset);
   const currentMinutes = parisMinutes % (24 * 60);
 
-  // Trouver le prochain créneau
   let minDelay = Infinity;
   for (const targetMinutes of REFRESH_HOURS_PARIS) {
     let delay = targetMinutes - currentMinutes;
-    if (delay <= 0) delay += 24 * 60; // demain
+    if (delay <= 0) delay += 24 * 60;
     if (delay < minDelay) minDelay = delay;
   }
 
@@ -326,85 +270,101 @@ function _scheduleNextRefresh(container, storeInstance) {
 
   return setTimeout(async function() {
     Logger.info('AUTO_REFRESH_TRIGGERED', {});
-    // Invalider le cache pour forcer un rechargement complet
-    storeInstance.set({ dashboardCacheAt: 0 });
     const date = storeInstance.get('dashboardFilters')?.selectedDate ?? _getTodayDate();
-    await _loadAndDisplay(container, storeInstance, date, { manualRefresh: false });
-    // Planifier le prochain refresh
+    const sport = _getSelectedSport(storeInstance);
+    storeInstance.set({ dashboardCacheAt: 0, dashboardCacheDate: null, dashboardCacheSport: null });
+    await _loadAndDisplay(container, storeInstance, date, { manualRefresh: false, sport });
     _scheduleNextRefresh(container, storeInstance);
   }, delayMs);
 }
 
-// ── POINT D'ENTRÉE ────────────────────────────────────────────────────────
-
 export async function render(container, storeInstance) {
   _injectStyles();
-  let selectedDate = storeInstance.get('dashboardFilters')?.selectedDate ?? _getTodayDate();
 
-  container.innerHTML = _renderShell(selectedDate);
-  _bindFilterEvents(container, storeInstance);
+  let selectedDate  = storeInstance.get('dashboardFilters')?.selectedDate ?? _getTodayDate();
+  let selectedSport = _getSelectedSport(storeInstance);
+
+  _syncDashboardSelection(storeInstance, selectedSport);
+
+  container.innerHTML = _renderShell(selectedDate, selectedSport);
+
+  _bindFilterEvents(container, storeInstance, async (newSport) => {
+    selectedSport = newSport;
+    _syncDashboardSelection(storeInstance, selectedSport);
+    storeInstance.set({
+      dashboardCacheAt: 0,
+      dashboardCacheDate: null,
+      dashboardCacheSport: null,
+    });
+    await _loadAndDisplay(container, storeInstance, selectedDate, { manualRefresh: false, sport: selectedSport });
+  });
+
   _bindDateSelector(container, storeInstance, selectedDate, async (newDate) => {
     selectedDate = newDate;
     storeInstance.set({
       'dashboardFilters.selectedDate': newDate,
-      dashboardCacheDate: null,   // invalide le cache pour forcer le rechargement
-      dashboardCacheAt:   0,
+      'dashboardFilters.selectedSport': selectedSport,
+      dashboardCacheDate: null,
+      dashboardCacheSport: null,
+      dashboardCacheAt: 0,
     });
-    await _loadAndDisplay(container, storeInstance, newDate);
+    await _loadAndDisplay(container, storeInstance, newDate, { manualRefresh: false, sport: selectedSport });
   });
 
-  // v4.7 : Bouton actualiser manuel
   const refreshBtn = container.querySelector('#refresh-btn');
   if (refreshBtn) {
     refreshBtn.addEventListener('click', async function() {
       refreshBtn.textContent = '⟳ Actualisation...';
       refreshBtn.disabled = true;
-      storeInstance.set({ dashboardCacheAt: 0 });
-      await _loadAndDisplay(container, storeInstance, selectedDate, { manualRefresh: true });
+      storeInstance.set({ dashboardCacheAt: 0, dashboardCacheDate: null, dashboardCacheSport: null });
+      await _loadAndDisplay(container, storeInstance, selectedDate, { manualRefresh: true, sport: selectedSport });
       refreshBtn.textContent = '⟳ Actualiser';
       refreshBtn.disabled = false;
     });
   }
 
-  await _loadAndDisplay(container, storeInstance, selectedDate, { manualRefresh: false });
-
-  // v4.7 : Planifier l'auto-refresh
+  await _loadAndDisplay(container, storeInstance, selectedDate, { manualRefresh: false, sport: selectedSport });
   _scheduleNextRefresh(container, storeInstance);
 
   return { destroy() {} };
 }
 
-// ── CHARGEMENT ────────────────────────────────────────────────────────────
-
 async function _loadAndDisplay(container, storeInstance, date, options = {}) {
   const list = container.querySelector('#matches-list');
   date = date ?? _getTodayDate();
+  const selectedSport = options.sport ?? _getSelectedSport(storeInstance);
+
+  _syncDashboardSelection(storeInstance, selectedSport);
 
   try {
     LoadingUI.show();
 
-    // ── Cache : si analyses déjà chargées pour cette date, réutiliser ──
     const cachedAnalyses = storeInstance.get('analyses') ?? {};
-    const cachedMatches  = storeInstance.get('matches')  ?? {};
-    // Lire la date depuis le paramètre `date` — pas depuis le store qui peut ne pas
-    // encore être mis à jour quand onDateChange est appelé (ex: bouton Demain).
+    const cachedMatches  = storeInstance.get('matches') ?? {};
     const cachedDate     = storeInstance.get('dashboardCacheDate');
-
-    const cachedAt  = storeInstance.get('dashboardCacheAt') ?? 0;
-    const cacheAge  = Date.now() - cachedAt;
-    const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+    const cachedSport    = storeInstance.get('dashboardCacheSport') ?? null;
+    const cachedAt       = storeInstance.get('dashboardCacheAt') ?? 0;
+    const cacheAge       = Date.now() - cachedAt;
+    const CACHE_TTL      = 5 * 60 * 1000;
 
     if (
       cachedDate === date &&
+      cachedSport === selectedSport &&
       Object.keys(cachedAnalyses).length > 0 &&
       Object.keys(cachedMatches).length > 0 &&
       cacheAge < CACHE_TTL
     ) {
-      const matchList     = Object.values(cachedMatches).filter(m => m.sport === 'NBA');
+      const matchList = Object.values(cachedMatches).filter(m => (m?.sport ?? 'NBA') === selectedSport);
       const analysisIndex = _buildAnalysisIndex(cachedAnalyses);
-
-      // Charger l'état paper trading une seule fois pour tout le rendu
       const ptState = _loadPaperState();
+
+      if (!matchList.length) {
+        _renderEmptyState(list, selectedSport);
+        _updateSummary(container, 0, 0, 0);
+        LoadingUI.hide();
+        return;
+      }
+
       _renderMatchCards(list, matchList, storeInstance);
 
       let analyser = 0, explorer = 0, insuffisant = 0, rejete = 0;
@@ -420,38 +380,40 @@ async function _loadAndDisplay(container, storeInstance, date, options = {}) {
         }
       });
 
-      const conclusive = analyser + explorer;
-      const rejected   = insuffisant + rejete;
-      _updateSummary(container, matchList.length, conclusive, rejected);
+      _updateSummary(container, matchList.length, analyser + explorer, insuffisant + rejete);
       _renderBestOpportunity(container, matchList, analysisIndex);
       LoadingUI.hide();
       return;
     }
 
-    // ── Pas de cache — charger depuis l'API ──
-    const result = await DataOrchestrator.loadAndAnalyze(date, storeInstance, options);
+    const result = await DataOrchestrator.loadAndAnalyze(date, storeInstance, { ...options, sport: selectedSport });
 
     if (!result?.matches?.length) {
-      _renderEmptyState(list);
+      _renderEmptyState(list, selectedSport);
       _updateSummary(container, 0, 0, 0);
+      storeInstance.set({
+        dashboardCacheAt: null,
+        dashboardCacheDate: null,
+        dashboardCacheSport: null,
+      });
       return;
     }
 
-    // Stocker le timestamp et la date de chargement pour le TTL cache
-    storeInstance.set({ dashboardCacheAt: Date.now(), dashboardCacheDate: date });
+    storeInstance.set({
+      dashboardCacheAt: Date.now(),
+      dashboardCacheDate: date,
+      dashboardCacheSport: selectedSport,
+    });
 
     const analysisIndex = _buildAnalysisIndex(result.analyses);
-
     const ptState = _loadPaperState();
     _renderMatchCards(list, result.matches, storeInstance);
 
     let analyser = 0, explorer = 0, insuffisant = 0, rejete = 0;
-
     result.matches.forEach(match => {
       const analysis = analysisIndex[match.id];
       if (!analysis) return;
       _updateMatchCard(list, match.id, analysis, match, ptState);
-
       switch (analysis.decision ?? _legacyDecision(analysis)) {
         case 'ANALYSER':    analyser++;    break;
         case 'EXPLORER':    explorer++;    break;
@@ -460,11 +422,8 @@ async function _loadAndDisplay(container, storeInstance, date, options = {}) {
       }
     });
 
-    const conclusive = analyser + explorer;
-    const rejected   = insuffisant + rejete;
-    _updateSummary(container, result.matches.length, conclusive, rejected);
+    _updateSummary(container, result.matches.length, analyser + explorer, insuffisant + rejete);
     _renderBestOpportunity(container, result.matches, analysisIndex);
-
   } catch (err) {
     Logger.error('DASHBOARD_RENDER_ERROR', { message: err.message });
     _renderError(list);
@@ -472,9 +431,6 @@ async function _loadAndDisplay(container, storeInstance, date, options = {}) {
     LoadingUI.hide();
   }
 }
-
-// ── INDEX DES ANALYSES ────────────────────────────────────────────────────
-
 
 function _resolveLatestAnalysisForMatch(analyses, matchId) {
   if (!analyses || !matchId) return null;
@@ -517,9 +473,7 @@ function _legacyDecision(analysis) {
   return 'INSUFFISANT';
 }
 
-// ── SHELL ─────────────────────────────────────────────────────────────────
-
-function _renderShell(selectedDate) {
+function _renderShell(selectedDate, selectedSport) {
   const displayDate = new Date(selectedDate + 'T12:00:00').toLocaleDateString('fr-FR', {
     weekday: 'long', day: 'numeric', month: 'long',
   });
@@ -528,7 +482,6 @@ function _renderShell(selectedDate) {
 
   return `
     <div class="dashboard">
-
       <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
         <div>
           <div class="page-header__eyebrow">Mani Bet Pro</div>
@@ -539,7 +492,7 @@ function _renderShell(selectedDate) {
       </div>
 
       <div class="date-selector filter-chips" id="date-selector">
-        <button class="chip ${selectedDate === today    ? 'chip--active' : ''}" data-date="${today}">Aujourd'hui</button>
+        <button class="chip ${selectedDate === today ? 'chip--active' : ''}" data-date="${today}">Aujourd'hui</button>
         <button class="chip ${selectedDate === tomorrow ? 'chip--active' : ''}" data-date="${tomorrow}">Demain</button>
         <input type="date" id="date-picker" value="${selectedDate}"
           style="background:var(--color-card);border:1px solid var(--color-border);color:var(--color-text);border-radius:20px;padding:4px 12px;font-size:12px;cursor:pointer;"
@@ -565,10 +518,9 @@ function _renderShell(selectedDate) {
         <div class="filter-row">
           <span class="filter-label">Sport</span>
           <div class="filter-chips" id="filter-sports">
-            <button class="chip chip--active" data-sport="ALL">Tous</button>
-            <button class="chip" data-sport="NBA">NBA</button>
-            <button class="chip" data-sport="MLB">MLB</button>
-            <button class="chip" data-sport="TENNIS">Tennis</button>
+            <button class="chip ${selectedSport === 'NBA' ? 'chip--active' : ''}" data-sport="NBA">NBA</button>
+            <button class="chip ${selectedSport === 'MLB' ? 'chip--active' : ''}" data-sport="MLB">MLB</button>
+            <button class="chip ${selectedSport === 'TENNIS' ? 'chip--active' : ''}" data-sport="TENNIS">Tennis</button>
           </div>
         </div>
         <div class="filter-row">
@@ -587,20 +539,16 @@ function _renderShell(selectedDate) {
       <div class="dashboard__matches" id="matches-list">
         <div class="loading-state">
           <div class="loader__spinner"></div>
-          <span class="text-muted" style="font-size:13px">Chargement ESPN…</span>
+          <span class="text-muted" style="font-size:13px">Chargement ${selectedSport}…</span>
         </div>
       </div>
-
     </div>
   `;
 }
 
-// ── CARTES MATCH ──────────────────────────────────────────────────────────
-
-function _renderMatchCards(list, matches, storeInstance) {
+function _renderMatchCards(list, matches) {
   list.innerHTML = '';
   if (!matches.length) { _renderEmptyState(list); return; }
-
   const frag = document.createDocumentFragment();
   matches.forEach(match => frag.appendChild(_createMatchCard(match)));
   list.appendChild(frag);
@@ -624,45 +572,35 @@ function _createMatchCard(match) {
   const awayScore     = match.away_team?.score;
   const showScore     = isFinal && homeScore != null && awayScore != null;
 
-  // ── Cotes ML en format DÉCIMAL (cotes françaises) ─────────────────────────
   const marketOdds = match.market_odds ?? null;
   const espnOdds   = match.odds ?? {};
 
-  // Priorité : market_odds (Pinnacle/Winamax) → conversion depuis ESPN américain
   const _amToDec = (am) => {
     if (am == null) return null;
     const n = Number(am);
     return n > 0 ? Number((n / 100 + 1).toFixed(2)) : Number((1 - 100 / n).toFixed(2));
   };
 
-  // Chercher la meilleure source de cotes ML décimales
   const pinnacleBook = marketOdds?.bookmakers?.find(b => b.key === 'pinnacle')
                     ?? marketOdds?.bookmakers?.find(b => b.key === 'winamax')
                     ?? marketOdds?.bookmakers?.[0]
                     ?? null;
 
-  const homeDecRaw = marketOdds?.home_ml_decimal
-                  ?? pinnacleBook?.home_ml
-                  ?? _amToDec(espnOdds.home_ml);
-  const awayDecRaw = marketOdds?.away_ml_decimal
-                  ?? pinnacleBook?.away_ml
-                  ?? _amToDec(espnOdds.away_ml);
-
+  const homeDecRaw = marketOdds?.home_ml_decimal ?? pinnacleBook?.home_ml ?? _amToDec(espnOdds.home_ml);
+  const awayDecRaw = marketOdds?.away_ml_decimal ?? pinnacleBook?.away_ml ?? _amToDec(espnOdds.away_ml);
   const homeDec    = homeDecRaw != null ? Number(homeDecRaw).toFixed(2) : null;
   const awayDec    = awayDecRaw != null ? Number(awayDecRaw).toFixed(2) : null;
   const oddsSource = pinnacleBook
     ? (pinnacleBook.key === 'winamax' ? 'Winamax' : 'Pinnacle')
     : (espnOdds.home_ml != null ? 'ESPN' : null);
 
-  // ── O/U en décimal ────────────────────────────────────────────────────────
-  const ou        = espnOdds.over_under ?? marketOdds?.ou_line ?? null;
-  const overDec   = marketOdds?.over_decimal  ?? null;
-  const underDec  = marketOdds?.under_decimal ?? null;
+  const ou         = espnOdds.over_under ?? marketOdds?.ou_line ?? null;
+  const overDec    = marketOdds?.over_decimal  ?? null;
+  const underDec   = marketOdds?.under_decimal ?? null;
   const ouOverFmt  = overDec  != null ? Number(overDec).toFixed(2)  : null;
   const ouUnderFmt = underDec != null ? Number(underDec).toFixed(2) : null;
 
   card.innerHTML = `
-    <!-- ── HEADER ── -->
     <div class="match-card__header" style="display:flex;align-items:center;gap:6px">
       <span class="sport-tag ${isTennis ? 'sport-tag--tennis' : isMLB ? 'sport-tag--mlb' : 'sport-tag--nba'}">${isTennis ? 'Tennis' : isMLB ? 'MLB' : 'NBA'}</span>
       ${!isFinal ? countdownHtml : ''}
@@ -672,22 +610,15 @@ function _createMatchCard(match) {
       </span>
     </div>
 
-    <!-- ── ÉQUIPES ── -->
     <div class="mc-teams">
-
-      <!-- Équipe domicile -->
       <div class="mc-team">
         <span class="mc-team__abbr">${match.home_team?.abbreviation ?? '—'}</span>
         <span class="mc-team__name">${match.home_team?.name ?? '—'}</span>
         <span class="mc-team__record">${homeRecord}</span>
-        <span class="mc-team__odds" id="odds-home-${match.id}">
-          ${homeDec ? `<strong>${homeDec}</strong>` : '—'}
-        </span>
+        <span class="mc-team__odds" id="odds-home-${match.id}">${homeDec ? `<strong>${homeDec}</strong>` : '—'}</span>
         <span class="mc-team__prob" id="motor-home-${match.id}" style="display:none"></span>
-        <span style="display:none" id="market-home-${match.id}"></span>
       </div>
 
-      <!-- Séparateur central -->
       <div class="mc-vs">
         ${showScore
           ? `<div class="mc-vs__score">${homeScore}<br><span style="font-size:10px;color:var(--color-text-muted)">–</span><br>${awayScore}</div>`
@@ -696,20 +627,15 @@ function _createMatchCard(match) {
         ${oddsSource ? `<span class="mc-source">${oddsSource}</span>` : ''}
       </div>
 
-      <!-- Équipe extérieure -->
       <div class="mc-team mc-team--away">
         <span class="mc-team__abbr">${match.away_team?.abbreviation ?? '—'}</span>
         <span class="mc-team__name">${match.away_team?.name ?? '—'}</span>
         <span class="mc-team__record">${awayRecord}</span>
-        <span class="mc-team__odds" id="odds-away-${match.id}">
-          ${awayDec ? `<strong>${awayDec}</strong>` : '—'}
-        </span>
+        <span class="mc-team__odds" id="odds-away-${match.id}">${awayDec ? `<strong>${awayDec}</strong>` : '—'}</span>
         <span class="mc-team__prob" id="motor-away-${match.id}" style="display:none"></span>
-        <span style="display:none" id="market-away-${match.id}"></span>
       </div>
     </div>
 
-    <!-- ── BARRE PROBABILITÉ ── -->
     <div id="proba-bar-${match.id}" style="display:none">
       <div class="mc-proba-bar"><div class="mc-proba-bar__fill" id="proba-fill-${match.id}" style="width:50%"></div></div>
       <div style="display:flex;justify-content:space-between;margin-top:2px">
@@ -718,7 +644,6 @@ function _createMatchCard(match) {
       </div>
     </div>
 
-    <!-- ── MARCHÉS EN PILLS (Option B) ── -->
     ${ou != null ? `
     <div class="mc-markets" id="ou-${match.id}">
       <div class="mc-market-row">
@@ -732,27 +657,17 @@ function _createMatchCard(match) {
       <div id="spread-row-${match.id}" style="display:none" class="mc-market-row mc-market-row--spread"></div>
     </div>` : ''}
 
-    <!-- Nœuds hérités compatibilité -->
     <div id="proba-${match.id}" style="display:none"></div>
     <div id="edge-${match.id}" style="display:none">
       <span id="edge-val-${match.id}"></span>
       <span id="quality-val-${match.id}"></span>
     </div>
 
-    <!-- Niveau / Net Rating -->
     <div id="level-${match.id}" style="display:none"></div>
-
-    <!-- Meilleure recommandation -->
     <div id="best-rec-${match.id}" style="display:none"></div>
-
-    <!-- Paris recommandés supplémentaires -->
     <div id="recs-${match.id}" class="match-card__recs" style="display:none"></div>
-
-    <!-- Footer -->
     <div id="bet-indicator-${match.id}" style="margin-top:6px"></div>
-    <button class="mc-footer__cta match-card__cta" data-match-id="${match.id}" data-analysis-id="">
-      Voir l'analyse →
-    </button>
+    <button class="mc-footer__cta match-card__cta" data-match-id="${match.id}" data-analysis-id="">Voir l'analyse →</button>
   `;
 
   card.querySelector('.match-card__cta').addEventListener('click', (e) => {
@@ -765,10 +680,9 @@ function _createMatchCard(match) {
 
 function _updateMatchCard(list, matchId, analysis, match, ptState) {
   const decision = analysis.decision ?? _legacyDecision(analysis);
-  const card     = list.querySelector(`[data-match-id="${matchId}"]`);
+  const card = list.querySelector(`[data-match-id="${matchId}"]`);
   if (!card) return;
 
-  // ── 1. Badge décision ────────────────────────────────────────────────────
   const badge = card.querySelector(`#badge-${matchId}`);
   if (badge) {
     const cfg = _decisionConfig(decision);
@@ -780,85 +694,67 @@ function _updateMatchCard(list, matchId, analysis, match, ptState) {
     }
   }
 
-  // ── 2. Bordure gauche selon décision ─────────────────────────────────────
   card.dataset.analysisId = analysis.analysis_id ?? '';
   const cta = card.querySelector('.match-card__cta');
   if (cta) cta.dataset.analysisId = analysis.analysis_id ?? '';
 
   const borderColors = { ANALYSER: 'var(--color-success)', EXPLORER: 'var(--color-warning)' };
-  const borderColor  = borderColors[decision];
+  const borderColor = borderColors[decision];
   if (borderColor) card.style.borderLeft = `3px solid ${borderColor}`;
 
-  // ── 3. Probabilités + barre + cotes colorées ─────────────────────────────
-  if (analysis.predictive_score !== null) {
+  if (analysis.predictive_score !== null && analysis.predictive_score !== undefined) {
     const homeProb = Math.round(analysis.predictive_score * 100);
     const awayProb = 100 - homeProb;
     const isFavHome = homeProb > awayProb;
 
-    // Colorier les cotes ML selon le favori moteur
     const oddsHomeEl = card.querySelector(`#odds-home-${matchId}`);
     const oddsAwayEl = card.querySelector(`#odds-away-${matchId}`);
     if (oddsHomeEl) {
-      oddsHomeEl.style.color = isFavHome
-        ? 'var(--color-text-primary)'
-        : 'var(--color-text-muted)';
+      oddsHomeEl.style.color = isFavHome ? 'var(--color-text-primary)' : 'var(--color-text-muted)';
       if (isFavHome) oddsHomeEl.style.fontWeight = '800';
     }
     if (oddsAwayEl) {
-      oddsAwayEl.style.color = !isFavHome
-        ? 'var(--color-text-primary)'
-        : 'var(--color-text-muted)';
+      oddsAwayEl.style.color = !isFavHome ? 'var(--color-text-primary)' : 'var(--color-text-muted)';
       if (!isFavHome) oddsAwayEl.style.fontWeight = '800';
     }
 
-    // Probabilités sous les équipes
     const motorHomeEl = card.querySelector(`#motor-home-${matchId}`);
     const motorAwayEl = card.querySelector(`#motor-away-${matchId}`);
     if (motorHomeEl) {
       motorHomeEl.textContent = `${homeProb}% analyse`;
-      motorHomeEl.className   = `mc-team__prob${isFavHome ? ' mc-team__prob--fav' : ''}`;
+      motorHomeEl.className = `mc-team__prob${isFavHome ? ' mc-team__prob--fav' : ''}`;
       motorHomeEl.style.display = '';
     }
     if (motorAwayEl) {
       motorAwayEl.textContent = `${awayProb}% analyse`;
-      motorAwayEl.className   = `mc-team__prob${!isFavHome ? ' mc-team__prob--fav' : ''}`;
+      motorAwayEl.className = `mc-team__prob${!isFavHome ? ' mc-team__prob--fav' : ''}`;
       motorAwayEl.style.display = '';
     }
 
-    // Barre de probabilité — sans labels redondants sous la barre
-    const probaBarEl   = card.querySelector(`#proba-bar-${matchId}`);
-    const probaFillEl  = card.querySelector(`#proba-fill-${matchId}`);
+    const probaBarEl = card.querySelector(`#proba-bar-${matchId}`);
+    const probaFillEl = card.querySelector(`#proba-fill-${matchId}`);
     if (probaBarEl && probaFillEl) {
       probaFillEl.style.width = `${homeProb}%`;
       probaBarEl.style.display = '';
     }
   }
 
-  // ── 4. Niveau / Net Rating ────────────────────────────────────────────────
   const netRating = analysis.variables_used?.net_rating_diff?.value;
-  const levelEl   = card.querySelector(`#level-${matchId}`);
+  const levelEl = card.querySelector(`#level-${matchId}`);
   if (levelEl && netRating != null) {
-    const absVal  = Math.abs(netRating);
-    const domTeam = netRating > 0
-      ? (match?.home_team?.abbreviation ?? 'DOM')
-      : (match?.away_team?.abbreviation ?? 'EXT');
+    const absVal = Math.abs(netRating);
+    const domTeam = netRating > 0 ? (match?.home_team?.abbreviation ?? 'DOM') : (match?.away_team?.abbreviation ?? 'EXT');
 
     let label, color, bg;
-    if (absVal < 2)       { label = 'Niveau équivalent';          color = 'var(--color-text-muted)'; bg = 'rgba(255,255,255,0.04)'; }
-    else if (absVal < 4)  { label = `Léger avantage ${domTeam}`;  color = 'var(--color-warning)';    bg = 'rgba(245,158,11,0.08)'; }
-    else if (absVal < 7)  { label = `Avantage ${domTeam}`;        color = 'var(--color-warning)';    bg = 'rgba(245,158,11,0.08)'; }
-    else if (absVal < 10) { label = `Domination ${domTeam}`;      color = netRating > 0 ? 'var(--color-success)' : 'var(--color-danger)'; bg = netRating > 0 ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)'; }
+    if (absVal < 2)       { label = 'Niveau équivalent'; color = 'var(--color-text-muted)'; bg = 'rgba(255,255,255,0.04)'; }
+    else if (absVal < 4)  { label = `Léger avantage ${domTeam}`; color = 'var(--color-warning)'; bg = 'rgba(245,158,11,0.08)'; }
+    else if (absVal < 7)  { label = `Avantage ${domTeam}`; color = 'var(--color-warning)'; bg = 'rgba(245,158,11,0.08)'; }
+    else if (absVal < 10) { label = `Domination ${domTeam}`; color = netRating > 0 ? 'var(--color-success)' : 'var(--color-danger)'; bg = netRating > 0 ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)'; }
     else                  { label = `Mismatch total — ${domTeam}`; color = netRating > 0 ? 'var(--color-success)' : 'var(--color-danger)'; bg = netRating > 0 ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)'; }
 
-    // Badge qualité données dans le même bloc
-    const quality  = analysis.data_quality_score != null ? Math.round(analysis.data_quality_score * 100) : null;
-    const qColor   = quality == null ? 'var(--color-text-muted)'
-                   : quality >= 80   ? '#22c55e'
-                   : quality >= 60   ? '#f97316'
-                   : '#ef4444';
-    const qBadge   = quality != null
-      ? `<span style="margin-left:auto;font-size:10px;font-weight:600;color:${qColor}">● ${quality}%</span>`
-      : '';
+    const quality = analysis.data_quality_score != null ? Math.round(analysis.data_quality_score * 100) : null;
+    const qColor  = quality == null ? 'var(--color-text-muted)' : quality >= 80 ? '#22c55e' : quality >= 60 ? '#f97316' : '#ef4444';
+    const qBadge  = quality != null ? `<span style="margin-left:auto;font-size:10px;font-weight:600;color:${qColor}">● ${quality}%</span>` : '';
 
     levelEl.className = 'mc-level';
     levelEl.style.cssText = `color:${color};background:${bg}`;
@@ -866,7 +762,6 @@ function _updateMatchCard(list, matchId, analysis, match, ptState) {
     levelEl.style.display = '';
   }
 
-  // ── 4b. Spread dans la section O/U ───────────────────────────────────────
   const spreadRowEl = card.querySelector(`#spread-row-${matchId}`);
   if (spreadRowEl) {
     const marketOdds   = match?.market_odds ?? null;
@@ -878,12 +773,8 @@ function _updateMatchCard(list, matchId, analysis, match, ptState) {
     if (spreadLine != null) {
       const homeAbv = match?.home_team?.abbreviation ?? 'DOM';
       const awayAbv = match?.away_team?.abbreviation ?? 'EXT';
-      const homeSprdFmt = spreadLine <= 0
-        ? `${homeAbv} ${spreadLine}`
-        : `${homeAbv} +${spreadLine}`;
-      const awaySprdFmt = spreadLine <= 0
-        ? `${awayAbv} +${Math.abs(spreadLine)}`
-        : `${awayAbv} -${spreadLine}`;
+      const homeSprdFmt = spreadLine <= 0 ? `${homeAbv} ${spreadLine}` : `${homeAbv} +${spreadLine}`;
+      const awaySprdFmt = spreadLine <= 0 ? `${awayAbv} +${Math.abs(spreadLine)}` : `${awayAbv} -${spreadLine}`;
 
       spreadRowEl.innerHTML = `
         <span class="mc-market-row__label">Hcap</span>
@@ -895,7 +786,6 @@ function _updateMatchCard(list, matchId, analysis, match, ptState) {
     }
   }
 
-  // ── 5. Badge warning données partielles ──────────────────────────────────
   if (!card.querySelector('.mbp-weight-warning')) {
     const coverage = analysis.weight_coverage;
     if (coverage !== null && coverage !== undefined && coverage < 0.75) {
@@ -906,26 +796,21 @@ function _updateMatchCard(list, matchId, analysis, match, ptState) {
         rest_days_diff: 'repos',          win_pct_diff: 'bilan saison',
         defensive_diff: 'défense',
       };
-      const missing       = analysis.missing_variables ?? [];
+      const missing = analysis.missing_variables ?? [];
       const missingLabels = missing.map(id => LABELS[id] ?? id).slice(0, 3).join(', ');
-      const warn          = document.createElement('div');
-      warn.className      = 'mbp-weight-warning';
-      warn.title          = `Données manquantes : ${missingLabels || 'inconnues'}`;
-      warn.textContent    = `⚠ Données partielles (${Math.round(coverage * 100)}%)`;
+      const warn = document.createElement('div');
+      warn.className = 'mbp-weight-warning';
+      warn.title = `Données manquantes : ${missingLabels || 'inconnues'}`;
+      warn.textContent = `⚠ Données partielles (${Math.round(coverage * 100)}%)`;
       const levelEl2 = card.querySelector(`#level-${matchId}`);
       if (levelEl2) levelEl2.after(warn);
     }
   }
 
-  // ── 6. Meilleure recommandation ───────────────────────────────────────────
   const bestRecEl = card.querySelector(`#best-rec-${matchId}`);
-  const best      = analysis.betting_recommendations?.best;
-
+  const best = analysis.betting_recommendations?.best;
   if (bestRecEl && best?.edge != null) {
-    const typeLabel = best.type === 'MONEYLINE' ? 'Vainqueur'
-                    : best.type === 'SPREAD'    ? 'Handicap'
-                    : 'O/U';
-
+    const typeLabel = best.type === 'MONEYLINE' ? 'Vainqueur' : best.type === 'SPREAD' ? 'Handicap' : 'O/U';
     const sideLabel = best.type === 'MONEYLINE'
       ? (best.side === 'HOME' ? match?.home_team?.abbreviation : match?.away_team?.abbreviation)
       : best.type === 'SPREAD'
@@ -936,18 +821,13 @@ function _updateMatchCard(list, matchId, analysis, match, ptState) {
         ? `Plus de ${best.ou_line ?? best.market_total ?? '—'} pts`
         : `Moins de ${best.ou_line ?? best.market_total ?? '—'} pts`;
 
-    const decOdds = best.odds_decimal ?? (best.odds_line > 0 ? (best.odds_line/100+1) : (1-100/best.odds_line));
+    const decOdds = best.odds_decimal ?? (best.odds_line > 0 ? (best.odds_line / 100 + 1) : (1 - 100 / best.odds_line));
     const fmtOdds = Number(decOdds).toFixed(2);
-
-    const edgeColor = best.edge >= 12 ? 'var(--color-success)'
-                    : best.edge >= 7  ? 'var(--color-warning)'
-                    : 'var(--color-text-muted)';
-
-    // Classe visuelle selon qualité de l'opportunité
-    const dataQ     = analysis.data_quality_score ?? 0;
-    const divFlag   = analysis.market_divergence?.flag ?? 'low';
+    const edgeColor = best.edge >= 12 ? 'var(--color-success)' : best.edge >= 7 ? 'var(--color-warning)' : 'var(--color-text-muted)';
+    const dataQ = analysis.data_quality_score ?? 0;
+    const divFlag = analysis.market_divergence?.flag ?? 'low';
     const isGoodRec = best.edge >= 7 && dataQ >= 0.80 && divFlag !== 'critical' && !best.is_contrarian;
-    const recClass  = isGoodRec ? 'mc-best-rec--value' : best.edge >= 5 ? 'mc-best-rec--warn' : '';
+    const recClass = isGoodRec ? 'mc-best-rec--value' : best.edge >= 5 ? 'mc-best-rec--warn' : '';
 
     bestRecEl.className = `mc-best-rec ${recClass}`;
     bestRecEl.innerHTML = `
@@ -960,35 +840,30 @@ function _updateMatchCard(list, matchId, analysis, match, ptState) {
     bestRecEl.style.display = '';
   }
 
-  // ── 7. Paris en cours ─────────────────────────────────────────────────────
   const betIndicatorEl = card.querySelector(`#bet-indicator-${matchId}`);
   if (betIndicatorEl && ptState && !betIndicatorEl.querySelector('.mbp-open-bet-indicator')) {
     const pendingIndex = _buildPendingIndex(ptState);
-    const pendingBets  = pendingIndex[matchId] ?? [];
+    const pendingBets = pendingIndex[matchId] ?? [];
     if (pendingBets.length > 0) {
       const totalStake = pendingBets.reduce((s, b) => s + (b.stake || 0), 0);
-      const markets    = pendingBets.map(b => b.market === 'MONEYLINE' ? 'ML' : b.market === 'SPREAD' ? 'Hcap' : 'O/U').join(' · ');
-      const dot        = document.createElement('div');
-      dot.className    = 'mbp-open-bet-indicator';
-      dot.innerHTML    = `<span class="mbp-bet-dot"></span>${pendingBets.length} pari${pendingBets.length > 1 ? 's' : ''} en cours <span style="opacity:0.6;font-weight:400">(${markets} · ${totalStake.toFixed(0)}€)</span>`;
+      const markets = pendingBets.map(b => b.market === 'MONEYLINE' ? 'ML' : b.market === 'SPREAD' ? 'Hcap' : 'O/U').join(' · ');
+      const dot = document.createElement('div');
+      dot.className = 'mbp-open-bet-indicator';
+      dot.innerHTML = `<span class="mbp-bet-dot"></span>${pendingBets.length} pari${pendingBets.length > 1 ? 's' : ''} en cours <span style="opacity:0.6;font-weight:400">(${markets} · ${totalStake.toFixed(0)}€)</span>`;
       betIndicatorEl.appendChild(dot);
     }
   }
 
-  // ── 8. Motif de rejet ─────────────────────────────────────────────────────
   if (!card.querySelector('.match-card__rejection')) {
     const hasReason = analysis.rejection_reason || analysis.insuffisant_reason;
     if (hasReason) {
-      const el     = document.createElement('div');
+      const el = document.createElement('div');
       el.className = 'match-card__rejection text-muted';
       el.textContent = `↳ ${analysis.rejection_reason ? _formatRejection(analysis.rejection_reason) : analysis.insuffisant_reason}`;
       bestRecEl?.after(el);
     }
   }
 }
-
-
-// ── RÉSUMÉ ────────────────────────────────────────────────────────────────
 
 function _updateSummary(container, total, conclusive, rejected) {
   const t = container.querySelector('#summary-total .summary-card__value');
@@ -999,14 +874,11 @@ function _updateSummary(container, total, conclusive, rejected) {
   if (r) r.textContent = rejected;
 }
 
-// ── MEILLEURE OPPORTUNITÉ ─────────────────────────────────────────────────
-
 function _renderBestOpportunity(container, matches, analysisIndex) {
   const el = container.querySelector('#best-opportunity');
   if (!el) return;
 
   let bestMatch = null, bestAnalysis = null, bestEdge = 0, bestScore = 0;
-
   matches.forEach(m => {
     const a = analysisIndex[m.id];
     if (!a?.betting_recommendations?.best) return;
@@ -1014,22 +886,24 @@ function _renderBestOpportunity(container, matches, analysisIndex) {
     const edge = best.edge ?? 0;
     if (edge < 5) return;
 
-    // Score composite : edge pondéré par qualité données + pénalité divergence forte
-    const quality    = a.data_quality_score ?? 0.5;
+    const quality = a.data_quality_score ?? 0.5;
     const divergence = a.market_divergence?.flag ?? 'low';
-    const divPenalty = divergence === 'critical' ? 0.5
-                     : divergence === 'high'     ? 0.3
-                     : 0;
-    // Favoriser les marchés O/U et Spread plutôt que ML avec grand écart
-    const mlPenalty  = best.type === 'MONEYLINE' && Math.abs(edge) > 10 ? 0.2 : 0;
+    const divPenalty = divergence === 'critical' ? 0.5 : divergence === 'high' ? 0.3 : 0;
+    const mlPenalty = best.type === 'MONEYLINE' && Math.abs(edge) > 10 ? 0.2 : 0;
     const score = edge * quality * (1 - divPenalty) * (1 - mlPenalty);
 
     if (score > bestScore) {
-      bestScore = score; bestEdge = edge; bestMatch = m; bestAnalysis = a;
+      bestScore = score;
+      bestEdge = edge;
+      bestMatch = m;
+      bestAnalysis = a;
     }
   });
 
-  if (!bestMatch || bestEdge < 5) { el.style.display = 'none'; return; }
+  if (!bestMatch || bestEdge < 5) {
+    el.style.display = 'none';
+    return;
+  }
 
   const best = bestAnalysis.betting_recommendations.best;
   const SIDE_MAP = {
@@ -1038,7 +912,7 @@ function _renderBestOpportunity(container, matches, analysisIndex) {
     HOME:  bestMatch.home_team?.name,
     UNDER: `Moins de ${best.ou_line ?? best.market_total ?? '—'} pts`,
   };
-  const sideLabel   = SIDE_MAP[best.side] ?? best.side;
+  const sideLabel = SIDE_MAP[best.side] ?? best.side;
   const oddsDecimal = americanToDecimal(best.odds_line) ?? '—';
   const gainPour100 = oddsDecimal !== '—' ? Math.round((oddsDecimal - 1) * 100) : null;
 
@@ -1059,9 +933,7 @@ function _renderBestOpportunity(container, matches, analysisIndex) {
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
-          <div style="font-size:15px;font-weight:700">
-            ${bestMatch.home_team?.abbreviation} vs ${bestMatch.away_team?.abbreviation}
-          </div>
+          <div style="font-size:15px;font-weight:700">${bestMatch.home_team?.abbreviation} vs ${bestMatch.away_team?.abbreviation}</div>
           <div style="font-size:12px;color:var(--color-muted);margin-top:3px">
             Parier sur <strong style="color:var(--color-text)">${sideLabel}</strong> · cote <strong style="color:var(--color-signal)">${oddsDecimal}</strong>${gainPour100 ? ` <span style="color:var(--color-muted)">(+${gainPour100}€ / 100€)</span>` : ''}
           </div>
@@ -1079,8 +951,6 @@ function _renderBestOpportunity(container, matches, analysisIndex) {
   });
 }
 
-// ── FILTRES ───────────────────────────────────────────────────────────────
-
 function _bindDateSelector(container, storeInstance, initialDate, onDateChange) {
   const selector = container.querySelector('#date-selector');
   const picker   = container.querySelector('#date-picker');
@@ -1090,7 +960,7 @@ function _bindDateSelector(container, storeInstance, initialDate, onDateChange) 
     const chip = e.target.closest('.chip[data-date]');
     if (!chip) return;
     const newDate = chip.dataset.date;
-    selector.querySelectorAll('.chip').forEach(c => c.classList.remove('chip--active'));
+    selector.querySelectorAll('.chip[data-date]').forEach(c => c.classList.remove('chip--active'));
     chip.classList.add('chip--active');
     if (picker) picker.value = newDate;
     onDateChange(newDate);
@@ -1098,13 +968,13 @@ function _bindDateSelector(container, storeInstance, initialDate, onDateChange) 
 
   if (picker) {
     picker.addEventListener('change', (e) => {
-      selector.querySelectorAll('.chip').forEach(c => c.classList.remove('chip--active'));
+      selector.querySelectorAll('.chip[data-date]').forEach(c => c.classList.remove('chip--active'));
       onDateChange(e.target.value);
     });
   }
 }
 
-function _bindFilterEvents(container, storeInstance) {
+function _bindFilterEvents(container, storeInstance, onSportChange) {
   container.addEventListener('click', (e) => {
     const chip = e.target.closest('.chip');
     if (!chip) return;
@@ -1118,12 +988,14 @@ function _bindFilterEvents(container, storeInstance) {
     const analysisIndex = _buildAnalysisIndex(analyses);
 
     if (chip.dataset.sport !== undefined) {
-      _applyFilter(container, storeInstance, 'sport', chip.dataset.sport, analysisIndex);
-      // Changer le sport actif dans le store pour router vers le bon orchestrateur
-      if (chip.dataset.sport !== 'ALL') {
-        storeInstance.set({ selectedSport: chip.dataset.sport });
+      const currentSport = _getSelectedSport(storeInstance);
+      const nextSport = chip.dataset.sport;
+      if (nextSport !== currentSport && typeof onSportChange === 'function') {
+        void onSportChange(nextSport);
       }
+      return;
     }
+
     if (chip.dataset.decision !== undefined) _applyFilter(container, storeInstance, 'decision', chip.dataset.decision, analysisIndex);
     if (chip.dataset.edge !== undefined)     _applyFilter(container, storeInstance, 'edge',     chip.dataset.edge,     analysisIndex);
     if (chip.dataset.bets !== undefined)     _applyFilter(container, storeInstance, 'bets',     chip.dataset.bets,     analysisIndex);
@@ -1137,12 +1009,7 @@ function _applyFilter(container, storeInstance, filterType, value, analysisIndex
     const matchId  = card.dataset.matchId;
     const match    = matches[matchId];
     const analysis = analysisIndex[matchId];
-
     let visible = true;
-
-    if (filterType === 'sport' && value !== 'ALL') {
-      visible = match?.sport === value;
-    }
 
     if (filterType === 'decision' && value !== 'ALL') {
       const dec = analysis?.decision ?? _legacyDecision(analysis);
@@ -1150,7 +1017,7 @@ function _applyFilter(container, storeInstance, filterType, value, analysisIndex
     }
 
     if (filterType === 'edge' && value !== '0') {
-      const minEdge  = parseInt(value);
+      const minEdge = parseInt(value, 10);
       const bestEdge = analysis?.betting_recommendations?.best?.edge ?? 0;
       visible = bestEdge >= minEdge;
     }
@@ -1158,28 +1025,24 @@ function _applyFilter(container, storeInstance, filterType, value, analysisIndex
     if (filterType === 'bets' && value === 'OPEN') {
       try {
         const pts = _loadPaperState();
-        const pendingMatchIds = new Set(
-          (pts.bets ?? [])
-            .filter(function(b) { return b.result === 'PENDING'; })
-            .map(function(b) { return b.match_id; })
-        );
+        const pendingMatchIds = new Set((pts.bets ?? []).filter(b => b.result === 'PENDING').map(b => b.match_id));
         visible = pendingMatchIds.has(matchId);
-      } catch { visible = false; }
+      } catch {
+        visible = false;
+      }
     }
 
     card.style.display = visible ? '' : 'none';
   });
 }
 
-// ── ÉTATS VIDES ───────────────────────────────────────────────────────────
-
-function _renderEmptyState(container) {
+function _renderEmptyState(container, selectedSport = 'NBA') {
+  const sportLabel = selectedSport === 'MLB' ? 'MLB' : selectedSport === 'TENNIS' ? 'Tennis' : 'NBA';
   container.innerHTML = `
     <div class="empty-state">
       <div class="empty-state__icon">◎</div>
       <div class="empty-state__text">
-        Aucun match NBA aujourd'hui.<br>
-        ${store?.get('selectedSport') === 'MLB' ? 'Aucun match MLB aujourd\'hui.' : ''}
+        Aucun match ${sportLabel} pour cette date.<br>
         <span style="font-size:11px">Vérifie la connexion au Worker Cloudflare.</span>
       </div>
     </div>
@@ -1198,47 +1061,39 @@ function _renderError(container) {
   `;
 }
 
-// ── HELPERS ───────────────────────────────────────────────────────────────
-
-// Charger l'état paper trading depuis localStorage (cache local du KV)
 function _loadPaperState() {
   try {
     return JSON.parse(localStorage.getItem('mbp_paper_trading') ?? '{}');
-  } catch { return {}; }
+  } catch {
+    return {};
+  }
 }
 
-// Indexer les paris PENDING par match_id pour accès O(1)
 function _buildPendingIndex(ptState) {
-  const index = {}; // { matchId: [{ market, side, side_label, stake, edge }] }
+  const index = {};
   (ptState.bets ?? []).forEach(function(b) {
     if (b.result !== 'PENDING' || !b.match_id) return;
     if (!index[b.match_id]) index[b.match_id] = [];
     index[b.match_id].push({
-      market:     b.market,
-      side:       b.side,
+      market: b.market,
+      side: b.side,
       side_label: b.side_label,
-      stake:      b.stake,
-      edge:       b.edge,
+      stake: b.stake,
+      edge: b.edge,
     });
   });
   return index;
 }
 
-// Countdown jusqu'au tip-off
 function _renderCountdown(datetime) {
   if (!datetime) return '';
-  const now      = Date.now();
-  const kickoff  = new Date(datetime).getTime();
-  const diffMs   = kickoff - now;
+  const now = Date.now();
+  const kickoff = new Date(datetime).getTime();
+  const diffMs = kickoff - now;
   const diffMins = Math.round(diffMs / 60000);
 
-  if (diffMs < 0) {
-    // Match en cours
-    return '<span class="mbp-countdown mbp-countdown--live">● En cours</span>';
-  }
-  if (diffMins < 60) {
-    return `<span class="mbp-countdown mbp-countdown--soon">Dans ${diffMins} min</span>`;
-  }
+  if (diffMs < 0) return '<span class="mbp-countdown mbp-countdown--live">● En cours</span>';
+  if (diffMins < 60) return `<span class="mbp-countdown mbp-countdown--soon">Dans ${diffMins} min</span>`;
   if (diffMins < 120) {
     const h = Math.floor(diffMins / 60);
     const m = diffMins % 60;
@@ -1268,20 +1123,30 @@ function _formatRejection(reason) {
     SPORT_NOT_SUPPORTED_OR_DISABLED: 'Sport non activé',
     ENGINE_NOT_IMPLEMENTED:          'Moteur non implémenté',
     ABSENCES_NOT_CONFIRMED:          'Absences non confirmées',
+    MISSING_PITCHER_DATA:            'Données pitchers manquantes',
   };
   return labels[reason] ?? reason;
 }
 
 function _getTodayDate() {
-  // Utilise l'heure locale Paris (Europe/Paris) pour éviter le décalage UTC.
-  // Sans ça, après minuit heure de Paris mais avant 2h UTC, la date retournée
-  // est celle d'hier → les matchs NBA de la nuit restent affichés au lieu de ceux du lendemain.
   return new Date().toLocaleDateString('fr-CA', { timeZone: 'Europe/Paris' });
-  // fr-CA retourne le format YYYY-MM-DD nativement
 }
 
 function _offsetDate(dateStr, days) {
   const d = new Date(dateStr + 'T12:00:00');
   d.setDate(d.getDate() + days);
   return d.toISOString().slice(0, 10);
+}
+
+function _getSelectedSport(storeInstance) {
+  return storeInstance.get('dashboardFilters')?.selectedSport
+    ?? storeInstance.get('selectedSport')
+    ?? 'NBA';
+}
+
+function _syncDashboardSelection(storeInstance, selectedSport) {
+  storeInstance.set({
+    selectedSport,
+    'dashboardFilters.selectedSport': selectedSport,
+  });
 }
