@@ -392,11 +392,7 @@ async function handleNBATeamDetail(url, env, origin) {
     console.log('[TEAM-DETAIL] cache read fail', e?.message || e);
   }
 
-  // Sequential to avoid Tank01 rate limits (~11 calls per bundle)
-  const homeData = await getTeamDetailBundle(home, away, env);
-  const awayData = await getTeamDetailBundle(away, home, env);
-
-  // Rosters cached 24h in KV to avoid burning a 3rd Tank01 call on every team-detail fetch
+  // Rosters: cached 24h in KV — fetched FIRST before bundle calls to avoid rate-limiting
   const ROSTER_CACHE_KEY = 'nba_rosters_teams_v1';
   const ROSTER_TTL_MS    = 24 * 60 * 60 * 1000;
   const ROSTER_TTL_S     = 24 * 60 * 60;
@@ -408,14 +404,18 @@ async function handleNBATeamDetail(url, env, origin) {
     }
   } catch (_) {}
   if (!rostersData) {
-    rostersData = await getNBAData('getNBATeams', { rosters: 'true', schedules: 'false', topPerformers: 'false', teamStats: 'true' }, env).catch(() => null);
+    // Params identiques à TANK01_ROSTER_URL (statsToGet=averages, teamStats=false)
+    rostersData = await getNBAData('getNBATeams', { rosters: 'true', schedules: 'false', statsToGet: 'averages', topPerformers: 'false', teamStats: 'false' }, env).catch(() => null);
     if (rostersData && kv) {
       try { await kv.put(ROSTER_CACHE_KEY, JSON.stringify({ _ts: Date.now(), data: rostersData }), { expirationTtl: ROSTER_TTL_S }); } catch (_) {}
     }
   }
 
-  // Debug: diagnostique roster visible dans le payload API (_debug_roster)
-  const _rosterDebug = { rostersNull: rostersData === null, teamsCount: 0, homeFound: false, homeRosterSize: 0, awayFound: false, awayRosterSize: 0, sampleTeamAbvs: [], homeSamplePlayer: null };
+  // Sequential to avoid Tank01 rate limits (~11 calls per bundle)
+  const homeData = await getTeamDetailBundle(home, away, env);
+  const awayData = await getTeamDetailBundle(away, home, env);
+
+  const _rd = { null: rostersData === null, n: 0, hFound: false, hSize: 0, aFound: false, aSize: 0, abvs: [], sp: null };
 
   const extractTop10 = (teamAbv, rostersPayload, boxScores) => {
     try {
@@ -424,20 +424,15 @@ async function handleNBATeamDetail(url, env, origin) {
       else if (Array.isArray(rostersPayload?.body))   teamsArr = rostersPayload.body;
       else if (Array.isArray(rostersPayload?.teams))  teamsArr = rostersPayload.teams;
       else if (rostersPayload && typeof rostersPayload === 'object') teamsArr = Object.values(rostersPayload);
-      if (!_rosterDebug.teamsCount) {
-        _rosterDebug.teamsCount = teamsArr.length;
-        _rosterDebug.sampleTeamAbvs = teamsArr.slice(0, 5).map(t => t?.teamAbv ?? t?.abbr ?? '?');
-      }
+      if (!_rd.n) { _rd.n = teamsArr.length; _rd.abvs = teamsArr.slice(0, 5).map(t => t?.teamAbv ?? '?'); }
       const abv  = String(teamAbv || '').toUpperCase();
       const team = teamsArr.find(t => String(t?.teamAbv ?? t?.abbr ?? '').toUpperCase() === abv);
-      const rosterRaw = team?.roster ?? null;
-      const roster = Array.isArray(rosterRaw) ? rosterRaw : (rosterRaw && typeof rosterRaw === 'object' ? Object.values(rosterRaw) : []);
-      if (teamAbv === home) { _rosterDebug.homeFound = !!team; _rosterDebug.homeRosterSize = roster.length; _rosterDebug.homeSamplePlayer = roster[0] ? { name: roster[0]?.longName, ppg: roster[0]?.ppg, statsPts: roster[0]?.stats?.pts } : null; }
-      else                  { _rosterDebug.awayFound = !!team; _rosterDebug.awayRosterSize  = roster.length; }
+      const rr = team?.roster ?? null;
+      const roster = Array.isArray(rr) ? rr : (rr && typeof rr === 'object' ? Object.values(rr) : []);
+      if (teamAbv === home) { _rd.hFound = !!team; _rd.hSize = roster.length; _rd.sp = roster[0] ? { name: roster[0]?.longName, ppg: roster[0]?.ppg, pts: roster[0]?.stats?.pts } : null; }
+      else                  { _rd.aFound = !!team; _rd.aSize = roster.length; }
       return buildTop10ScorersFromRoster(roster, teamAbv, boxScores);
-    } catch (_) {
-      return [];
-    }
+    } catch (_) { return []; }
   };
 
   const homeTop10 = extractTop10(home, rostersData, homeData?.boxScores);
@@ -452,7 +447,7 @@ async function handleNBATeamDetail(url, env, origin) {
     _ts: Date.now(),
     _bundleError_home: homeData?._bundleError ?? null,
     _bundleError_away: awayData?._bundleError ?? null,
-    _debug_roster: _rosterDebug,
+    _debug_roster: _rd,
     home: {
       teamAbv:           homeRaw,
       last10:            homeData?.last10 ?? [],
