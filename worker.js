@@ -384,7 +384,8 @@ async function handleNBATeamDetail(url, env, origin) {
   const bustCache = url.searchParams.get('bust') === '1';
   try {
     const cached = kv ? await kv.get(cacheKey, { type: 'json' }) : null;
-    if (!bustCache && cached && cached._ts && (now - cached._ts) < READ_TTL_MS && !cached._bundleError_home && !cached._bundleError_away) {
+    const cachedHasData = cached?.home?.last10?.length > 0 || cached?.away?.last10?.length > 0;
+    if (!bustCache && cached && cached._ts && (now - cached._ts) < READ_TTL_MS && cachedHasData) {
       return jsonResponse(cached, 200, origin);
     }
   } catch (e) {
@@ -575,8 +576,19 @@ function _teamDetailComputeSplit(games, side, teamAbv) {
 }
 
 async function getTeamDetailBundle(teamAbv, oppAbv, env) {
+  const hasKeys = !!(env.TANK01_API_KEY1 || env.TANK01_API_KEY2 || env.TANK01_API_KEY3 || env.TANK01_API_KEY);
+  if (!hasKeys) {
+    return {
+      _bundleError: 'TANK01_API_KEY not configured — set secret in Cloudflare dashboard',
+      last10: [], h2h: [],
+      homeSplit: { wins: 0, losses: 0, games: 0 },
+      awaySplit: { wins: 0, losses: 0, games: 0 },
+      restDays: null, avgTotal: null, last5ScoringAvg: null,
+      momentum: { last3W: 0, last10W: 0 }, boxScores: {},
+    };
+  }
   try {
-    const schedulePayload = await getNBAData('getNBATeamSchedule', { teamAbv, seasonYear: '2025' }, env);
+    const schedulePayload = await getNBAData('getNBATeamSchedule', { teamAbv }, env);
     const scheduleGames = _teamDetailScheduleArray(schedulePayload)
       .filter(_teamDetailIsCompletedGame)
       .sort((a, b) => Number(String(b?.gameDate ?? 0)) - Number(String(a?.gameDate ?? 0)));
