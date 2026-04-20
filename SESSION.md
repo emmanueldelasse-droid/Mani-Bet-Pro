@@ -35,8 +35,12 @@ Stack: CF Worker + KV + Tank01 (RapidAPI) + ESPN + Claude API + Telegram
 ## Bugs actifs
 - P1 `/health` annonce v6.31, worker v6.44
 
+## Deploy
+Auto via intégration Git CF : `git push origin main` → déploiement immédiat.
+Aucun `wrangler deploy` manuel requis.
+
 ## Hors SESSION (charger à la demande)
-- Setup/deploy/secrets/reprise nouveau compte → `.claude/onboarding.md`
+- Secrets/reprise nouveau compte → `.claude/onboarding.md`
 - Historique → `git log --oneline`
 - TODO → GitHub issues
 
