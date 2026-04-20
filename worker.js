@@ -392,20 +392,23 @@ async function handleNBATeamDetail(url, env, origin) {
     console.log('[TEAM-DETAIL] cache read fail', e?.message || e);
   }
 
-  // Rosters: cached 24h in KV — fetched FIRST to avoid rate-limiting after bundle calls
-  const ROSTER_CACHE_KEY = 'nba_rosters_teams_v1';
+  // Rosters: cached 24h in KV — fetched FIRST before bundle calls to avoid rate-limiting
+  // v2 key invalidates stale v1 cache that had empty rosters (was fetched with statsToGet=averages)
+  const ROSTER_CACHE_KEY = 'nba_rosters_teams_v2';
   const ROSTER_TTL_MS    = 24 * 60 * 60 * 1000;
   const ROSTER_TTL_S     = 24 * 60 * 60;
   let rostersData = null;
-  try {
-    const cached = kv ? await kv.get(ROSTER_CACHE_KEY, { type: 'json' }) : null;
-    if (cached?.data && cached._ts && (Date.now() - cached._ts) < ROSTER_TTL_MS) {
-      rostersData = cached.data;
-    }
-  } catch (_) {}
+  if (!bustCache) {
+    try {
+      const cached = kv ? await kv.get(ROSTER_CACHE_KEY, { type: 'json' }) : null;
+      if (cached?.data && cached._ts && (Date.now() - cached._ts) < ROSTER_TTL_MS) {
+        rostersData = cached.data;
+      }
+    } catch (_) {}
+  }
   if (!rostersData) {
-    // Use same URL as TANK01_ROSTER_URL (proven working params)
-    rostersData = await getNBAData('getNBATeams', { rosters: 'true', schedules: 'false', statsToGet: 'averages', topPerformers: 'false', teamStats: 'false' }, env).catch(() => null);
+    // No statsToGet param — returns full player rosters with ppg/stats
+    rostersData = await getNBAData('getNBATeams', { rosters: 'true', schedules: 'false', topPerformers: 'false', teamStats: 'false' }, env).catch(() => null);
     if (rostersData && kv) {
       try { await kv.put(ROSTER_CACHE_KEY, JSON.stringify({ _ts: Date.now(), data: rostersData }), { expirationTtl: ROSTER_TTL_S }); } catch (_) {}
     }
@@ -415,6 +418,8 @@ async function handleNBATeamDetail(url, env, origin) {
   const homeData = await getTeamDetailBundle(home, away, env);
   const awayData = await getTeamDetailBundle(away, home, env);
 
+  const _rd = { null: rostersData === null, n: 0, hFound: false, hSize: 0, aFound: false, aSize: 0, abvs: [], sp: null, rosterType: null };
+
   const extractTop10 = (teamAbv, rostersPayload, boxScores) => {
     try {
       // Normalise Tank01 roster response — may be array, object-of-teams, or wrapped in .body/.teams
@@ -423,9 +428,14 @@ async function handleNBATeamDetail(url, env, origin) {
       else if (Array.isArray(rostersPayload?.body))   teamsArr = rostersPayload.body;
       else if (Array.isArray(rostersPayload?.teams))  teamsArr = rostersPayload.teams;
       else if (rostersPayload && typeof rostersPayload === 'object') teamsArr = Object.values(rostersPayload);
+      if (!_rd.n) { _rd.n = teamsArr.length; _rd.abvs = teamsArr.slice(0, 5).map(t => t?.teamAbv ?? '?'); }
       const abv  = String(teamAbv || '').toUpperCase();
       const team = teamsArr.find(t => String(t?.teamAbv ?? t?.abbr ?? '').toUpperCase() === abv);
-      const roster = team?.roster || [];
+      const rr = team?.roster ?? null;
+      const roster = Array.isArray(rr) ? rr : (rr && typeof rr === 'object' ? Object.values(rr) : []);
+      if (!_rd.rosterType && rr !== null) _rd.rosterType = Array.isArray(rr) ? 'array' : typeof rr;
+      if (teamAbv === home) { _rd.hFound = !!team; _rd.hSize = roster.length; _rd.sp = roster[0] ? { name: roster[0]?.longName, ppg: roster[0]?.ppg, pts: roster[0]?.stats?.pts } : null; }
+      else                  { _rd.aFound = !!team; _rd.aSize = roster.length; }
       return buildTop10ScorersFromRoster(roster, teamAbv, boxScores);
     } catch (_) {
       return [];
@@ -444,6 +454,7 @@ async function handleNBATeamDetail(url, env, origin) {
     _ts: Date.now(),
     _bundleError_home: homeData?._bundleError ?? null,
     _bundleError_away: awayData?._bundleError ?? null,
+    _debug_roster: _rd,
     home: {
       teamAbv:           homeRaw,
       last10:            homeData?.last10 ?? [],
