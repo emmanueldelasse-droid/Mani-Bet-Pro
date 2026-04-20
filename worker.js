@@ -335,7 +335,7 @@ export default {
         return jsonResponse({
           status:    'ok',
           worker:    'mani-bet-pro',
-          version:   '6.31.0',
+          version:   '6.44.0',
           timestamp: new Date().toISOString(),
           routes: [
             'GET /nba/matches', 'GET /nba/team/:id/stats', 'GET /nba/team/:id/recent',
@@ -457,6 +457,242 @@ async function handleNBATeamDetail(url, env, origin) {
   }
 
   return jsonResponse(payload, 200, origin);
+}
+
+// ── HELPERS TEAM DETAIL (réparation v6.44) ─────────────────────────────────────
+// Ces helpers étaient appelés par handleNBATeamDetail() mais absents du fichier
+// déployé. Résultat : ReferenceError getTeamDetailBundle is not defined → 500.
+
+async function getNBAData(endpoint, params = {}, env) {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params || {})) {
+    if (v === undefined || v === null || v === '') continue;
+    qs.set(k, String(v));
+  }
+
+  const url = `${TANK01_BASE}/${endpoint}${qs.toString() ? `?${qs.toString()}` : ''}`;
+  const res = await _tank01FetchWithFallback(url, env, 15000);
+  if (!res || !res.ok) throw new Error(`Tank01 ${endpoint} ${res?.status ?? 'no_response'}`);
+  const json = await res.json();
+  return json?.body ?? json ?? null;
+}
+
+function _teamDetailSafeNum(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function _teamDetailScheduleArray(payload) {
+  const raw = payload?.schedule ?? payload?.body?.schedule ?? payload ?? [];
+  if (Array.isArray(raw)) return raw;
+  if (raw && typeof raw === 'object') return Object.values(raw);
+  return [];
+}
+
+function _teamDetailIsCompletedGame(game) {
+  const code = String(game?.gameStatusCode ?? game?.statusCode ?? game?.gameStatus ?? game?.status ?? '');
+  return ['2', '3', 'Final', 'FINAL', 'completed', 'Complete'].includes(code) ||
+    /final/i.test(String(game?.gameStatus ?? game?.status ?? ''));
+}
+
+function _teamDetailExtractGameDate(game) {
+  const raw = String(game?.gameDate ?? game?.date ?? game?.gameTime ?? '').trim();
+  if (!raw) return null;
+  if (/^\d{8}$/.test(raw)) return `${raw.slice(0,4)}-${raw.slice(4,6)}-${raw.slice(6,8)}`;
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
+
+function _teamDetailExtractScoreFromBoxScore(body, teamAbv, oppAbv) {
+  const candidates = [
+    { home: body?.homePts, away: body?.awayPts, homeAbv: body?.home, awayAbv: body?.away },
+    { home: body?.homeScore, away: body?.awayScore, homeAbv: body?.home, awayAbv: body?.away },
+    { home: body?.homeTeamScore, away: body?.awayTeamScore, homeAbv: body?.home, awayAbv: body?.away },
+    { home: body?.homeTeam?.score, away: body?.awayTeam?.score, homeAbv: body?.home, awayAbv: body?.away },
+  ];
+
+  for (const c of candidates) {
+    const home = _teamDetailSafeNum(c.home);
+    const away = _teamDetailSafeNum(c.away);
+    if (home === null || away === null) continue;
+    const homeAbv = String(c.homeAbv ?? '').toUpperCase();
+    const awayAbv = String(c.awayAbv ?? '').toUpperCase();
+    if (homeAbv && awayAbv) {
+      if (homeAbv === teamAbv && awayAbv === oppAbv) return { teamPts: home, oppPts: away, homeAway: 'home' };
+      if (awayAbv === teamAbv && homeAbv === oppAbv) return { teamPts: away, oppPts: home, homeAway: 'away' };
+    }
+  }
+  return null;
+}
+
+function _teamDetailExtractPlayerBoxScores(body) {
+  const out = [];
+  const pushLine = (line) => {
+    if (!line || typeof line !== 'object') return;
+    const name = line.longName || line.name || line.playerName || line.espnName || line.displayName || null;
+    if (!name) return;
+    out.push({
+      name,
+      team: String(line.team || line.teamAbv || line.teamID || '').toUpperCase() || null,
+      pts: _teamDetailSafeNum(line.pts ?? line.PTS ?? line.points),
+      reb: _teamDetailSafeNum(line.reb ?? line.REB ?? line.rebounds),
+      ast: _teamDetailSafeNum(line.ast ?? line.AST ?? line.assists),
+      stl: _teamDetailSafeNum(line.stl ?? line.STL ?? line.steals),
+      blk: _teamDetailSafeNum(line.blk ?? line.BLK ?? line.blocks),
+    });
+  };
+
+  const containers = [body?.playerStats, body?.homePlayers, body?.awayPlayers, body?.players, body?.home?.players, body?.away?.players];
+  for (const container of containers) {
+    if (!container) continue;
+    if (Array.isArray(container)) {
+      container.forEach(pushLine);
+    } else if (typeof container === 'object') {
+      Object.values(container).forEach(pushLine);
+    }
+  }
+  return out;
+}
+
+function _teamDetailComputeSplit(games, side, teamAbv) {
+  const filtered = games.filter(g => {
+    const home = String(g?.home ?? '').toUpperCase();
+    const away = String(g?.away ?? '').toUpperCase();
+    return side === 'home' ? home === teamAbv : away === teamAbv;
+  });
+  const wins = filtered.filter(g => {
+    const homeScore = _teamDetailSafeNum(g?.homeTeamScore ?? g?.homePts ?? g?.homeScore);
+    const awayScore = _teamDetailSafeNum(g?.awayTeamScore ?? g?.awayPts ?? g?.awayScore);
+    if (homeScore === null || awayScore === null) return false;
+    return side === 'home' ? homeScore > awayScore : awayScore > homeScore;
+  }).length;
+  return { wins, losses: Math.max(0, filtered.length - wins), games: filtered.length };
+}
+
+async function getTeamDetailBundle(teamAbv, oppAbv, env) {
+  try {
+    const schedulePayload = await getNBAData('getNBATeamSchedule', { teamAbv }, env);
+    const scheduleGames = _teamDetailScheduleArray(schedulePayload)
+      .filter(_teamDetailIsCompletedGame)
+      .sort((a, b) => Number(String(b?.gameDate ?? 0)) - Number(String(a?.gameDate ?? 0)));
+
+    const last10Raw = scheduleGames.slice(0, 10);
+    const last10GameIds = last10Raw.map(g => g?.gameID).filter(Boolean);
+
+    const boxScoreEntries = await Promise.all(last10GameIds.map(async (gameID) => {
+      try {
+        const body = await getNBAData('getNBABoxScore', { gameID }, env);
+        return [gameID, body];
+      } catch (_) {
+        return [gameID, null];
+      }
+    }));
+    const boxScores = Object.fromEntries(boxScoreEntries);
+
+    const last10 = last10Raw.map((game) => {
+      const gameID = game?.gameID;
+      const home = String(game?.home ?? '').toUpperCase();
+      const away = String(game?.away ?? '').toUpperCase();
+      const opponent = home === teamAbv ? away : home;
+      const fromBox = gameID ? _teamDetailExtractScoreFromBoxScore(boxScores[gameID] ?? {}, teamAbv, opponent) : null;
+      const homeScore = _teamDetailSafeNum(game?.homeTeamScore ?? game?.homePts ?? game?.homeScore);
+      const awayScore = _teamDetailSafeNum(game?.awayTeamScore ?? game?.awayPts ?? game?.awayScore);
+      const homeAway = fromBox?.homeAway ?? (home === teamAbv ? 'home' : 'away');
+      const teamPts = fromBox?.teamPts ?? (homeAway === 'home' ? homeScore : awayScore);
+      const oppPts = fromBox?.oppPts ?? (homeAway === 'home' ? awayScore : homeScore);
+      const result = teamPts !== null && oppPts !== null ? (teamPts > oppPts ? 'W' : 'L') : null;
+      return {
+        gameID,
+        date: _teamDetailExtractGameDate(game),
+        opponent,
+        homeAway,
+        result,
+        teamPts,
+        oppPts,
+      };
+    });
+
+    const h2h = last10.filter(g => g.opponent === oppAbv).slice(0, 5);
+    const homeSplit = _teamDetailComputeSplit(scheduleGames, 'home', teamAbv);
+    const awaySplit = _teamDetailComputeSplit(scheduleGames, 'away', teamAbv);
+
+    let restDays = null;
+    if (last10[0]?.date) {
+      const d = new Date(`${last10[0].date}T00:00:00Z`);
+      const diff = Math.floor((Date.now() - d.getTime()) / 86400000);
+      restDays = Number.isFinite(diff) ? Math.max(0, diff) : null;
+    }
+
+    const totals = last10.map(g => (g.teamPts !== null && g.oppPts !== null) ? g.teamPts + g.oppPts : null).filter(v => v !== null);
+    const teamLast5 = last10.slice(0, 5).map(g => g.teamPts).filter(v => v !== null);
+    const avgTotal = totals.length ? Math.round((totals.reduce((a, b) => a + b, 0) / totals.length) * 10) / 10 : null;
+    const last5ScoringAvg = teamLast5.length ? Math.round((teamLast5.reduce((a, b) => a + b, 0) / teamLast5.length) * 10) / 10 : null;
+    const momentum = {
+      last3W: last10.slice(0, 3).filter(g => g.result === 'W').length,
+      last10W: last10.filter(g => g.result === 'W').length,
+    };
+
+    return {
+      last10,
+      h2h,
+      homeSplit,
+      awaySplit,
+      restDays,
+      avgTotal,
+      last5ScoringAvg,
+      momentum,
+      boxScores,
+    };
+  } catch (err) {
+    console.warn('[TEAM-DETAIL] getTeamDetailBundle error', teamAbv, oppAbv, err?.message || err);
+    return {
+      last10: [],
+      h2h: [],
+      homeSplit: { wins: 0, losses: 0, games: 0 },
+      awaySplit: { wins: 0, losses: 0, games: 0 },
+      restDays: null,
+      avgTotal: null,
+      last5ScoringAvg: null,
+      momentum: { last3W: 0, last10W: 0 },
+      boxScores: {},
+    };
+  }
+}
+
+function buildTop10ScorersFromRoster(roster, teamAbv, boxScores = {}) {
+  const players = (Array.isArray(roster) ? roster : Object.values(roster || {})).map((p) => {
+    const seasonPpg = _teamDetailSafeNum(p?.ppg ?? p?.pts ?? p?.stats?.pts ?? p?.stats?.PTS);
+    const reb = _teamDetailSafeNum(p?.stats?.reb ?? p?.stats?.REB ?? p?.reb);
+    const ast = _teamDetailSafeNum(p?.stats?.ast ?? p?.stats?.AST ?? p?.ast);
+    const stl = _teamDetailSafeNum(p?.stats?.stl ?? p?.stats?.STL ?? p?.stl);
+    const blk = _teamDetailSafeNum(p?.stats?.blk ?? p?.stats?.BLK ?? p?.blk);
+    const name = p?.longName ?? p?.espnName ?? p?.displayName ?? p?.name ?? 'Unknown';
+
+    const last5Lines = Object.values(boxScores || {})
+      .flatMap((body) => _teamDetailExtractPlayerBoxScores(body || {}))
+      .filter((line) => (!line.team || line.team === String(teamAbv || '').toUpperCase()) && _normalizeName(line.name) === _normalizeName(name))
+      .slice(0, 5);
+
+    const last5Ppg = last5Lines.length
+      ? Math.round((last5Lines.reduce((sum, line) => sum + (line.pts ?? 0), 0) / last5Lines.length) * 10) / 10
+      : null;
+
+    return {
+      playerID: p?.playerID ?? null,
+      name,
+      team: teamAbv,
+      ppg: seasonPpg,
+      last5_ppg: last5Ppg,
+      reb,
+      ast,
+      stl,
+      blk,
+    };
+  });
+
+  return players
+    .sort((a, b) => (b.ppg ?? -999) - (a.ppg ?? -999))
+    .slice(0, 10);
 }
 
 // ── HANDLER : MATCHS (ESPN) ───────────────────────────────────────────────────
@@ -4614,4 +4850,3 @@ async function handleMLBBotSettleLogs(request, env, origin) {
     return jsonResponse({ success: true, settled }, 200, origin);
   } catch (err) { return jsonResponse({ error: err.message }, 500, origin); }
 }
-
