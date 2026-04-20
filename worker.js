@@ -632,9 +632,36 @@ async function getTeamDetailBundle(teamAbv, oppAbv, env) {
       .sort((a, b) => Number(String(b?.gameDate ?? 0)) - Number(String(a?.gameDate ?? 0)));
 
     const last10Raw = scheduleGames.slice(0, 10);
-    // No box score fetches — schedule data includes teamScore/oppScore/gameResult.
-    // This keeps calls to 1 per bundle and avoids Tank01 rate limits.
+    // Box scores : 5 derniers matchs, cache KV 7j par gameID (finals never change).
+    // Worst case ~5 Tank01 calls/équipe au premier hit, quasi 0 ensuite.
     const boxScores = {};
+    const kvBox = env.PAPER_TRADING;
+    const BOX_TTL_S = 7 * 24 * 60 * 60;
+    const gameIDsForBox = last10Raw.slice(0, 5).map(g => g?.gameID).filter(Boolean);
+    for (const gameID of gameIDsForBox) {
+      try {
+        const cacheKey = `box_score_v1_${gameID}`;
+        let body = null;
+        if (kvBox) {
+          const cached = await kvBox.get(cacheKey, { type: 'json' });
+          if (cached) body = cached;
+        }
+        if (!body) {
+          const res = await _tank01FetchWithFallback(
+            `${TANK01_BASE}/getNBABoxScore?gameID=${encodeURIComponent(gameID)}`,
+            env, 10000
+          );
+          if (res && res.ok) {
+            const json = await res.json();
+            body = json?.body ?? json ?? null;
+            if (body && kvBox) {
+              try { await kvBox.put(cacheKey, JSON.stringify(body), { expirationTtl: BOX_TTL_S }); } catch (_) {}
+            }
+          }
+        }
+        if (body) boxScores[gameID] = body;
+      } catch (_) {}
+    }
 
     const last10 = last10Raw.map((game) => {
       const gameID = game?.gameID;

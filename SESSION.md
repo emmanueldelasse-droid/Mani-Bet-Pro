@@ -29,12 +29,11 @@ Stack: CF Worker + KV + Tank01 (RapidAPI) + ESPN + Claude API + Telegram
 - Quota limité → cache 24h KV obligatoire rosters
 - `?bust=1` vide cache team-detail + roster
 - Cache team-detail 6h/8h · roster 24h
-- Box scores retirés (rate-limit) → `last5_ppg` toujours null
+- Box scores: 5 derniers/équipe cachés KV 7j par `gameID` → `last5_ppg` actif, ~5 calls max premier hit, ~0 ensuite
 - Bundle calls séquentiels (anti rate-limit)
 
 ## Bugs actifs
 - P1 `/health` annonce v6.31, worker v6.44
-- P1 `last5_ppg` top10 null
 
 ## Hors SESSION (charger à la demande)
 - Setup/deploy/secrets/reprise nouveau compte → `.claude/onboarding.md`
