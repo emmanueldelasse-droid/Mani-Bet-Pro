@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git commit *)",
+            "command": "echo '{\"hookSpecificOutput\": {\"hookEventName\": \"PostToolUse\", \"additionalContext\": \"RAPPEL OBLIGATOIRE : Tu viens de faire un commit. Mets a jour SESSION.md maintenant — section Derniere session (taches accomplies, bugs resolus, fichiers modifies), section Etat actuel, et Prochaine etape prioritaire. Ensuite commite SESSION.md (git add SESSION.md && git commit) et pushe la branche.\"}}'",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -119,6 +119,7 @@
 
 ## Notes permanentes
 
+- **RÈGLE OBLIGATOIRE** : Mettre à jour ce fichier après chaque modification importante (commit de code). Sections à mettre à jour : `Dernière mise à jour`, `Dernière session` (tâches, bugs, fichiers), `État actuel`, `Prochaine étape prioritaire`. Un hook Claude Code est configuré dans `.claude/settings.json` pour rappeler cette règle automatiquement après chaque `git commit`.
 - Ne jamais afficher de prix fictifs ou périmés — toujours un état de chargement
 - Les abréviations Tank01 non-standard (GS, NO, NY, SA) sont CORRECTES — ne pas les "corriger"
 - Ces abréviations DOIVENT être présentes dans `BU_DEBUG_TEAMS` pour que le scoring Basket USA fonctionne
