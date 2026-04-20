@@ -392,11 +392,7 @@ async function handleNBATeamDetail(url, env, origin) {
     console.log('[TEAM-DETAIL] cache read fail', e?.message || e);
   }
 
-  // Sequential to avoid Tank01 rate limits (~11 calls per bundle)
-  const homeData = await getTeamDetailBundle(home, away, env);
-  const awayData = await getTeamDetailBundle(away, home, env);
-
-  // Rosters cached 24h in KV to avoid burning a 3rd Tank01 call on every team-detail fetch
+  // Rosters: cached 24h in KV — fetched FIRST to avoid rate-limiting after bundle calls
   const ROSTER_CACHE_KEY = 'nba_rosters_teams_v1';
   const ROSTER_TTL_MS    = 24 * 60 * 60 * 1000;
   const ROSTER_TTL_S     = 24 * 60 * 60;
@@ -408,11 +404,16 @@ async function handleNBATeamDetail(url, env, origin) {
     }
   } catch (_) {}
   if (!rostersData) {
-    rostersData = await getNBAData('getNBATeams', { rosters: 'true', schedules: 'false', topPerformers: 'false', teamStats: 'true' }, env).catch(() => null);
+    // Use same URL as TANK01_ROSTER_URL (proven working params)
+    rostersData = await getNBAData('getNBATeams', { rosters: 'true', schedules: 'false', statsToGet: 'averages', topPerformers: 'false', teamStats: 'false' }, env).catch(() => null);
     if (rostersData && kv) {
       try { await kv.put(ROSTER_CACHE_KEY, JSON.stringify({ _ts: Date.now(), data: rostersData }), { expirationTtl: ROSTER_TTL_S }); } catch (_) {}
     }
   }
+
+  // Sequential to avoid Tank01 rate limits
+  const homeData = await getTeamDetailBundle(home, away, env);
+  const awayData = await getTeamDetailBundle(away, home, env);
 
   const extractTop10 = (teamAbv, rostersPayload, boxScores) => {
     try {
