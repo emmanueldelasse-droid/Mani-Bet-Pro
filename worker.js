@@ -393,16 +393,37 @@ async function handleNBATeamDetail(url, env, origin) {
   }
 
   // Sequential to avoid Tank01 rate limits (~11 calls per bundle)
-  const homeData    = await getTeamDetailBundle(home, away, env);
-  const awayData    = await getTeamDetailBundle(away, home, env);
-  const rostersData = await getNBAData('getNBATeams', { rosters: 'true', schedules: 'false', topPerformers: 'false', teamStats: 'true' }, env).catch(() => null);
+  const homeData = await getTeamDetailBundle(home, away, env);
+  const awayData = await getTeamDetailBundle(away, home, env);
+
+  // Rosters cached 24h in KV to avoid burning a 3rd Tank01 call on every team-detail fetch
+  const ROSTER_CACHE_KEY = 'nba_rosters_teams_v1';
+  const ROSTER_TTL_MS    = 24 * 60 * 60 * 1000;
+  const ROSTER_TTL_S     = 24 * 60 * 60;
+  let rostersData = null;
+  try {
+    const cached = kv ? await kv.get(ROSTER_CACHE_KEY, { type: 'json' }) : null;
+    if (cached?.data && cached._ts && (Date.now() - cached._ts) < ROSTER_TTL_MS) {
+      rostersData = cached.data;
+    }
+  } catch (_) {}
+  if (!rostersData) {
+    rostersData = await getNBAData('getNBATeams', { rosters: 'true', schedules: 'false', topPerformers: 'false', teamStats: 'true' }, env).catch(() => null);
+    if (rostersData && kv) {
+      try { await kv.put(ROSTER_CACHE_KEY, JSON.stringify({ _ts: Date.now(), data: rostersData }), { expirationTtl: ROSTER_TTL_S }); } catch (_) {}
+    }
+  }
 
   const extractTop10 = (teamAbv, rostersPayload, boxScores) => {
     try {
-      const teams = rostersPayload?.body || rostersPayload || [];
-      const team = Array.isArray(teams)
-        ? teams.find(t => String(t.teamAbv || '').toUpperCase() === String(teamAbv || '').toUpperCase())
-        : null;
+      // Normalise Tank01 roster response — may be array, object-of-teams, or wrapped in .body/.teams
+      let teamsArr = [];
+      if (Array.isArray(rostersPayload))              teamsArr = rostersPayload;
+      else if (Array.isArray(rostersPayload?.body))   teamsArr = rostersPayload.body;
+      else if (Array.isArray(rostersPayload?.teams))  teamsArr = rostersPayload.teams;
+      else if (rostersPayload && typeof rostersPayload === 'object') teamsArr = Object.values(rostersPayload);
+      const abv  = String(teamAbv || '').toUpperCase();
+      const team = teamsArr.find(t => String(t?.teamAbv ?? t?.abbr ?? '').toUpperCase() === abv);
       const roster = team?.roster || [];
       return buildTop10ScorersFromRoster(roster, teamAbv, boxScores);
     } catch (_) {
@@ -496,8 +517,12 @@ function _teamDetailScheduleArray(payload) {
 
 function _teamDetailIsCompletedGame(game) {
   const code = String(game?.gameStatusCode ?? game?.statusCode ?? game?.gameStatus ?? game?.status ?? '');
-  return ['2', '3', 'Final', 'FINAL', 'completed', 'Complete'].includes(code) ||
-    /final/i.test(String(game?.gameStatus ?? game?.status ?? ''));
+  if (['2', '3', 'Final', 'FINAL', 'completed', 'Completed', 'Complete', 'STATUS_FINAL', 'post'].includes(code)) return true;
+  if (/final|complet/i.test(code)) return true;
+  // Fallback: game has valid scores → must be finished
+  const ts = Number(game?.teamScore ?? game?.homeTeamScore ?? game?.homePts);
+  const os = Number(game?.oppScore  ?? game?.awayTeamScore ?? game?.awayPts);
+  return Number.isFinite(ts) && Number.isFinite(os) && ts > 0 && os > 0;
 }
 
 function _teamDetailExtractGameDate(game) {
@@ -565,11 +590,21 @@ function _teamDetailComputeSplit(games, side, teamAbv) {
     const away = String(g?.away ?? '').toUpperCase();
     return side === 'home' ? home === teamAbv : away === teamAbv;
   });
+  if (!filtered.length) return null;
   const wins = filtered.filter(g => {
+    // Try absolute scores first
     const homeScore = _teamDetailSafeNum(g?.homeTeamScore ?? g?.homePts ?? g?.homeScore);
     const awayScore = _teamDetailSafeNum(g?.awayTeamScore ?? g?.awayPts ?? g?.awayScore);
-    if (homeScore === null || awayScore === null) return false;
-    return side === 'home' ? homeScore > awayScore : awayScore > homeScore;
+    if (homeScore !== null && awayScore !== null) {
+      return side === 'home' ? homeScore > awayScore : awayScore > homeScore;
+    }
+    // Fallback: team-relative scores (teamScore > oppScore means the team won)
+    const teamScore = _teamDetailSafeNum(g?.teamScore);
+    const oppScore  = _teamDetailSafeNum(g?.oppScore);
+    if (teamScore !== null && oppScore !== null) return teamScore > oppScore;
+    // Last resort: gameResult field
+    const r = String(g?.gameResult ?? g?.result ?? '');
+    return r.startsWith('W');
   }).length;
   return { wins, losses: Math.max(0, filtered.length - wins), games: filtered.length };
 }
