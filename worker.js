@@ -1351,6 +1351,11 @@ const BU_DEBUG_TEAMS = {
   TOR: ['toronto raptors', 'toronto', 'raptors'],
   UTA: ['utah jazz', 'utah', 'jazz'],
   WAS: ['washington wizards', 'washington', 'wizards'],
+  // Abréviations non-standard Tank01 — même aliases que leurs équivalents standard
+  GS:  ['golden state warriors', 'golden state', 'warriors', 'gsw'],
+  NO:  ['new orleans pelicans', 'new orleans', 'pelicans', 'pels'],
+  NY:  ['new york knicks', 'new york', 'knicks', 'ny knicks'],
+  SA:  ['san antonio spurs', 'san antonio', 'spurs'],
 };
 
 function _buNormalizeText(input = '') {
@@ -1626,12 +1631,25 @@ function _buildLatestGameSummary(teamAbv, game) {
 }
 
 async function handleDebugBasketUSA(url, env, origin) {
-  const home = String(url.searchParams.get('home') ?? '').toUpperCase();
-  const away = String(url.searchParams.get('away') ?? '').toUpperCase();
+  const home     = String(url.searchParams.get('home') ?? '').toUpperCase();
+  const away     = String(url.searchParams.get('away') ?? '').toUpperCase();
+  const noCache  = url.searchParams.get('no_cache') === '1';
 
   if (!home || !away) {
-    return jsonResponse({ error: 'home and away params required' }, 400, origin);
+    return jsonResponse({ error: 'home and away params required — ex: /debug/basketusa?home=GS&away=BOS' }, 400, origin);
   }
+
+  // Efface le cache KV de la paire si no_cache=1
+  if (noCache && env?.PAPER_TRADING) {
+    const key1 = `basketusa_best_v3_${home}_${away}`;
+    const key2 = `basketusa_best_v3_${away}_${home}`;
+    try {
+      await Promise.all([env.PAPER_TRADING.delete(key1), env.PAPER_TRADING.delete(key2)]);
+    } catch (_) {}
+  }
+
+  const homeAliases = BU_DEBUG_TEAMS[home] ?? [];
+  const awayAliases = BU_DEBUG_TEAMS[away] ?? [];
 
   const pages = [
     'https://www.basketusa.com/',
@@ -1737,6 +1755,11 @@ async function handleDebugBasketUSA(url, env, origin) {
   return jsonResponse({
     home,
     away,
+    home_aliases_found: homeAliases.length > 0,
+    away_aliases_found: awayAliases.length > 0,
+    home_aliases: homeAliases,
+    away_aliases: awayAliases,
+    cache_cleared: noCache,
     fetched,
     total_candidates: scored.length,
     top_candidates: scored.slice(0, 20),
