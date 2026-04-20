@@ -516,7 +516,7 @@ function _teamDetailScheduleArray(payload) {
 }
 
 function _teamDetailIsCompletedGame(game) {
-  const code = String(game?.gameStatusCode ?? game?.statusCode ?? game?.gameStatus ?? game?.status ?? '');
+  const code = String(game?.gameStatusCode ?? game?.statusCode ?? game?.gameStatus ?? game?.status ?? '').trim();
   if (['2', '3', 'Final', 'FINAL', 'completed', 'Completed', 'Complete', 'STATUS_FINAL', 'post'].includes(code)) return true;
   if (/final|complet/i.test(code)) return true;
   // Fallback: game has valid scores → must be finished
@@ -586,8 +586,8 @@ function _teamDetailExtractPlayerBoxScores(body) {
 
 function _teamDetailComputeSplit(games, side, teamAbv) {
   const filtered = games.filter(g => {
-    const home = String(g?.home ?? '').toUpperCase();
-    const away = String(g?.away ?? '').toUpperCase();
+    const home = String(g?.home ?? '').trim().toUpperCase();
+    const away = String(g?.away ?? '').trim().toUpperCase();
     return side === 'home' ? home === teamAbv : away === teamAbv;
   });
   if (!filtered.length) return null;
@@ -634,8 +634,8 @@ async function getTeamDetailBundle(teamAbv, oppAbv, env) {
 
     const last10 = last10Raw.map((game) => {
       const gameID = game?.gameID;
-      const home = String(game?.home ?? '').toUpperCase();
-      const away = String(game?.away ?? '').toUpperCase();
+      const home = String(game?.home ?? '').trim().toUpperCase();
+      const away = String(game?.away ?? '').trim().toUpperCase();
       const opponent = home === teamAbv ? away : home;
       const homeAway = home === teamAbv ? 'home' : 'away';
       // Use schedule-level scores: teamScore/oppScore are team-relative,
