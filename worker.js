@@ -393,8 +393,8 @@ async function handleNBATeamDetail(url, env, origin) {
   }
 
   // Rosters: cached 24h in KV — fetched FIRST before bundle calls to avoid rate-limiting
-  // v2 key invalidates stale v1 cache that had empty rosters (was fetched with statsToGet=averages)
-  const ROSTER_CACHE_KEY = 'nba_rosters_teams_v2';
+  // v3 key : v2 avait rosters mais sans stats joueurs (statsToGet=averages manquait)
+  const ROSTER_CACHE_KEY = 'nba_rosters_teams_v3';
   const ROSTER_TTL_MS    = 24 * 60 * 60 * 1000;
   const ROSTER_TTL_S     = 24 * 60 * 60;
   let rostersData = null;
@@ -407,8 +407,8 @@ async function handleNBATeamDetail(url, env, origin) {
     } catch (_) {}
   }
   if (!rostersData) {
-    // No statsToGet param — returns full player rosters with ppg/stats
-    rostersData = await getNBAData('getNBATeams', { rosters: 'true', schedules: 'false', topPerformers: 'false', teamStats: 'false' }, env).catch(() => null);
+    // statsToGet=averages nécessaire pour obtenir ppg/reb/ast par joueur (sinon stats vides)
+    rostersData = await getNBAData('getNBATeams', { rosters: 'true', schedules: 'false', statsToGet: 'averages', topPerformers: 'false', teamStats: 'false' }, env).catch(() => null);
     if (rostersData && kv) {
       try { await kv.put(ROSTER_CACHE_KEY, JSON.stringify({ _ts: Date.now(), data: rostersData }), { expirationTtl: ROSTER_TTL_S }); } catch (_) {}
     }
