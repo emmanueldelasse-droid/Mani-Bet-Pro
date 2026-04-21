@@ -667,12 +667,12 @@ function _createMatchCard(match) {
     <div id="best-rec-${match.id}" style="display:none"></div>
     <div id="recs-${match.id}" class="match-card__recs" style="display:none"></div>
     <div id="bet-indicator-${match.id}" style="margin-top:6px"></div>
-    <button class="mc-footer__cta match-card__cta" data-match-id="${match.id}" data-analysis-id="">Voir l'analyse →</button>
   `;
 
-  card.querySelector('.match-card__cta').addEventListener('click', (e) => {
-    e.stopPropagation();
-    router.navigate('match', { matchId: e.currentTarget.dataset.matchId, analysisId: e.currentTarget.dataset.analysisId || null });
+  card.style.cursor = 'pointer';
+  card.addEventListener('click', (e) => {
+    if (e.target.closest('button')) return;
+    router.navigate('match', { matchId: card.dataset.matchId, analysisId: card.dataset.analysisId || null });
   });
 
   return card;
@@ -695,8 +695,6 @@ function _updateMatchCard(list, matchId, analysis, match, ptState) {
   }
 
   card.dataset.analysisId = analysis.analysis_id ?? '';
-  const cta = card.querySelector('.match-card__cta');
-  if (cta) cta.dataset.analysisId = analysis.analysis_id ?? '';
 
   const borderColors = { ANALYSER: 'var(--color-success)', EXPLORER: 'var(--color-warning)' };
   const borderColor = borderColors[decision];
