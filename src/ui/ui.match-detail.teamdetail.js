@@ -749,10 +749,13 @@ function _openTeamModal(teamAbv, teamName, record, stats, detail, top10, last10,
     const injBadge = inj
       ? `<span style="font-size:9px;color:#ef4444;font-weight:700;margin-left:4px">${inj.status === 'Out' ? 'OUT' : 'DTD'}</span>`
       : '';
+    const ppgVal = p.ppg ?? p.pts ?? null;
+    const l5Val  = p.last5_ppg ?? null;
+    const l5Str  = l5Val != null ? ` <span style="font-size:10px;color:var(--color-text-secondary)">(L5: ${l5Val.toFixed(1)})</span>` : '';
     return `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--color-border)">
-        <span style="font-size:12px">${p.pts >= 20 ? '⭐ ' : ''}${p.name}${injBadge}</span>
-        <span style="font-size:12px;font-weight:700;color:var(--color-signal)">${p.pts?.toFixed(1)} pts</span>
+        <span style="font-size:12px">${(ppgVal ?? 0) >= 20 ? '⭐ ' : ''}${p.name}${injBadge}</span>
+        <span style="font-size:12px;font-weight:700;color:var(--color-signal)">${ppgVal != null ? ppgVal.toFixed(1) : '—'} pts${l5Str}</span>
       </div>`;
   }).join('');
 
@@ -784,13 +787,16 @@ function _openTeamModal(teamAbv, teamName, record, stats, detail, top10, last10,
         </div>
       </div>
 
-      <!-- Playoffs -->
+      <!-- Forme / Momentum -->
       <div style="background:var(--color-bg);border-radius:10px;padding:12px;margin-bottom:14px">
-        <div style="font-size:10px;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;margin-bottom:8px">🏆 Playoffs 2026</div>
-        <div style="font-size:12px;color:var(--color-text-secondary)">
-          ${detail.playoffRecord
-            ? `<strong style="color:var(--color-text)">${detail.playoffRecord}</strong>`
-            : 'Pas encore commencé · débute le 18 avril'}
+        <div style="font-size:10px;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;margin-bottom:8px">Scoring récent</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          ${_statPill('Moy. 5 dern.', detail.last5ScoringAvg != null ? detail.last5ScoringAvg.toFixed(1) : '—')}
+          ${_statPill('V/3 derniers', detail.momentum?.last3W != null ? `${detail.momentum.last3W}/3` : '—')}
+          ${_statPill('V/10 derniers', detail.momentum?.last10W != null ? `${detail.momentum.last10W}/10` : '—')}
+          ${_statPill('Repos (jours)', detail.restDays != null ? String(detail.restDays) : '—')}
+          ${_statPill('Moy. total L10', avgTotal)}
+          ${_statPill('Pts encaissés', encaisse !== '—' ? encaisse : '—')}
         </div>
       </div>
 
