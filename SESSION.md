@@ -1,7 +1,7 @@
 # Mani Bet Pro
 
 ## État
-Worker `manibetpro` v6.45 · `manibetpro.workers.dev`
+Worker `manibetpro` v6.47 · `manibetpro.workers.dev`
 Front: GitHub Pages · KV `PAPER_TRADING` id=`17eb7ddc41a949dd99bd840142832cfd`
 Stack: CF Worker + KV + Tank01 (RapidAPI) + ESPN + Claude API + Telegram
 
@@ -38,7 +38,7 @@ Stack: CF Worker + KV + Tank01 (RapidAPI) + ESPN + Claude API + Telegram
 - `line_movement` dans logs · snapshot horaire KV → sharp detect
 
 ## Bugs actifs
-- P1 `/health` annonce v6.31, worker v6.45
+- néant
 
 ## Deploy
 Auto via intégration Git CF : `git push origin main` → déploiement immédiat.
