@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — Cloudflare Worker v6.51
+ * MANI BET PRO — Cloudflare Worker v6.52
  *
  * CORRECTIONS v6.39 :
  *   1. Fix critique bot — emaLambda non défini dans _botEngineCompute.
@@ -140,6 +140,40 @@ const NAME_ALIASES = {
   'alexandre sarr': 'alex sarr',
   'nahshon hyland': 'bones hyland',
 };
+
+// Extrait un objet JSON d'un texte qui peut contenir de la prose autour.
+// Essaie parsing direct, puis bloc ```json```, puis premier {…} balancé.
+function _extractJSONFromText(text) {
+  if (!text || typeof text !== 'string') return null;
+  const cleaned = text.replace(/```json|```/g, '').trim();
+
+  // Essai 1 : parse direct
+  try { return JSON.parse(cleaned); } catch (_) {}
+
+  // Essai 2 : trouver le premier { et matcher les accolades balancées
+  const firstBrace = cleaned.indexOf('{');
+  if (firstBrace === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = firstBrace; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    if (escape) { escape = false; continue; }
+    if (ch === '\\') { escape = true; continue; }
+    if (ch === '"') inString = !inString;
+    if (inString) continue;
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        const block = cleaned.slice(firstBrace, i + 1);
+        try { return JSON.parse(block); } catch (_) { return null; }
+      }
+    }
+  }
+  return null;
+}
 
 function _normalizeName(name) {
   if (!name) return '';
@@ -353,7 +387,7 @@ export default {
         return jsonResponse({
           status:    'ok',
           worker:    'mani-bet-pro',
-          version:   '6.51.0',
+          version:   '6.52.0',
           timestamp: new Date().toISOString(),
           routes: [
             'GET /nba/matches', 'GET /nba/team/:id/stats', 'GET /nba/team/:id/recent',
@@ -1484,13 +1518,25 @@ async function handleNBAAIPlayerPropsBatch(request, env, origin) {
   }
 
   const compactGames = games.map(g => `${g.away}@${g.home}`).join(', ');
-  const systemPrompt = `Tu trouves les lignes "points joueur O/U" NBA publiées pour ce soir. Sources prioritaires : actionnetwork.com/nba/player-props, covers.com/sports/nba/player-props, rotowire.com/basketball/nba-player-props, draftkings.com/sportsbook. Uniquement joueurs avec ppg≥15 saison. Lignes format décimal .5 (ex 24.5, 30.5). Si plusieurs sources pour un joueur, prends la médiane. Si aucune source fiable, omets le joueur. Réponds uniquement en JSON valide, pas de texte libre.`;
+  const systemPrompt = `Tu es une API qui retourne STRICTEMENT du JSON. Jamais de texte libre, jamais d'explications, jamais de préambule. Recherche les lignes "points joueur O/U" NBA publiées pour ce soir sur actionnetwork.com, covers.com, rotowire.com, draftkings.com, espn.com. Uniquement joueurs ppg≥15 saison. Lignes format décimal (.5). Si aucune donnée trouvée, retourne la structure JSON avec des tableaux vides.
+
+RÈGLES ABSOLUES :
+- Ta réponse DOIT commencer par { et finir par }
+- AUCUN texte hors du JSON (pas "Voici", pas "Based on", pas "Je trouve")
+- Si tu ne trouves rien, players:[] pour chaque match
+- JAMAIS d'explication après le JSON`;
+
   const userPrompt = `Date:${date.slice(0,4)}-${date.slice(4,6)}-${date.slice(6,8)}
 Matchs:${compactGames}
-Pour chaque match, trouve les lignes "player points O/U" des stars (ppg≥15).
-Retourne exactement :
-{"games":[{"game":"AWY@HOME","players":[{"name":"LeBron James","team":"LAL","line":25.5,"source":"actionnetwork.com","confidence":"high|medium|low"}]}]}
-Tableau vide players si aucune ligne trouvée. Max 6 joueurs/match.`;
+
+Trouve les lignes over/under points des stars (ppg≥15 saison).
+
+SCHÉMA OBLIGATOIRE (copie strictement) :
+{"games":[{"game":"AWY@HOME","players":[{"name":"","team":"","line":24.5,"source":"","confidence":"high"}]}]}
+
+Si match trouvé avec 0 ligne → players:[]. Max 6 joueurs/match. Ligne entre 4 et 55.
+
+RÉPONDS UNIQUEMENT AVEC LE JSON. RIEN D'AUTRE.`;
 
   try {
     const textContent = await _callClaudeWithWebSearch(env.CLAUDE_API_KEY, systemPrompt, userPrompt, 2500);
@@ -1498,13 +1544,15 @@ Tableau vide players si aucune ligne trouvée. Max 6 joueurs/match.`;
       return jsonResponse({ available: false, note: 'Claude returned no content' }, 200, origin);
     }
 
-    const cleaned = textContent.replace(/```json|```/g, '').trim();
-    let parsed;
-    try {
-      parsed = JSON.parse(cleaned);
-    } catch (err) {
-      console.warn('AIProps JSON parse fail:', err.message, cleaned.slice(0, 200));
-      return jsonResponse({ available: false, note: 'invalid_json', raw_preview: cleaned.slice(0, 200) }, 200, origin);
+    const parsed = _extractJSONFromText(textContent);
+    if (!parsed) {
+      console.warn('AIProps JSON extraction fail, raw preview:', textContent.slice(0, 200));
+      return jsonResponse({
+        available:   false,
+        note:        'invalid_json',
+        raw_preview: textContent.slice(0, 500),
+        hint:        'Claude a répondu en texte libre au lieu de JSON. Essaye à nouveau, le prompt a été durci.',
+      }, 200, origin);
     }
 
     const byGame = {};
