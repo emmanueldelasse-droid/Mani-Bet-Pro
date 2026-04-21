@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — Cloudflare Worker v6.46
+ * MANI BET PRO — Cloudflare Worker v6.47
  *
  * CORRECTIONS v6.39 :
  *   1. Fix critique bot — emaLambda non défini dans _botEngineCompute.
@@ -343,7 +343,7 @@ export default {
         return jsonResponse({
           status:    'ok',
           worker:    'mani-bet-pro',
-          version:   '6.46.0',
+          version:   '6.47.0',
           timestamp: new Date().toISOString(),
           routes: [
             'GET /nba/matches', 'GET /nba/team/:id/stats', 'GET /nba/team/:id/recent',
@@ -426,25 +426,8 @@ async function handleNBATeamDetail(url, env, origin) {
   const homeData = await getTeamDetailBundle(home, away, env);
   const awayData = await getTeamDetailBundle(away, home, env);
 
-  const extractTop10 = (teamAbv, rostersPayload, boxScores) => {
-    try {
-      let teamsArr = [];
-      if (Array.isArray(rostersPayload))              teamsArr = rostersPayload;
-      else if (Array.isArray(rostersPayload?.body))   teamsArr = rostersPayload.body;
-      else if (Array.isArray(rostersPayload?.teams))  teamsArr = rostersPayload.teams;
-      else if (rostersPayload && typeof rostersPayload === 'object') teamsArr = Object.values(rostersPayload);
-      const abv  = String(teamAbv || '').toUpperCase();
-      const team = teamsArr.find(t => String(t?.teamAbv ?? t?.abbr ?? '').toUpperCase() === abv);
-      const rr = team?.Roster ?? team?.roster ?? null;
-      const roster = Array.isArray(rr) ? rr : (rr && typeof rr === 'object' ? Object.values(rr) : []);
-      return buildTop10ScorersFromRoster(roster, teamAbv, boxScores);
-    } catch (_) {
-      return [];
-    }
-  };
-
-  const homeTop10 = extractTop10(home, rostersData, homeData?.boxScores);
-  const awayTop10 = extractTop10(away, rostersData, awayData?.boxScores);
+  const homeTop10 = _extractTop10ForTeam(rostersData, home, homeData?.boxScores);
+  const awayTop10 = _extractTop10ForTeam(rostersData, away, awayData?.boxScores);
 
   const [homeMedia, awayMedia] = await Promise.all([
     _findBestBasketUSAArticle(homeRaw, awayRaw, env),
@@ -747,6 +730,23 @@ async function getTeamDetailBundle(teamAbv, oppAbv, env) {
       momentum: { last3W: 0, last10W: 0 },
       boxScores: {},
     };
+  }
+}
+
+function _extractTop10ForTeam(rostersPayload, teamAbv, boxScores = {}) {
+  try {
+    let teamsArr = [];
+    if (Array.isArray(rostersPayload))              teamsArr = rostersPayload;
+    else if (Array.isArray(rostersPayload?.body))   teamsArr = rostersPayload.body;
+    else if (Array.isArray(rostersPayload?.teams))  teamsArr = rostersPayload.teams;
+    else if (rostersPayload && typeof rostersPayload === 'object') teamsArr = Object.values(rostersPayload);
+    const abv  = String(teamAbv || '').toUpperCase();
+    const team = teamsArr.find(t => String(t?.teamAbv ?? t?.abbr ?? '').toUpperCase() === abv);
+    const rr = team?.Roster ?? team?.roster ?? null;
+    const roster = Array.isArray(rr) ? rr : (rr && typeof rr === 'object' ? Object.values(rr) : []);
+    return buildTop10ScorersFromRoster(roster, teamAbv, boxScores);
+  } catch (_) {
+    return [];
   }
 }
 
@@ -2707,6 +2707,18 @@ async function _runBotCron(env, forceRun = false) {
   const oddsData     = oddsResp.status    === 'fulfilled' ? await oddsResp.value.json()    : null;
   const advancedData = advancedResp.status === 'fulfilled' ? await advancedResp.value.json() : null;
 
+  // Rosters Tank01 depuis KV cache 24h (populé par /nba/team-detail)
+  // Aucun call Tank01 ajouté ici — si miss, player props skippés ce run
+  let rostersData = null;
+  if (env.PAPER_TRADING) {
+    try {
+      const cached = await env.PAPER_TRADING.get('nba_rosters_teams_v3', { type: 'json' });
+      if (cached?.data && cached._ts && (Date.now() - cached._ts) < 24 * 3600 * 1000) {
+        rostersData = cached.data;
+      }
+    } catch (err) { console.warn('[BOT] rosters KV read:', err.message); }
+  }
+
   // Charger recent forms BDL pour toutes les équipes du soir en parallèle
   const season = currentSeason();
   const recentForms = {};
@@ -2751,7 +2763,7 @@ async function _runBotCron(env, forceRun = false) {
 
   for (const match of matches) {
     try {
-      const log = await _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedData, aiInjuriesData, recentForms, env);
+      const log = await _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedData, aiInjuriesData, recentForms, env, rostersData);
       if (!log) continue;
       await _botSaveLog(env, log);
       logs.push(log);
@@ -2777,7 +2789,7 @@ async function _runBotCron(env, forceRun = false) {
   console.log(`[BOT] Terminé — ${logs.length} matchs analysés, ${edgesFound.length} edges détectés`);
 }
 
-async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedData, aiInjuriesData, recentForms = {}, env = null) {
+async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedData, aiInjuriesData, recentForms = {}, env = null, rostersData = null) {
   const homeName = match.home_team?.name;
   const awayName = match.away_team?.name;
   if (!homeName || !awayName) return null;
@@ -2838,6 +2850,8 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
     away_rest_days:      null,
     home_last5_avg_pts:  null,
     away_last5_avg_pts:  null,
+    home_top10scorers:   rostersData ? _extractTop10ForTeam(rostersData, homeAbv, {}) : [],
+    away_top10scorers:   rostersData ? _extractTop10ForTeam(rostersData, awayAbv, {}) : [],
   };
 
   // Lancer le moteur
@@ -2911,6 +2925,9 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
     ou_prediction_side:  analysis.total_prediction?.recommendation?.side ?? null,
     ou_prediction_edge:  analysis.total_prediction?.recommendation?.edge ?? null,
     ou_adjustments:      analysis.total_prediction?.adjustments      ?? [],
+
+    // Prédiction props joueur NBA (Phase 1) — projections pures sans marché
+    player_props_prediction: analysis.player_props_prediction ?? null,
 
     // Post-match (rempli par handleBotSettleLogs)
     result_home_score: null,
@@ -3735,6 +3752,9 @@ function _botEngineCompute(matchData) {
     bettingRecs.recommendations.sort((a, b) => b.edge - a.edge);
   }
 
+  // Prédiction props joueur (Phase 1) — projection pure, pas encore de marché
+  const playerPropsPrediction = _botPredictPlayerPoints(matchData);
+
   return {
     score, score_method: score !== null ? 'WEIGHTED_SUM' : 'MISSING',
     signals:               computed.signals,
@@ -3747,6 +3767,7 @@ function _botEngineCompute(matchData) {
     nba_phase:             phase,
     betting_recommendations: bettingRecs,
     total_prediction:      totalPrediction,
+    player_props_prediction: playerPropsPrediction,
   };
 }
 
@@ -3937,6 +3958,93 @@ function _botPredictNBATotal(matchData) {
     recommendation,
     adjustments,
     all_edges: { over: overEdge, under: underEdge },
+  };
+}
+
+// ── MOTEUR PROPS JOUEUR NBA (Phase 1) ────────────────────────────────────────
+// Projette les pts de chaque top scoreur · base = last5_ppg ?? ppg
+// · matchup défensif = oppg adverse vs ligue · bonus absence coéquipier
+// Pas de comparaison marché ici (Phase 3 activera market player_points)
+
+function _botPredictPlayerPoints(matchData) {
+  const LEAGUE_AVG_OPPG = 113;
+  const MIN_PPG         = 8;    // Seuil minimum pour inclusion
+  const MAX_SCORERS     = 5;    // Top scoreurs par équipe
+  const MATCHUP_MIN     = 0.90;
+  const MATCHUP_MAX     = 1.12;
+
+  const hOppg = matchData?.home_season_stats?.oppg != null ? parseFloat(matchData.home_season_stats.oppg) : null;
+  const aOppg = matchData?.away_season_stats?.oppg != null ? parseFloat(matchData.away_season_stats.oppg) : null;
+
+  const buildSide = (scorers, opposingOppg, ownInjuries) => {
+    if (!Array.isArray(scorers) || scorers.length === 0) return [];
+
+    // Coéquipiers absents notables (ppg≥14) → redistribution usage
+    const absentTeammates = (Array.isArray(ownInjuries) ? ownInjuries : []).filter(p => {
+      const ppg = parseFloat(p?.ppg);
+      if (!Number.isFinite(ppg) || ppg < 14) return false;
+      return p.status === 'Out' || p.status === 'Doubtful';
+    });
+    const lostPpg = absentTeammates.reduce((s, p) => {
+      const ppg = parseFloat(p.ppg) || 0;
+      const w   = p.status === 'Out' ? 1.0 : 0.5;
+      return s + ppg * w;
+    }, 0);
+
+    // Facteur matchup défensif — cap ±12%
+    const matchupFactor = opposingOppg != null
+      ? Math.max(MATCHUP_MIN, Math.min(MATCHUP_MAX, 1 + (opposingOppg - LEAGUE_AVG_OPPG) / (LEAGUE_AVG_OPPG * 2)))
+      : 1.0;
+
+    const topN = scorers.slice(0, MAX_SCORERS).filter(p => (p.ppg ?? 0) >= MIN_PPG);
+    if (topN.length === 0) return [];
+
+    // Part de chaque top scoreur dans les pts réabsorbés (pondérée ppg)
+    const totalTopPpg = topN.reduce((s, p) => s + (p.ppg || 0), 0) || 1;
+
+    // Filtrer absentTeammates pour éviter self-redistribution si le joueur absent figure dans top
+    const absentNames = new Set(absentTeammates.map(p => (p.name || '').toLowerCase()));
+
+    return topN
+      .filter(p => !absentNames.has((p.name || '').toLowerCase()))
+      .map(p => {
+        const base = p.last5_ppg != null ? p.last5_ppg : p.ppg;
+        if (base == null) return null;
+
+        const shareBonus = lostPpg > 0 ? (p.ppg / totalTopPpg) * lostPpg * 0.55 : 0;
+        const projected  = base * matchupFactor + shareBonus;
+
+        return {
+          name:            p.name,
+          team:            p.team,
+          player_id:       p.playerID ?? null,
+          ppg:             p.ppg,
+          last5_ppg:       p.last5_ppg,
+          base_ppg:        base,
+          matchup_factor:  Math.round(matchupFactor * 1000) / 1000,
+          absence_bonus:   Math.round(shareBonus * 10) / 10,
+          projected_pts:   Math.round(projected * 10) / 10,
+          opposing_oppg:   opposingOppg,
+          absent_teammates: absentTeammates.map(t => ({ name: t.name, status: t.status, ppg: t.ppg })),
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.projected_pts - a.projected_pts);
+  };
+
+  const homePlayers = buildSide(matchData?.home_top10scorers, aOppg, matchData?.home_injuries);
+  const awayPlayers = buildSide(matchData?.away_top10scorers, hOppg, matchData?.away_injuries);
+
+  if (homePlayers.length === 0 && awayPlayers.length === 0) {
+    return { available: false, phase: 1, missing: 'top10scorers_or_ppg' };
+  }
+
+  return {
+    available:     true,
+    phase:         1,
+    home_players:  homePlayers,
+    away_players:  awayPlayers,
+    league_avg_oppg: LEAGUE_AVG_OPPG,
   };
 }
 
