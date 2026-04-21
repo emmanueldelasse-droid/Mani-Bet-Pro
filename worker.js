@@ -1348,6 +1348,35 @@ async function handleNBAAIPlayerPropsBatch(request, env, origin) {
     return jsonResponse({ available: false, note: 'games required' }, 400, origin);
   }
 
+  // Validation : au moins un match programmé à venir sur ESPN scoreboard.
+  // Évite les appels Claude hors-saison ou sur games invalides.
+  if (!force) {
+    try {
+      const espnData = await espnFetch(`${ESPN_SCOREBOARD}?dates=${date}&limit=25`);
+      const nowMs = Date.now();
+      const upcoming = parseESPNMatches(espnData || {}, date).filter(m =>
+        m.home_team && m.away_team &&
+        m.status !== 'STATUS_FINAL' &&
+        m.datetime && new Date(m.datetime).getTime() > nowMs
+      );
+      const submittedKeys = new Set(games.map(g => `${g.away}@${g.home}`));
+      const hasValidMatch = upcoming.some(m => {
+        const key = `${_botGetTeamAbv(m.away_team?.name)}@${_botGetTeamAbv(m.home_team?.name)}`;
+        return submittedKeys.has(key);
+      });
+      if (!hasValidMatch) {
+        return jsonResponse({
+          available: false,
+          note:      'no_scheduled_upcoming_match',
+          detail:    `Aucun des ${games.length} matchs soumis n'est programmé à venir aujourd'hui (${date}). Utilise force:true pour bypass.`,
+        }, 200, origin);
+      }
+    } catch (err) {
+      console.warn('[AI-PROPS] ESPN validation skip:', err.message);
+      // Si ESPN indispo, on continue — ne pas bloquer l'appel sur panne tierce
+    }
+  }
+
   const cacheKey = `ai_player_props_${date}`;
   const READ_TTL_MS = 20 * 3600 * 1000;
   const WRITE_TTL_S = 24 * 3600;
@@ -3596,17 +3625,28 @@ async function _runAIPlayerPropsCron(env) {
     const espnData = await espnFetch(`${ESPN_SCOREBOARD}?dates=${dateStr}&limit=25`);
     if (!espnData) { console.warn('[AI-PROPS CRON] ESPN indispo'); return; }
 
-    const matches = parseESPNMatches(espnData, dateStr).filter(m =>
-      m.status !== 'STATUS_FINAL' && m.home_team && m.away_team
-    );
-    if (!matches.length) { console.log('[AI-PROPS CRON] aucun match à venir'); return; }
+    const nowMs = Date.now();
+    const matches = parseESPNMatches(espnData, dateStr).filter(m => {
+      if (!m.home_team || !m.away_team) return false;
+      if (m.status === 'STATUS_FINAL') return false;
+      // Exclure matchs déjà commencés ou sans heure de début
+      if (!m.datetime) return false;
+      return new Date(m.datetime).getTime() > nowMs;
+    });
+    if (!matches.length) {
+      console.log('[AI-PROPS CRON] aucun match programmé à venir, pas d\'appel Claude');
+      return;
+    }
 
     const games = matches.map(m => ({
       home: _botGetTeamAbv(m.home_team?.name),
       away: _botGetTeamAbv(m.away_team?.name),
     })).filter(g => g.home && g.away);
 
-    if (!games.length) return;
+    if (!games.length) {
+      console.log('[AI-PROPS CRON] abréviations équipes introuvables, skip');
+      return;
+    }
 
     const fakeReq = new Request('https://manibetpro.emmanueldelasse.workers.dev/nba/ai-player-props-batch', {
       method:  'POST',
@@ -3615,7 +3655,7 @@ async function _runAIPlayerPropsCron(env) {
     });
     const resp = await handleNBAAIPlayerPropsBatch(fakeReq, env, 'https://manibetpro.emmanueldelasse.workers.dev');
     const result = await resp.json();
-    console.log(`[AI-PROPS CRON] ${result.available ? 'OK' : 'FAIL'} — ${Object.keys(result.by_game ?? {}).length} matchs`);
+    console.log(`[AI-PROPS CRON] ${result.available ? 'OK' : 'FAIL'} — ${games.length} matchs envoyés, ${Object.keys(result.by_game ?? {}).length} retournés`);
   } catch (err) {
     console.error('[AI-PROPS CRON] error:', err.message);
   }
@@ -4355,6 +4395,41 @@ function _botPredictNBATotal(matchData) {
   };
 }
 
+// ── CONFIANCE PROJECTION JOUEUR ──────────────────────────────────────────────
+// Score composite 0–1 basé sur signaux disponibles · module l'edge des recos.
+// Retour : { score: 0.30–1.0, label: 'high|medium|low', factors: [...] }
+function _computePlayerProjectionConfidence(p, absentCount, model) {
+  let score = 0.80;
+  const factors = [];
+
+  const ppg = parseFloat(p?.ppg);
+  if (Number.isFinite(ppg)) {
+    if (ppg >= 25)       { score += 0.10; factors.push('star_ppg'); }
+    else if (ppg < 12)   { score -= 0.15; factors.push('role_volatile'); }
+  }
+
+  // Divergence forme récente vs saison
+  if (p?.last5_ppg != null && Number.isFinite(ppg) && ppg > 0) {
+    const diff = Math.abs((p.last5_ppg - ppg) / ppg);
+    if (diff > 0.30)      { score -= 0.15; factors.push('form_divergent'); }
+    else if (diff < 0.10) { score += 0.05; factors.push('form_stable'); }
+  } else {
+    score -= 0.08;
+    factors.push('no_last5_data');
+  }
+
+  // Absences coéquipiers → rotation imprévisible
+  if (absentCount >= 2)      { score -= 0.12; factors.push('multi_absences'); }
+  else if (absentCount === 1) { score -= 0.05; factors.push('one_absence'); }
+
+  // Modèle moins précis sans mpg
+  if (model === 'ppg_only') { score -= 0.07; factors.push('no_mpg'); }
+
+  score = Math.max(0.30, Math.min(1.0, score));
+  const label = score >= 0.80 ? 'high' : score >= 0.60 ? 'medium' : 'low';
+  return { score: Math.round(score * 100) / 100, label, factors };
+}
+
 // ── MOTEUR PROPS JOUEUR NBA (Phase 2) ────────────────────────────────────────
 // Modèle pts/min : sépare volume (minutes) et efficacité (pts/min)
 // · base_pts = last5_ppg ?? ppg · base_mins = last5_mpg ?? mpg
@@ -4362,7 +4437,7 @@ function _botPredictNBATotal(matchData) {
 // · projected_mins = base_mins + mins_boost_absence (cap 40)
 // · matchup défensif = oppg adverse vs ligue ligue · absences coéquipiers → +mins
 // Fallback Phase 1 (matchup × ppg) si mpg indisponible.
-// Pas de comparaison marché ici (Phase 3 activera market player_points).
+// Chaque projection reçoit aussi un score de confiance pour moduler l'edge.
 
 function _botPredictPlayerPoints(matchData) {
   const LEAGUE_AVG_OPPG = 113;
@@ -4410,6 +4485,9 @@ function _botPredictPlayerPoints(matchData) {
         const weight   = p.ppg / totalTopPpg;
         const phase    = (baseMins != null && baseMins >= 8) ? 2 : 1;
 
+        const modelName  = phase === 2 ? 'pts_per_min' : 'ppg_only';
+        const confidence = _computePlayerProjectionConfidence(p, absentTeammates.length, modelName);
+
         if (phase === 2) {
           // Modèle pts/min
           const ppm         = Math.max(PPM_MIN, Math.min(PPM_MAX, basePts / baseMins));
@@ -4421,7 +4499,7 @@ function _botPredictPlayerPoints(matchData) {
             name:             p.name,
             team:             p.team,
             player_id:        p.playerID ?? null,
-            model:            'pts_per_min',
+            model:            modelName,
             ppg:              p.ppg,
             last5_ppg:        p.last5_ppg,
             mpg:              p.mpg,
@@ -4435,6 +4513,7 @@ function _botPredictPlayerPoints(matchData) {
             projected_pts:    Math.round(projected * 10) / 10,
             opposing_oppg:    opposingOppg,
             absent_teammates: absentTeammates.map(t => ({ name: t.name, status: t.status, ppg: t.ppg })),
+            confidence,
           };
         }
 
@@ -4446,7 +4525,7 @@ function _botPredictPlayerPoints(matchData) {
           name:             p.name,
           team:             p.team,
           player_id:        p.playerID ?? null,
-          model:            'ppg_only',
+          model:            modelName,
           ppg:              p.ppg,
           last5_ppg:        p.last5_ppg,
           mpg:              p.mpg ?? null,
@@ -4457,6 +4536,7 @@ function _botPredictPlayerPoints(matchData) {
           projected_pts:    Math.round(projected * 10) / 10,
           opposing_oppg:    opposingOppg,
           absent_teammates: absentTeammates.map(t => ({ name: t.name, status: t.status, ppg: t.ppg })),
+          confidence,
         };
       })
       .filter(Boolean)
@@ -4528,6 +4608,13 @@ function _botMatchPlayerPropsToLines(propsPrediction, linesMap, homeTeam, awayTe
   const homeEnriched = enrichSide(propsPrediction.home_players ?? [], homeTeam);
   const awayEnriched = enrichSide(propsPrediction.away_players ?? [], awayTeam);
 
+  // Facteur confiance combiné : projection interne × ligne AI (si présente)
+  const confFactor = (projConf, lineConf) => {
+    const projScore = projConf?.score ?? 0.80;
+    const lineScore = lineConf === 'high' ? 1.0 : lineConf === 'medium' ? 0.85 : lineConf === 'low' ? 0.6 : 0.95;
+    return Math.round(projScore * lineScore * 1000) / 1000;
+  };
+
   const recommendations = [];
   for (const p of [...homeEnriched, ...awayEnriched]) {
     if (!p.market) continue;
@@ -4535,22 +4622,35 @@ function _botMatchPlayerPropsToLines(propsPrediction, linesMap, homeTeam, awayTe
     const best = (oe ?? -99) >= (ue ?? -99)
       ? { side: 'OVER',  edge: oe, prob: p.market.over_prob,  decimal: p.market.over_decimal,  book: p.market.over_book }
       : { side: 'UNDER', edge: ue, prob: p.market.under_prob, decimal: p.market.under_decimal, book: p.market.under_book };
-    if (best.edge == null || best.edge < 5 || !best.decimal) continue;
+    if (best.edge == null || !best.decimal) continue;
+
+    // Appliquer facteur confiance (projection + source ligne)
+    const lineConfLabel = (linesMap[_normalizeName(p.name)] || {}).confidence ?? null;
+    const cf            = confFactor(p.confidence, lineConfLabel);
+    const adjustedEdge  = Math.round(best.edge * cf);
+
+    // Seuil 5% sur edge ajusté · + seuil de confiance min 0.50
+    if (adjustedEdge < 5) continue;
+    if (cf < 0.50)        continue;
 
     recommendations.push({
-      type:          'PLAYER_POINTS',
-      player:        p.name,
-      team:          p.team,
-      side:          best.side,
+      type:              'PLAYER_POINTS',
+      player:            p.name,
+      team:              p.team,
+      side:              best.side,
       line,
-      projected_pts: p.projected_pts,
-      motor_prob:    Math.round(best.prob * 100),
-      implied_prob:  Math.round((1 / best.decimal) * 100),
-      odds_decimal:  best.decimal,
-      odds_line:     _decToAm(best.decimal),
-      odds_source:   best.book,
-      edge:          best.edge,
-      has_value:     true,
+      projected_pts:     p.projected_pts,
+      motor_prob:        Math.round(best.prob * 100),
+      implied_prob:      Math.round((1 / best.decimal) * 100),
+      odds_decimal:      best.decimal,
+      odds_line:         _decToAm(best.decimal),
+      odds_source:       best.book,
+      edge_raw:          best.edge,
+      edge:              adjustedEdge,
+      confidence_factor: cf,
+      confidence_label:  p.confidence?.label ?? 'medium',
+      line_confidence:   lineConfLabel,
+      has_value:         true,
     });
   }
 
