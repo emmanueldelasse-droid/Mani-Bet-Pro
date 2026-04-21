@@ -740,7 +740,7 @@ function _openTeamModal(teamAbv, teamName, record, stats, detail, top10, last10,
   const formeHtml = last10.slice(0, 10).map(g => {
     const won   = g.result === 'W';
     const color = won ? '#22c55e' : '#ef4444';
-    return `<span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:4px;background:${color}22;border:1px solid ${color}44;font-size:9px;font-weight:700;color:${color}">${won ? 'V' : 'D'}</span>`;
+    return `<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;background:${color}${won ? '20' : '18'};border:1px solid ${color}50;font-size:10px;font-weight:700;color:${color}">${won ? 'V' : 'D'}</span>`;
   }).join('');
 
   // Top 5 scoreurs
@@ -760,59 +760,80 @@ function _openTeamModal(teamAbv, teamName, record, stats, detail, top10, last10,
   }).join('');
 
   const modal = document.createElement('div');
-  modal.style.cssText = 'position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,0.75);display:flex;align-items:flex-end;justify-content:center;padding:0';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:16px';
   modal.innerHTML = `
-    <div style="background:var(--color-card);border-radius:16px 16px 0 0;width:100%;max-width:600px;max-height:90vh;overflow-y:auto;padding:20px">
+    <div style="background:var(--color-card);border-radius:20px;width:100%;max-width:480px;max-height:88vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,0.35);display:flex;flex-direction:column">
 
       <!-- Header -->
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
+      <div style="padding:20px 20px 16px;border-bottom:1px solid var(--color-border);position:sticky;top:0;background:var(--color-card);border-radius:20px 20px 0 0;z-index:1">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div style="display:flex;align-items:center;gap:14px">
+            <div style="width:48px;height:48px;border-radius:12px;background:var(--color-bg);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;font-family:var(--font-mono);color:var(--color-signal);flex-shrink:0">${teamAbv}</div>
+            <div>
+              <div style="font-size:15px;font-weight:700;color:var(--color-text);line-height:1.2">${teamName}</div>
+              <div style="font-size:12px;color:var(--color-text-secondary);margin-top:2px">${record} · <span style="color:var(--color-signal);font-weight:600">${winPct} win</span></div>
+            </div>
+          </div>
+          <button id="close-team-modal" style="background:var(--color-bg);border:none;width:30px;height:30px;border-radius:50%;cursor:pointer;color:var(--color-text-secondary);font-size:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0">✕</button>
+        </div>
+      </div>
+
+      <div style="padding:16px 20px;display:flex;flex-direction:column;gap:16px">
+
+        <!-- Stats saison -->
         <div>
-          <div style="font-size:28px;font-weight:800;font-family:var(--font-mono);color:var(--color-signal)">${teamAbv}</div>
-          <div style="font-size:14px;font-weight:600;color:var(--color-text)">${teamName}</div>
-          <div style="font-size:12px;color:var(--color-text-secondary);margin-top:2px">${record} · ${winPct} win</div>
+          <div style="font-size:10px;font-weight:700;letter-spacing:0.08em;color:var(--color-text-secondary);text-transform:uppercase;margin-bottom:10px">Saison régulière 2025-26</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+            ${_statPill('Pts marqués', avgPts)}
+            ${_statPill('Pts encaissés', encaisse)}
+            ${_statPill('Net Rating', netRating)}
+            ${_statPill('eFG%', efg)}
+            ${_statPill('Moy. total', avgTotal)}
+            ${_statPill('Win %', winPct)}
+          </div>
         </div>
-        <button id="close-team-modal" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--color-text-secondary);padding:0">✕</button>
-      </div>
 
-      <!-- Stats saison -->
-      <div style="background:var(--color-bg);border-radius:10px;padding:12px;margin-bottom:14px">
-        <div style="font-size:10px;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;margin-bottom:8px">Saison régulière 2025-26</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-          ${_statPill('Pts marqués', avgPts)}
-          ${_statPill('Pts encaissés', encaisse)}
-          ${_statPill('Net Rating', netRating)}
-          ${_statPill('eFG%', efg)}
-          ${_statPill('Moy. total', avgTotal)}
-          ${_statPill('Win %', winPct)}
+        <!-- Scoring récent -->
+        <div>
+          <div style="font-size:10px;font-weight:700;letter-spacing:0.08em;color:var(--color-text-secondary);text-transform:uppercase;margin-bottom:10px">Scoring récent</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div style="background:var(--color-bg);border-radius:10px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:11px;color:var(--color-text-secondary)">Moy. 5 dern.</span>
+              <span style="font-size:14px;font-weight:700;color:var(--color-text)">${detail.last5ScoringAvg != null ? detail.last5ScoringAvg.toFixed(1) : '—'}</span>
+            </div>
+            <div style="background:var(--color-bg);border-radius:10px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:11px;color:var(--color-text-secondary)">Repos</span>
+              <span style="font-size:14px;font-weight:700;color:var(--color-text)">${detail.restDays != null ? detail.restDays + 'j' : '—'}</span>
+            </div>
+            <div style="background:var(--color-bg);border-radius:10px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:11px;color:var(--color-text-secondary)">V / 3 dern.</span>
+              <span style="font-size:14px;font-weight:700;color:${(detail.momentum?.last3W ?? 0) >= 2 ? '#22c55e' : (detail.momentum?.last3W ?? 0) === 0 ? '#ef4444' : 'var(--color-text)'}">${detail.momentum?.last3W != null ? detail.momentum.last3W + '/3' : '—'}</span>
+            </div>
+            <div style="background:var(--color-bg);border-radius:10px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:11px;color:var(--color-text-secondary)">V / 10 dern.</span>
+              <span style="font-size:14px;font-weight:700;color:${(detail.momentum?.last10W ?? 0) >= 7 ? '#22c55e' : (detail.momentum?.last10W ?? 0) <= 3 ? '#ef4444' : 'var(--color-text)'}">${detail.momentum?.last10W != null ? detail.momentum.last10W + '/10' : '—'}</span>
+            </div>
+          </div>
         </div>
-      </div>
 
-      <!-- Forme / Momentum -->
-      <div style="background:var(--color-bg);border-radius:10px;padding:12px;margin-bottom:14px">
-        <div style="font-size:10px;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;margin-bottom:8px">Scoring récent</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-          ${_statPill('Moy. 5 dern.', detail.last5ScoringAvg != null ? detail.last5ScoringAvg.toFixed(1) : '—')}
-          ${_statPill('V/3 derniers', detail.momentum?.last3W != null ? `${detail.momentum.last3W}/3` : '—')}
-          ${_statPill('V/10 derniers', detail.momentum?.last10W != null ? `${detail.momentum.last10W}/10` : '—')}
-          ${_statPill('Repos (jours)', detail.restDays != null ? String(detail.restDays) : '—')}
-          ${_statPill('Moy. total L10', avgTotal)}
-          ${_statPill('Pts encaissés', encaisse !== '—' ? encaisse : '—')}
+        <!-- Forme récente -->
+        <div>
+          <div style="font-size:10px;font-weight:700;letter-spacing:0.08em;color:var(--color-text-secondary);text-transform:uppercase;margin-bottom:10px">Forme (10 derniers)</div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap">
+            ${formeHtml || '<span style="font-size:11px;color:var(--color-text-secondary)">Données indisponibles</span>'}
+          </div>
         </div>
-      </div>
 
-      <!-- Forme récente -->
-      <div style="margin-bottom:14px">
-        <div style="font-size:10px;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;margin-bottom:6px">Forme récente (10 derniers)</div>
-        <div style="display:flex;gap:3px;flex-wrap:wrap">${formeHtml || '<span style="font-size:11px;color:var(--color-text-secondary)">Données indisponibles</span>'}</div>
-      </div>
+        <!-- Top scoreurs -->
+        <div>
+          <div style="font-size:10px;font-weight:700;letter-spacing:0.08em;color:var(--color-text-secondary);text-transform:uppercase;margin-bottom:10px">Top scoreurs</div>
+          <div style="display:flex;flex-direction:column;gap:2px">
+            ${top5Html || '<div style="font-size:11px;color:var(--color-text-secondary)">Données indisponibles</div>'}
+          </div>
+        </div>
 
-      <!-- Top 5 scoreurs -->
-      <div>
-        <div style="font-size:10px;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;margin-bottom:6px">Top scoreurs</div>
-        ${top5Html || '<div style="font-size:11px;color:var(--color-text-secondary)">Données indisponibles</div>'}
+        <div style="font-size:10px;color:var(--color-text-secondary);text-align:center;padding-top:4px;border-top:1px solid var(--color-border)">Tank01 · ESPN · saison en cours</div>
       </div>
-
-      <div style="font-size:10px;color:var(--color-text-secondary);margin-top:12px;text-align:center">Source : Tank01 · ESPN · données saison en cours</div>
     </div>`;
 
   document.body.appendChild(modal);
@@ -822,8 +843,8 @@ function _openTeamModal(teamAbv, teamName, record, stats, detail, top10, last10,
 
 function _statPill(label, value) {
   return `
-    <div style="text-align:center;padding:8px;background:var(--color-card);border-radius:8px">
-      <div style="font-size:16px;font-weight:700;color:var(--color-text)">${value}</div>
-      <div style="font-size:9px;color:var(--color-text-secondary);margin-top:2px">${label}</div>
+    <div style="text-align:center;padding:10px 6px;background:var(--color-bg);border-radius:10px">
+      <div style="font-size:17px;font-weight:700;color:var(--color-text);line-height:1">${value}</div>
+      <div style="font-size:9px;font-weight:500;color:var(--color-text-secondary);margin-top:4px;line-height:1.2">${label}</div>
     </div>`;
 }
