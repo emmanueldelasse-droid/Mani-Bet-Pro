@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — Cloudflare Worker v6.50
+ * MANI BET PRO — Cloudflare Worker v6.51
  *
  * CORRECTIONS v6.39 :
  *   1. Fix critique bot — emaLambda non défini dans _botEngineCompute.
@@ -261,6 +261,9 @@ export default {
       if (path === '/nba/ai-player-props-batch' && request.method === 'POST')
         return await handleNBAAIPlayerPropsBatch(request, env, origin);
 
+      if (path === '/nba/ai-player-props' && request.method === 'GET')
+        return await handleNBAAIPlayerPropsGet(url, env, origin);
+
       if (path === '/nba/roster-debug' && request.method === 'GET')
         return await handleNBARosterDebug(url, env, origin);
 
@@ -350,7 +353,7 @@ export default {
         return jsonResponse({
           status:    'ok',
           worker:    'mani-bet-pro',
-          version:   '6.50.0',
+          version:   '6.51.0',
           timestamp: new Date().toISOString(),
           routes: [
             'GET /nba/matches', 'GET /nba/team/:id/stats', 'GET /nba/team/:id/recent',
@@ -358,7 +361,7 @@ export default {
             'GET /nba/standings', 'GET /nba/results', 'GET /nba/teams/stats',
             'GET /nba/player/test', 'GET /nba/roster-injuries',
             'GET /nba/ai-injuries', 'POST /nba/ai-injuries-batch', 'GET /nba/odds/comparison', 'GET /nba/team-detail',
-            'GET /nba/player-points', 'POST /nba/ai-player-props-batch',
+            'GET /nba/player-points', 'POST /nba/ai-player-props-batch', 'GET /nba/ai-player-props',
             'GET /paper/state', 'POST /paper/bet', 'PUT /paper/bet/:id', 'POST /paper/reset',
           ],
         }, 200, origin);
@@ -1321,6 +1324,74 @@ async function handleNBAAIInjuriesBatch(request, env, origin) {
 // ── HANDLER : AI PLAYER PROPS BATCH (fallback TheOddsAPI) ────────────────────
 // Fetch 1 fois/jour les lignes props via Claude web_search sur agrégateurs.
 // Cache KV 20h · rate limit 2/jour · appelé par cron à 22h UTC.
+
+// GET /nba/ai-player-props?date=YYYYMMDD[&refresh=1]
+// Lit le cache (défaut) · refresh=1 force un appel Claude avec tous les matchs ESPN du jour
+async function handleNBAAIPlayerPropsGet(url, env, origin) {
+  const dateParam = url.searchParams.get('date');
+  const dateStr   = dateParam ? dateParam.replace(/-/g, '') : _botFormatDate(_botNowParis());
+  const refresh   = url.searchParams.get('refresh') === '1';
+
+  if (!refresh) {
+    // Lecture cache uniquement — zéro coût
+    if (!env.PAPER_TRADING) return jsonResponse({ available: false, note: 'KV not configured' }, 200, origin);
+    try {
+      const cached = await env.PAPER_TRADING.get(`ai_player_props_${dateStr}`, { type: 'json' });
+      if (!cached) {
+        return jsonResponse({
+          available: false,
+          note:      'not_cached',
+          hint:      'Ajoute &refresh=1 pour déclencher un fetch Claude (consomme 1 appel)',
+          date:      dateStr,
+        }, 200, origin);
+      }
+      return jsonResponse({
+        available:  true,
+        source:     'cache',
+        fetched_at: new Date(cached.fetched_at).toISOString(),
+        date:       cached.date,
+        games:      cached.games,
+        by_game:    cached.by_game,
+      }, 200, origin);
+    } catch (err) {
+      return jsonResponse({ available: false, note: err.message }, 500, origin);
+    }
+  }
+
+  // Refresh : récupérer matchs ESPN du jour puis appeler le handler batch avec force=true
+  try {
+    const espnData = await espnFetch(`${ESPN_SCOREBOARD}?dates=${dateStr}&limit=25`);
+    if (!espnData) return jsonResponse({ available: false, note: 'ESPN unavailable' }, 502, origin);
+
+    const nowMs = Date.now();
+    const matches = parseESPNMatches(espnData, dateStr).filter(m =>
+      m.home_team && m.away_team &&
+      m.status !== 'STATUS_FINAL' &&
+      m.datetime && new Date(m.datetime).getTime() > nowMs
+    );
+    if (!matches.length) {
+      return jsonResponse({
+        available: false,
+        note:      'no_scheduled_upcoming_match',
+        date:      dateStr,
+      }, 200, origin);
+    }
+
+    const games = matches.map(m => ({
+      home: _botGetTeamAbv(m.home_team?.name),
+      away: _botGetTeamAbv(m.away_team?.name),
+    })).filter(g => g.home && g.away);
+
+    const fakeReq = new Request('https://manibetpro.emmanueldelasse.workers.dev/nba/ai-player-props-batch', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ date: dateStr, games, force: true }),
+    });
+    return await handleNBAAIPlayerPropsBatch(fakeReq, env, origin);
+  } catch (err) {
+    return jsonResponse({ available: false, note: err.message }, 500, origin);
+  }
+}
 
 async function handleNBAAIPlayerPropsBatch(request, env, origin) {
   let body = null;
