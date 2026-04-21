@@ -45,3 +45,6 @@ Stack: CF Worker + KV + Tank01 (RapidAPI) + ESPN + Claude API + Telegram
 
 ## Règle
 Merge main → update SI impact critique. Format: voir CLAUDE.md.
+
+## Règle OBLIGATOIRE réponses user
+Vocabulaire simple · exemples concrets · détails CLI explicités. Voir CLAUDE.md.
