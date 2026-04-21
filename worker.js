@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — Cloudflare Worker v6.47
+ * MANI BET PRO — Cloudflare Worker v6.48
  *
  * CORRECTIONS v6.39 :
  *   1. Fix critique bot — emaLambda non défini dans _botEngineCompute.
@@ -343,7 +343,7 @@ export default {
         return jsonResponse({
           status:    'ok',
           worker:    'mani-bet-pro',
-          version:   '6.47.0',
+          version:   '6.48.0',
           timestamp: new Date().toISOString(),
           routes: [
             'GET /nba/matches', 'GET /nba/team/:id/stats', 'GET /nba/team/:id/recent',
@@ -559,11 +559,12 @@ function _teamDetailExtractPlayerBoxScores(body) {
     out.push({
       name,
       team: String(line.team || line.teamAbv || line.teamID || '').toUpperCase() || null,
-      pts: _teamDetailSafeNum(line.pts ?? line.PTS ?? line.points),
-      reb: _teamDetailSafeNum(line.reb ?? line.REB ?? line.rebounds),
-      ast: _teamDetailSafeNum(line.ast ?? line.AST ?? line.assists),
-      stl: _teamDetailSafeNum(line.stl ?? line.STL ?? line.steals),
-      blk: _teamDetailSafeNum(line.blk ?? line.BLK ?? line.blocks),
+      pts:  _teamDetailSafeNum(line.pts  ?? line.PTS ?? line.points),
+      reb:  _teamDetailSafeNum(line.reb  ?? line.REB ?? line.rebounds),
+      ast:  _teamDetailSafeNum(line.ast  ?? line.AST ?? line.assists),
+      stl:  _teamDetailSafeNum(line.stl  ?? line.STL ?? line.steals),
+      blk:  _teamDetailSafeNum(line.blk  ?? line.BLK ?? line.blocks),
+      mins: _teamDetailSafeNum(line.mins ?? line.MIN ?? line.min ?? line.minutes),
     });
   };
 
@@ -757,6 +758,7 @@ function buildTop10ScorersFromRoster(roster, teamAbv, boxScores = {}) {
     const ast = _teamDetailSafeNum(p?.stats?.ast ?? p?.stats?.AST ?? p?.ast);
     const stl = _teamDetailSafeNum(p?.stats?.stl ?? p?.stats?.STL ?? p?.stl);
     const blk = _teamDetailSafeNum(p?.stats?.blk ?? p?.stats?.BLK ?? p?.blk);
+    const mpg = _teamDetailSafeNum(p?.stats?.mins ?? p?.stats?.MIN ?? p?.stats?.min ?? p?.mpg ?? p?.mins);
     const name = p?.longName ?? p?.espnName ?? p?.displayName ?? p?.name ?? 'Unknown';
 
     const last5Lines = Object.values(boxScores || {})
@@ -768,12 +770,19 @@ function buildTop10ScorersFromRoster(roster, teamAbv, boxScores = {}) {
       ? Math.round((last5Lines.reduce((sum, line) => sum + (line.pts ?? 0), 0) / last5Lines.length) * 10) / 10
       : null;
 
+    const last5MpgLines = last5Lines.filter(line => line.mins != null);
+    const last5Mpg = last5MpgLines.length
+      ? Math.round((last5MpgLines.reduce((sum, line) => sum + line.mins, 0) / last5MpgLines.length) * 10) / 10
+      : null;
+
     return {
       playerID: p?.playerID ?? null,
       name,
       team: teamAbv,
       ppg: seasonPpg,
       last5_ppg: last5Ppg,
+      mpg,
+      last5_mpg: last5Mpg,
       reb,
       ast,
       stl,
@@ -3961,17 +3970,25 @@ function _botPredictNBATotal(matchData) {
   };
 }
 
-// ── MOTEUR PROPS JOUEUR NBA (Phase 1) ────────────────────────────────────────
-// Projette les pts de chaque top scoreur · base = last5_ppg ?? ppg
-// · matchup défensif = oppg adverse vs ligue · bonus absence coéquipier
-// Pas de comparaison marché ici (Phase 3 activera market player_points)
+// ── MOTEUR PROPS JOUEUR NBA (Phase 2) ────────────────────────────────────────
+// Modèle pts/min : sépare volume (minutes) et efficacité (pts/min)
+// · base_pts = last5_ppg ?? ppg · base_mins = last5_mpg ?? mpg
+// · pts_per_min = base_pts / base_mins (capé 0.3–1.5)
+// · projected_mins = base_mins + mins_boost_absence (cap 40)
+// · matchup défensif = oppg adverse vs ligue ligue · absences coéquipiers → +mins
+// Fallback Phase 1 (matchup × ppg) si mpg indisponible.
+// Pas de comparaison marché ici (Phase 3 activera market player_points).
 
 function _botPredictPlayerPoints(matchData) {
   const LEAGUE_AVG_OPPG = 113;
-  const MIN_PPG         = 8;    // Seuil minimum pour inclusion
-  const MAX_SCORERS     = 5;    // Top scoreurs par équipe
+  const MIN_PPG         = 8;
+  const MAX_SCORERS     = 5;
   const MATCHUP_MIN     = 0.90;
   const MATCHUP_MAX     = 1.12;
+  const PPM_MIN         = 0.30;
+  const PPM_MAX         = 1.50;
+  const MINS_CAP        = 40;
+  const MINS_BOOST_COEF = 0.18;  // part mpg d'un coéq absent redistribuée sur top scorers
 
   const hOppg = matchData?.home_season_stats?.oppg != null ? parseFloat(matchData.home_season_stats.oppg) : null;
   const aOppg = matchData?.away_season_stats?.oppg != null ? parseFloat(matchData.away_season_stats.oppg) : null;
@@ -3979,19 +3996,15 @@ function _botPredictPlayerPoints(matchData) {
   const buildSide = (scorers, opposingOppg, ownInjuries) => {
     if (!Array.isArray(scorers) || scorers.length === 0) return [];
 
-    // Coéquipiers absents notables (ppg≥14) → redistribution usage
+    // Coéquipiers absents notables (ppg≥14 Out/Doubtful)
     const absentTeammates = (Array.isArray(ownInjuries) ? ownInjuries : []).filter(p => {
       const ppg = parseFloat(p?.ppg);
       if (!Number.isFinite(ppg) || ppg < 14) return false;
       return p.status === 'Out' || p.status === 'Doubtful';
     });
-    const lostPpg = absentTeammates.reduce((s, p) => {
-      const ppg = parseFloat(p.ppg) || 0;
-      const w   = p.status === 'Out' ? 1.0 : 0.5;
-      return s + ppg * w;
-    }, 0);
+    const lostPpg  = absentTeammates.reduce((s, p) => s + (parseFloat(p.ppg) || 0) * (p.status === 'Out' ? 1.0 : 0.5), 0);
+    const lostMpg  = absentTeammates.reduce((s, p) => s + (parseFloat(p.mpg ?? p.mins) || 28) * (p.status === 'Out' ? 1.0 : 0.5), 0);
 
-    // Facteur matchup défensif — cap ±12%
     const matchupFactor = opposingOppg != null
       ? Math.max(MATCHUP_MIN, Math.min(MATCHUP_MAX, 1 + (opposingOppg - LEAGUE_AVG_OPPG) / (LEAGUE_AVG_OPPG * 2)))
       : 1.0;
@@ -3999,32 +4012,65 @@ function _botPredictPlayerPoints(matchData) {
     const topN = scorers.slice(0, MAX_SCORERS).filter(p => (p.ppg ?? 0) >= MIN_PPG);
     if (topN.length === 0) return [];
 
-    // Part de chaque top scoreur dans les pts réabsorbés (pondérée ppg)
     const totalTopPpg = topN.reduce((s, p) => s + (p.ppg || 0), 0) || 1;
-
-    // Filtrer absentTeammates pour éviter self-redistribution si le joueur absent figure dans top
     const absentNames = new Set(absentTeammates.map(p => (p.name || '').toLowerCase()));
 
     return topN
       .filter(p => !absentNames.has((p.name || '').toLowerCase()))
       .map(p => {
-        const base = p.last5_ppg != null ? p.last5_ppg : p.ppg;
-        if (base == null) return null;
+        const basePts  = p.last5_ppg != null ? p.last5_ppg : p.ppg;
+        const baseMins = p.last5_mpg != null ? p.last5_mpg : p.mpg;
+        if (basePts == null) return null;
 
-        const shareBonus = lostPpg > 0 ? (p.ppg / totalTopPpg) * lostPpg * 0.55 : 0;
-        const projected  = base * matchupFactor + shareBonus;
+        const weight   = p.ppg / totalTopPpg;
+        const phase    = (baseMins != null && baseMins >= 8) ? 2 : 1;
+
+        if (phase === 2) {
+          // Modèle pts/min
+          const ppm         = Math.max(PPM_MIN, Math.min(PPM_MAX, basePts / baseMins));
+          const minsBoost   = lostMpg > 0 ? weight * lostMpg * MINS_BOOST_COEF : 0;
+          const projMins    = Math.min(MINS_CAP, baseMins + minsBoost);
+          const projected   = ppm * projMins * matchupFactor;
+
+          return {
+            name:             p.name,
+            team:             p.team,
+            player_id:        p.playerID ?? null,
+            model:            'pts_per_min',
+            ppg:              p.ppg,
+            last5_ppg:        p.last5_ppg,
+            mpg:              p.mpg,
+            last5_mpg:        p.last5_mpg,
+            base_pts:         basePts,
+            base_mins:        baseMins,
+            pts_per_min:      Math.round(ppm * 1000) / 1000,
+            mins_boost:       Math.round(minsBoost * 10) / 10,
+            projected_mins:   Math.round(projMins * 10) / 10,
+            matchup_factor:   Math.round(matchupFactor * 1000) / 1000,
+            projected_pts:    Math.round(projected * 10) / 10,
+            opposing_oppg:    opposingOppg,
+            absent_teammates: absentTeammates.map(t => ({ name: t.name, status: t.status, ppg: t.ppg })),
+          };
+        }
+
+        // Fallback Phase 1 si mpg manquant
+        const shareBonus = lostPpg > 0 ? weight * lostPpg * 0.55 : 0;
+        const projected  = basePts * matchupFactor + shareBonus;
 
         return {
-          name:            p.name,
-          team:            p.team,
-          player_id:       p.playerID ?? null,
-          ppg:             p.ppg,
-          last5_ppg:       p.last5_ppg,
-          base_ppg:        base,
-          matchup_factor:  Math.round(matchupFactor * 1000) / 1000,
-          absence_bonus:   Math.round(shareBonus * 10) / 10,
-          projected_pts:   Math.round(projected * 10) / 10,
-          opposing_oppg:   opposingOppg,
+          name:             p.name,
+          team:             p.team,
+          player_id:        p.playerID ?? null,
+          model:            'ppg_only',
+          ppg:              p.ppg,
+          last5_ppg:        p.last5_ppg,
+          mpg:              p.mpg ?? null,
+          last5_mpg:        p.last5_mpg ?? null,
+          base_pts:         basePts,
+          matchup_factor:   Math.round(matchupFactor * 1000) / 1000,
+          absence_bonus:    Math.round(shareBonus * 10) / 10,
+          projected_pts:    Math.round(projected * 10) / 10,
+          opposing_oppg:    opposingOppg,
           absent_teammates: absentTeammates.map(t => ({ name: t.name, status: t.status, ppg: t.ppg })),
         };
       })
@@ -4036,14 +4082,14 @@ function _botPredictPlayerPoints(matchData) {
   const awayPlayers = buildSide(matchData?.away_top10scorers, hOppg, matchData?.away_injuries);
 
   if (homePlayers.length === 0 && awayPlayers.length === 0) {
-    return { available: false, phase: 1, missing: 'top10scorers_or_ppg' };
+    return { available: false, phase: 2, missing: 'top10scorers_or_ppg' };
   }
 
   return {
-    available:     true,
-    phase:         1,
-    home_players:  homePlayers,
-    away_players:  awayPlayers,
+    available:       true,
+    phase:           2,
+    home_players:    homePlayers,
+    away_players:    awayPlayers,
     league_avg_oppg: LEAGUE_AVG_OPPG,
   };
 }
