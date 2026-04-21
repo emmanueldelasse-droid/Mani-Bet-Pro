@@ -125,7 +125,10 @@ function renderBlocSyntheseSummary(analysis, match) {
 
   if (!best || best.edge < 5) return '';
 
-  const typeLabel = best.type === 'MONEYLINE' ? 'Vainqueur' : best.type === 'SPREAD' ? 'Handicap' : 'O/U';
+  const typeLabel = best.type === 'MONEYLINE' ? 'Vainqueur'
+                  : best.type === 'SPREAD' ? 'Handicap'
+                  : best.type === 'PLAYER_POINTS' ? 'Props'
+                  : 'O/U';
   let sideLabel;
   if (best.type === 'MONEYLINE') {
     sideLabel = best.side === 'HOME' ? (match?.home_team?.name ?? 'DOM') : (match?.away_team?.name ?? 'EXT');
@@ -133,6 +136,8 @@ function renderBlocSyntheseSummary(analysis, match) {
     const abbr = best.side === 'HOME' ? (match?.home_team?.abbreviation ?? 'DOM') : (match?.away_team?.abbreviation ?? 'EXT');
     const line = best.side === 'HOME' ? best.spread_line : -best.spread_line;
     sideLabel = abbr + ' ' + (line > 0 ? '+' : '') + line;
+  } else if (best.type === 'PLAYER_POINTS') {
+    sideLabel = `${best.player} ${best.side === 'OVER' ? '+' : '−'}${best.line}`;
   } else {
     sideLabel = best.side === 'OVER'
       ? 'Plus de ' + (best.ou_line ?? '—') + ' pts'
@@ -256,11 +261,15 @@ export function renderBlocParis(analysis, match) {
     const gainPour100 = oddsDecimal ? Math.round((oddsDecimal - 1) * 100) : null;
     const kellyEuros  = r.kelly_stake > 0 ? Math.round(r.kelly_stake * bankroll * 100) / 100 : null;
     const edgeColor   = r.edge >= 12 ? 'var(--color-success)' : r.edge >= 7 ? 'var(--color-warning)' : 'var(--color-muted)';
-    const marketLabel = r.type === 'MONEYLINE' ? 'Vainqueur du match' : r.type === 'SPREAD' ? 'Handicap' : 'Total de points';
+    const marketLabel = r.type === 'MONEYLINE' ? 'Vainqueur du match'
+                      : r.type === 'SPREAD' ? 'Handicap'
+                      : r.type === 'PLAYER_POINTS' ? `Points joueur — ${r.player ?? '—'}`
+                      : 'Total de points';
 
     let sideDisplay = sideLabel;
-    if (r.type === 'SPREAD')          sideDisplay = `${sideLabel} ${r.spread_line > 0 ? '+' : ''}${r.spread_line} pts`;
-    else if (r.type === 'OVER_UNDER') sideDisplay = r.side === 'OVER' ? `Plus de ${r.ou_line ?? '—'} pts` : `Moins de ${r.ou_line ?? '—'} pts`;
+    if (r.type === 'SPREAD')             sideDisplay = `${sideLabel} ${r.spread_line > 0 ? '+' : ''}${r.spread_line} pts`;
+    else if (r.type === 'OVER_UNDER')    sideDisplay = r.side === 'OVER' ? `Plus de ${r.ou_line ?? '—'} pts` : `Moins de ${r.ou_line ?? '—'} pts`;
+    else if (r.type === 'PLAYER_POINTS') sideDisplay = r.side === 'OVER' ? `Plus de ${r.line} pts` : `Moins de ${r.line} pts`;
 
     const motorProb = r.side === 'HOME' ? Math.round(analysis.predictive_score * 100)
                     : r.side === 'AWAY' ? Math.round((1 - analysis.predictive_score) * 100)
@@ -277,6 +286,10 @@ export function renderBlocParis(analysis, match) {
       whyText = r.side === 'OVER'
         ? `L'analyse projette un match à points élevés. La ligne de ${r.ou_line} pts semble trop basse.`
         : `L'analyse projette un match serré et défensif. La ligne de ${r.ou_line} pts semble trop haute.`;
+    } else if (r.type === 'PLAYER_POINTS') {
+      whyText = r.side === 'OVER'
+        ? `Projection de ${r.projected_pts} pts pour ${r.player} vs ligne ${r.line}. La cote ${oddsDecimal} chez ${r.odds_source ?? 'le bookmaker'} sous-estime la probabilité de ${r.edge}%.`
+        : `Projection de ${r.projected_pts} pts pour ${r.player} vs ligne ${r.line}. La cote ${oddsDecimal} chez ${r.odds_source ?? 'le bookmaker'} surestime la probabilité de ${r.edge}%.`;
     }
 
     // Explication de l'écart moteur/book
@@ -978,8 +991,12 @@ function _buildSynthese(analysis, match) {
   if (!best) {
     phrase3 = 'Aucune cote sous-évaluée détectée sur ce match.';
   } else {
-    const typeLabel = best.type === 'MONEYLINE' ? 'la victoire' : best.type === 'SPREAD' ? 'le handicap' : 'le total de points';
-    const sideLabel = best.side === 'HOME' ? home : best.side === 'AWAY' ? away : best.side === 'OVER' ? 'Over' : 'Under';
+    const typeLabel = best.type === 'MONEYLINE' ? 'la victoire'
+                    : best.type === 'SPREAD' ? 'le handicap'
+                    : best.type === 'PLAYER_POINTS' ? `les points de ${best.player}`
+                    : 'le total de points';
+    const sideLabel = best.type === 'PLAYER_POINTS' ? `${best.side === 'OVER' ? 'Over' : 'Under'} ${best.line}`
+                    : best.side === 'HOME' ? home : best.side === 'AWAY' ? away : best.side === 'OVER' ? 'Over' : 'Under';
     // Chercher la raison principale de l'edge
     const starMod   = analysis.star_absence_modifier;
     let reason = '';
@@ -1187,7 +1204,7 @@ function _openBetModal(btn, match, analysis, storeInstance) {
   const bankroll    = state.current_bankroll;
   const kellySugg   = kelly > 0 ? Math.round(kelly * bankroll * 100) / 100 : null;
   const oddsDecimal = _americanToDecimal(odds);
-  const marketLabels = { MONEYLINE: 'Vainqueur', SPREAD: 'Handicap', OVER_UNDER: 'Total pts' };
+  const marketLabels = { MONEYLINE: 'Vainqueur', SPREAD: 'Handicap', OVER_UNDER: 'Total pts', PLAYER_POINTS: 'Props joueur' };
 
   const modal = document.createElement('div');
   modal.className = 'paper-modal-overlay';

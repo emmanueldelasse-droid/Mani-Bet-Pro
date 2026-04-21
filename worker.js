@@ -4400,7 +4400,7 @@ async function handlePaperPlaceBet(request, env, origin) {
     // silencieusement current_bankroll en NaN et casse tous les calculs downstream.
     const stake = Number(bet.stake);
     const odds  = Number(bet.odds_taken);
-    const VALID_MARKETS = ['MONEYLINE', 'SPREAD', 'OVER_UNDER'];
+    const VALID_MARKETS = ['MONEYLINE', 'SPREAD', 'OVER_UNDER', 'PLAYER_POINTS'];
 
     if (!isFinite(stake) || stake <= 0)
       return jsonResponse({ error: 'stake invalide — doit être un nombre > 0' }, 400, origin);

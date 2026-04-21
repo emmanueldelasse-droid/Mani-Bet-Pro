@@ -808,13 +808,18 @@ function _updateMatchCard(list, matchId, analysis, match, ptState) {
   const bestRecEl = card.querySelector(`#best-rec-${matchId}`);
   const best = analysis.betting_recommendations?.best;
   if (bestRecEl && best?.edge != null) {
-    const typeLabel = best.type === 'MONEYLINE' ? 'Vainqueur' : best.type === 'SPREAD' ? 'Handicap' : 'O/U';
+    const typeLabel = best.type === 'MONEYLINE' ? 'Vainqueur'
+                    : best.type === 'SPREAD' ? 'Handicap'
+                    : best.type === 'PLAYER_POINTS' ? 'Props'
+                    : 'O/U';
     const sideLabel = best.type === 'MONEYLINE'
       ? (best.side === 'HOME' ? match?.home_team?.abbreviation : match?.away_team?.abbreviation)
       : best.type === 'SPREAD'
       ? (best.side === 'HOME'
           ? `${match?.home_team?.abbreviation ?? ''} ${best.spread_line > 0 ? '+' : ''}${best.spread_line}`
           : `${match?.away_team?.abbreviation ?? ''} ${-best.spread_line > 0 ? '+' : ''}${-best.spread_line}`)
+      : best.type === 'PLAYER_POINTS'
+      ? `${best.player} ${best.side === 'OVER' ? '+' : '−'}${best.line}`
       : best.side === 'OVER'
         ? `Plus de ${best.ou_line ?? best.market_total ?? '—'} pts`
         : `Moins de ${best.ou_line ?? best.market_total ?? '—'} pts`;
@@ -844,7 +849,7 @@ function _updateMatchCard(list, matchId, analysis, match, ptState) {
     const pendingBets = pendingIndex[matchId] ?? [];
     if (pendingBets.length > 0) {
       const totalStake = pendingBets.reduce((s, b) => s + (b.stake || 0), 0);
-      const markets = pendingBets.map(b => b.market === 'MONEYLINE' ? 'ML' : b.market === 'SPREAD' ? 'Hcap' : 'O/U').join(' · ');
+      const markets = pendingBets.map(b => b.market === 'MONEYLINE' ? 'ML' : b.market === 'SPREAD' ? 'Hcap' : b.market === 'PLAYER_POINTS' ? 'Props' : 'O/U').join(' · ');
       const dot = document.createElement('div');
       dot.className = 'mbp-open-bet-indicator';
       dot.innerHTML = `<span class="mbp-bet-dot"></span>${pendingBets.length} pari${pendingBets.length > 1 ? 's' : ''} en cours <span style="opacity:0.6;font-weight:400">(${markets} · ${totalStake.toFixed(0)}€)</span>`;
