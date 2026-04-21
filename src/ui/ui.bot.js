@@ -381,11 +381,21 @@ function _renderDetailPanel(log) {
 
     ${recs.length ? `<div class="bot-detail-section">
       <div class="bot-detail-title">Recommandations</div>
-      ${recs.map(r => `<div class="bot-detail-row">
-        <span>${r.type} ${r.side}</span>
-        <span class="bot-detail-row__val">Edge +${r.edge}% · ${r.motor_prob}% prob · cote ${r.odds_line > 0 ? '+' : ''}${r.odds_line}</span>
-      </div>`).join('')}
+      ${recs.map(r => {
+        const label = r.type === 'PLAYER_POINTS'
+          ? `${r.player} ${r.side} ${r.line}`
+          : `${r.type} ${r.side}`;
+        const extra = r.type === 'PLAYER_POINTS'
+          ? ` · proj ${r.projected_pts} · ${r.odds_source ?? ''}`
+          : '';
+        return `<div class="bot-detail-row">
+        <span>${label}</span>
+        <span class="bot-detail-row__val">Edge +${r.edge}% · ${r.motor_prob}% prob · cote ${r.odds_line > 0 ? '+' : ''}${r.odds_line}${extra}</span>
+      </div>`;
+      }).join('')}
     </div>` : ''}
+
+    ${_renderPlayerPropsSection(log)}
 
     ${log.star_absence_modifier != null && log.star_absence_modifier !== 1 ? `<div class="bot-detail-section">
       <div class="bot-detail-title">Modificateur star absence</div>
@@ -398,6 +408,36 @@ function _renderDetailPanel(log) {
       · Phase : ${log.nba_phase ?? '—'}
     </div>
   `;
+}
+
+function _renderPlayerPropsSection(log) {
+  const pp = log.player_props_prediction;
+  if (!pp || !pp.available) return '';
+  const all = [...(pp.home_players ?? []), ...(pp.away_players ?? [])];
+  if (all.length === 0) return '';
+
+  const hasMarket = all.some(p => p.market);
+  const title = hasMarket
+    ? `Props joueur (Phase ${pp.phase} · marché connecté)`
+    : `Props joueur (Phase ${pp.phase} · projection seule)`;
+
+  const rows = all.slice(0, 10).map(p => {
+    const mk   = p.market;
+    const line = mk ? ` vs ${mk.line}` : '';
+    const edge = mk && (mk.over_edge != null || mk.under_edge != null)
+      ? ` · edge O:${mk.over_edge ?? '—'}% U:${mk.under_edge ?? '—'}%`
+      : '';
+    const model = p.model === 'pts_per_min' ? 'pts/min' : 'ppg';
+    return `<div class="bot-detail-row">
+      <span>${p.name} (${p.team})</span>
+      <span class="bot-detail-row__val">${p.projected_pts} pts [${model}]${line}${edge}</span>
+    </div>`;
+  }).join('');
+
+  return `<div class="bot-detail-section">
+    <div class="bot-detail-title">${title}</div>
+    ${rows}
+  </div>`;
 }
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────

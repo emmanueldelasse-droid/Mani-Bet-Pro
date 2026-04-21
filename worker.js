@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — Cloudflare Worker v6.47
+ * MANI BET PRO — Cloudflare Worker v6.49
  *
  * CORRECTIONS v6.39 :
  *   1. Fix critique bot — emaLambda non défini dans _botEngineCompute.
@@ -272,6 +272,9 @@ export default {
       if (path === '/nba/odds/comparison' && request.method === 'GET')
         return await handleOddsComparison(url, env, origin);
 
+      if (path === '/nba/player-points' && request.method === 'GET')
+        return await handleNBAPlayerPointsOdds(url, env, origin);
+
       // ── v6.31 : Team Detail ───────────────────────────────────────────────
       if (path === '/nba/team-detail' && request.method === 'GET')
         return await handleNBATeamDetail(url, env, origin);
@@ -343,7 +346,7 @@ export default {
         return jsonResponse({
           status:    'ok',
           worker:    'mani-bet-pro',
-          version:   '6.47.0',
+          version:   '6.49.0',
           timestamp: new Date().toISOString(),
           routes: [
             'GET /nba/matches', 'GET /nba/team/:id/stats', 'GET /nba/team/:id/recent',
@@ -351,6 +354,7 @@ export default {
             'GET /nba/standings', 'GET /nba/results', 'GET /nba/teams/stats',
             'GET /nba/player/test', 'GET /nba/roster-injuries',
             'GET /nba/ai-injuries', 'POST /nba/ai-injuries-batch', 'GET /nba/odds/comparison', 'GET /nba/team-detail',
+            'GET /nba/player-points',
             'GET /paper/state', 'POST /paper/bet', 'PUT /paper/bet/:id', 'POST /paper/reset',
           ],
         }, 200, origin);
@@ -559,11 +563,12 @@ function _teamDetailExtractPlayerBoxScores(body) {
     out.push({
       name,
       team: String(line.team || line.teamAbv || line.teamID || '').toUpperCase() || null,
-      pts: _teamDetailSafeNum(line.pts ?? line.PTS ?? line.points),
-      reb: _teamDetailSafeNum(line.reb ?? line.REB ?? line.rebounds),
-      ast: _teamDetailSafeNum(line.ast ?? line.AST ?? line.assists),
-      stl: _teamDetailSafeNum(line.stl ?? line.STL ?? line.steals),
-      blk: _teamDetailSafeNum(line.blk ?? line.BLK ?? line.blocks),
+      pts:  _teamDetailSafeNum(line.pts  ?? line.PTS ?? line.points),
+      reb:  _teamDetailSafeNum(line.reb  ?? line.REB ?? line.rebounds),
+      ast:  _teamDetailSafeNum(line.ast  ?? line.AST ?? line.assists),
+      stl:  _teamDetailSafeNum(line.stl  ?? line.STL ?? line.steals),
+      blk:  _teamDetailSafeNum(line.blk  ?? line.BLK ?? line.blocks),
+      mins: _teamDetailSafeNum(line.mins ?? line.MIN ?? line.min ?? line.minutes),
     });
   };
 
@@ -757,6 +762,7 @@ function buildTop10ScorersFromRoster(roster, teamAbv, boxScores = {}) {
     const ast = _teamDetailSafeNum(p?.stats?.ast ?? p?.stats?.AST ?? p?.ast);
     const stl = _teamDetailSafeNum(p?.stats?.stl ?? p?.stats?.STL ?? p?.stl);
     const blk = _teamDetailSafeNum(p?.stats?.blk ?? p?.stats?.BLK ?? p?.blk);
+    const mpg = _teamDetailSafeNum(p?.stats?.mins ?? p?.stats?.MIN ?? p?.stats?.min ?? p?.mpg ?? p?.mins);
     const name = p?.longName ?? p?.espnName ?? p?.displayName ?? p?.name ?? 'Unknown';
 
     const last5Lines = Object.values(boxScores || {})
@@ -768,12 +774,19 @@ function buildTop10ScorersFromRoster(roster, teamAbv, boxScores = {}) {
       ? Math.round((last5Lines.reduce((sum, line) => sum + (line.pts ?? 0), 0) / last5Lines.length) * 10) / 10
       : null;
 
+    const last5MpgLines = last5Lines.filter(line => line.mins != null);
+    const last5Mpg = last5MpgLines.length
+      ? Math.round((last5MpgLines.reduce((sum, line) => sum + line.mins, 0) / last5MpgLines.length) * 10) / 10
+      : null;
+
     return {
       playerID: p?.playerID ?? null,
       name,
       team: teamAbv,
       ppg: seasonPpg,
       last5_ppg: last5Ppg,
+      mpg,
+      last5_mpg: last5Mpg,
       reb,
       ast,
       stl,
@@ -2424,6 +2437,111 @@ function _parseOddsAPIResponse(data) {
   });
 }
 
+// ── MARCHÉ PLAYER_POINTS (Phase 3) ────────────────────────────────────────────
+// Fetch ponctuel par event (TheOddsAPI) · KV cache 4h · gate env PLAYER_PROPS_ENABLED
+// Coût : 1 credit par event+market+region. On utilise us uniquement (max couverture).
+
+async function _fetchPlayerPointsForEvent(eventId, env) {
+  if (!eventId) return { available: false, note: 'no_event_id', lines: {} };
+  if (env.PLAYER_PROPS_ENABLED !== 'true' && env.PLAYER_PROPS_ENABLED !== '1') {
+    return { available: false, note: 'disabled', lines: {} };
+  }
+
+  const cacheKey = `player_points_${eventId}`;
+  const TTL_MS   = 4 * 3600 * 1000;
+  const TTL_S    = 4 * 3600;
+
+  if (env.PAPER_TRADING) {
+    try {
+      const cached = await env.PAPER_TRADING.get(cacheKey, { type: 'json' });
+      if (cached?._ts && (Date.now() - cached._ts) < TTL_MS) {
+        return { ...cached.data, source: 'cache' };
+      }
+    } catch (_) {}
+  }
+
+  const key = env.ODDS_API_KEY_1 ?? env.ODDS_API_KEY_2;
+  if (!key) return { available: false, note: 'no_api_key', lines: {} };
+
+  const url = `https://api.the-odds-api.com/v4/sports/basketball_nba/events/${eventId}/odds` +
+    `?apiKey=${key}&regions=us&markets=player_points&oddsFormat=decimal` +
+    `&bookmakers=pinnacle,betmgm,draftkings,fanduel,betonlineag`;
+
+  try {
+    const resp = await fetchTimeout(url, { headers: { Accept: 'application/json' } }, 10000);
+    if (!resp.ok) return { available: false, note: `odds_api_${resp.status}`, lines: {} };
+    const json = await resp.json();
+
+    // Agrégation : par joueur normalisé, meilleures cotes over/under
+    const BOOK_PRIORITY = ['pinnacle', 'betmgm', 'draftkings', 'fanduel', 'betonlineag'];
+    const linesByPlayer = {};
+
+    for (const bk of (json.bookmakers ?? [])) {
+      const market = bk.markets?.find(m => m.key === 'player_points');
+      if (!market) continue;
+
+      for (const o of (market.outcomes ?? [])) {
+        const playerName = o.description;
+        const side       = o.name; // 'Over' ou 'Under'
+        const line       = parseFloat(o.point);
+        const price      = parseFloat(o.price);
+        if (!playerName || !side || !Number.isFinite(line) || !Number.isFinite(price)) continue;
+
+        const norm = _normalizeName(playerName);
+        if (!linesByPlayer[norm]) {
+          linesByPlayer[norm] = {
+            player_name: playerName,
+            line,
+            over: { decimal: null, book: null },
+            under: { decimal: null, book: null },
+          };
+        }
+
+        const slot = side === 'Over' ? 'over' : side === 'Under' ? 'under' : null;
+        if (!slot) continue;
+
+        const current     = linesByPlayer[norm][slot];
+        const newBookRank = BOOK_PRIORITY.indexOf(bk.key);
+        const curBookRank = current.book ? BOOK_PRIORITY.indexOf(current.book) : 999;
+
+        // Priorité : ligne identique → prix max · sinon livre prioritaire
+        if (linesByPlayer[norm].line === line) {
+          if (current.decimal == null || price > current.decimal) {
+            linesByPlayer[norm][slot] = { decimal: price, book: bk.key };
+          }
+        } else if (newBookRank < curBookRank) {
+          linesByPlayer[norm].line = line;
+          linesByPlayer[norm][slot] = { decimal: price, book: bk.key };
+        }
+      }
+    }
+
+    const result = {
+      available:   true,
+      event_id:    eventId,
+      fetched_at:  new Date().toISOString(),
+      players_count: Object.keys(linesByPlayer).length,
+      lines:       linesByPlayer,
+    };
+
+    if (env.PAPER_TRADING) {
+      try {
+        await env.PAPER_TRADING.put(cacheKey, JSON.stringify({ _ts: Date.now(), data: result }), { expirationTtl: TTL_S });
+      } catch (_) {}
+    }
+    return result;
+  } catch (err) {
+    return { available: false, note: err.message, lines: {} };
+  }
+}
+
+async function handleNBAPlayerPointsOdds(url, env, origin) {
+  const eventId = url.searchParams.get('event_id');
+  if (!eventId) return jsonResponse({ available: false, note: 'event_id required' }, 400, origin);
+  const result = await _fetchPlayerPointsForEvent(eventId, env);
+  return jsonResponse(result, 200, origin);
+}
+
 // ── HANDLER : RÉSULTATS ───────────────────────────────────────────────────────
 
 async function handleNBAResults(url, origin) {
@@ -2857,6 +2975,38 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
   // Lancer le moteur
   const analysis = _botEngineCompute(matchData);
   if (!analysis) return null;
+
+  // Phase 3 : matching projections joueurs ↔ lignes marché TheOddsAPI
+  // Gate env PLAYER_PROPS_ENABLED · fetch par event · KV cache 4h
+  if (env && analysis.player_props_prediction?.available && marketOdds?.odds_api_id) {
+    try {
+      const ppResult = await _fetchPlayerPointsForEvent(marketOdds.odds_api_id, env);
+      if (ppResult?.available && ppResult.lines) {
+        const matched = _botMatchPlayerPropsToLines(
+          analysis.player_props_prediction,
+          ppResult.lines,
+          homeName, awayName
+        );
+        analysis.player_props_prediction = matched.enriched;
+        analysis.player_props_prediction.market_fetched_at = ppResult.fetched_at ?? null;
+        analysis.player_props_prediction.market_source     = ppResult.source ?? 'the_odds_api';
+
+        if (matched.recommendations.length > 0 && analysis.betting_recommendations) {
+          analysis.betting_recommendations.recommendations.push(...matched.recommendations);
+          analysis.betting_recommendations.recommendations.sort((a, b) => b.edge - a.edge);
+          // Mettre à jour best uniquement si pas en critical divergence
+          const curBest = analysis.betting_recommendations.best;
+          const newBest = analysis.betting_recommendations.recommendations[0];
+          if (newBest && (!curBest || newBest.edge > curBest.edge) &&
+              analysis.market_divergence?.flag !== 'critical') {
+            analysis.betting_recommendations.best = newBest;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[BOT] player_points fetch error for ${match.id}:`, err.message);
+    }
+  }
 
   // Snapshot absences
   const absVar = analysis.variables_used?.absences_impact ?? null;
@@ -3961,17 +4111,25 @@ function _botPredictNBATotal(matchData) {
   };
 }
 
-// ── MOTEUR PROPS JOUEUR NBA (Phase 1) ────────────────────────────────────────
-// Projette les pts de chaque top scoreur · base = last5_ppg ?? ppg
-// · matchup défensif = oppg adverse vs ligue · bonus absence coéquipier
-// Pas de comparaison marché ici (Phase 3 activera market player_points)
+// ── MOTEUR PROPS JOUEUR NBA (Phase 2) ────────────────────────────────────────
+// Modèle pts/min : sépare volume (minutes) et efficacité (pts/min)
+// · base_pts = last5_ppg ?? ppg · base_mins = last5_mpg ?? mpg
+// · pts_per_min = base_pts / base_mins (capé 0.3–1.5)
+// · projected_mins = base_mins + mins_boost_absence (cap 40)
+// · matchup défensif = oppg adverse vs ligue ligue · absences coéquipiers → +mins
+// Fallback Phase 1 (matchup × ppg) si mpg indisponible.
+// Pas de comparaison marché ici (Phase 3 activera market player_points).
 
 function _botPredictPlayerPoints(matchData) {
   const LEAGUE_AVG_OPPG = 113;
-  const MIN_PPG         = 8;    // Seuil minimum pour inclusion
-  const MAX_SCORERS     = 5;    // Top scoreurs par équipe
+  const MIN_PPG         = 8;
+  const MAX_SCORERS     = 5;
   const MATCHUP_MIN     = 0.90;
   const MATCHUP_MAX     = 1.12;
+  const PPM_MIN         = 0.30;
+  const PPM_MAX         = 1.50;
+  const MINS_CAP        = 40;
+  const MINS_BOOST_COEF = 0.18;  // part mpg d'un coéq absent redistribuée sur top scorers
 
   const hOppg = matchData?.home_season_stats?.oppg != null ? parseFloat(matchData.home_season_stats.oppg) : null;
   const aOppg = matchData?.away_season_stats?.oppg != null ? parseFloat(matchData.away_season_stats.oppg) : null;
@@ -3979,19 +4137,15 @@ function _botPredictPlayerPoints(matchData) {
   const buildSide = (scorers, opposingOppg, ownInjuries) => {
     if (!Array.isArray(scorers) || scorers.length === 0) return [];
 
-    // Coéquipiers absents notables (ppg≥14) → redistribution usage
+    // Coéquipiers absents notables (ppg≥14 Out/Doubtful)
     const absentTeammates = (Array.isArray(ownInjuries) ? ownInjuries : []).filter(p => {
       const ppg = parseFloat(p?.ppg);
       if (!Number.isFinite(ppg) || ppg < 14) return false;
       return p.status === 'Out' || p.status === 'Doubtful';
     });
-    const lostPpg = absentTeammates.reduce((s, p) => {
-      const ppg = parseFloat(p.ppg) || 0;
-      const w   = p.status === 'Out' ? 1.0 : 0.5;
-      return s + ppg * w;
-    }, 0);
+    const lostPpg  = absentTeammates.reduce((s, p) => s + (parseFloat(p.ppg) || 0) * (p.status === 'Out' ? 1.0 : 0.5), 0);
+    const lostMpg  = absentTeammates.reduce((s, p) => s + (parseFloat(p.mpg ?? p.mins) || 28) * (p.status === 'Out' ? 1.0 : 0.5), 0);
 
-    // Facteur matchup défensif — cap ±12%
     const matchupFactor = opposingOppg != null
       ? Math.max(MATCHUP_MIN, Math.min(MATCHUP_MAX, 1 + (opposingOppg - LEAGUE_AVG_OPPG) / (LEAGUE_AVG_OPPG * 2)))
       : 1.0;
@@ -3999,32 +4153,65 @@ function _botPredictPlayerPoints(matchData) {
     const topN = scorers.slice(0, MAX_SCORERS).filter(p => (p.ppg ?? 0) >= MIN_PPG);
     if (topN.length === 0) return [];
 
-    // Part de chaque top scoreur dans les pts réabsorbés (pondérée ppg)
     const totalTopPpg = topN.reduce((s, p) => s + (p.ppg || 0), 0) || 1;
-
-    // Filtrer absentTeammates pour éviter self-redistribution si le joueur absent figure dans top
     const absentNames = new Set(absentTeammates.map(p => (p.name || '').toLowerCase()));
 
     return topN
       .filter(p => !absentNames.has((p.name || '').toLowerCase()))
       .map(p => {
-        const base = p.last5_ppg != null ? p.last5_ppg : p.ppg;
-        if (base == null) return null;
+        const basePts  = p.last5_ppg != null ? p.last5_ppg : p.ppg;
+        const baseMins = p.last5_mpg != null ? p.last5_mpg : p.mpg;
+        if (basePts == null) return null;
 
-        const shareBonus = lostPpg > 0 ? (p.ppg / totalTopPpg) * lostPpg * 0.55 : 0;
-        const projected  = base * matchupFactor + shareBonus;
+        const weight   = p.ppg / totalTopPpg;
+        const phase    = (baseMins != null && baseMins >= 8) ? 2 : 1;
+
+        if (phase === 2) {
+          // Modèle pts/min
+          const ppm         = Math.max(PPM_MIN, Math.min(PPM_MAX, basePts / baseMins));
+          const minsBoost   = lostMpg > 0 ? weight * lostMpg * MINS_BOOST_COEF : 0;
+          const projMins    = Math.min(MINS_CAP, baseMins + minsBoost);
+          const projected   = ppm * projMins * matchupFactor;
+
+          return {
+            name:             p.name,
+            team:             p.team,
+            player_id:        p.playerID ?? null,
+            model:            'pts_per_min',
+            ppg:              p.ppg,
+            last5_ppg:        p.last5_ppg,
+            mpg:              p.mpg,
+            last5_mpg:        p.last5_mpg,
+            base_pts:         basePts,
+            base_mins:        baseMins,
+            pts_per_min:      Math.round(ppm * 1000) / 1000,
+            mins_boost:       Math.round(minsBoost * 10) / 10,
+            projected_mins:   Math.round(projMins * 10) / 10,
+            matchup_factor:   Math.round(matchupFactor * 1000) / 1000,
+            projected_pts:    Math.round(projected * 10) / 10,
+            opposing_oppg:    opposingOppg,
+            absent_teammates: absentTeammates.map(t => ({ name: t.name, status: t.status, ppg: t.ppg })),
+          };
+        }
+
+        // Fallback Phase 1 si mpg manquant
+        const shareBonus = lostPpg > 0 ? weight * lostPpg * 0.55 : 0;
+        const projected  = basePts * matchupFactor + shareBonus;
 
         return {
-          name:            p.name,
-          team:            p.team,
-          player_id:       p.playerID ?? null,
-          ppg:             p.ppg,
-          last5_ppg:       p.last5_ppg,
-          base_ppg:        base,
-          matchup_factor:  Math.round(matchupFactor * 1000) / 1000,
-          absence_bonus:   Math.round(shareBonus * 10) / 10,
-          projected_pts:   Math.round(projected * 10) / 10,
-          opposing_oppg:   opposingOppg,
+          name:             p.name,
+          team:             p.team,
+          player_id:        p.playerID ?? null,
+          model:            'ppg_only',
+          ppg:              p.ppg,
+          last5_ppg:        p.last5_ppg,
+          mpg:              p.mpg ?? null,
+          last5_mpg:        p.last5_mpg ?? null,
+          base_pts:         basePts,
+          matchup_factor:   Math.round(matchupFactor * 1000) / 1000,
+          absence_bonus:    Math.round(shareBonus * 10) / 10,
+          projected_pts:    Math.round(projected * 10) / 10,
+          opposing_oppg:    opposingOppg,
           absent_teammates: absentTeammates.map(t => ({ name: t.name, status: t.status, ppg: t.ppg })),
         };
       })
@@ -4036,15 +4223,102 @@ function _botPredictPlayerPoints(matchData) {
   const awayPlayers = buildSide(matchData?.away_top10scorers, hOppg, matchData?.away_injuries);
 
   if (homePlayers.length === 0 && awayPlayers.length === 0) {
-    return { available: false, phase: 1, missing: 'top10scorers_or_ppg' };
+    return { available: false, phase: 2, missing: 'top10scorers_or_ppg' };
   }
 
   return {
-    available:     true,
-    phase:         1,
-    home_players:  homePlayers,
-    away_players:  awayPlayers,
+    available:       true,
+    phase:           2,
+    home_players:    homePlayers,
+    away_players:    awayPlayers,
     league_avg_oppg: LEAGUE_AVG_OPPG,
+  };
+}
+
+// ── MATCHING PROJECTIONS ↔ LIGNES MARCHÉ (Phase 3) ───────────────────────────
+// Enrichit chaque projection avec {line, over_decimal, under_decimal, edge}
+// Retourne recos triées par edge (≥5%)
+
+function _botMatchPlayerPropsToLines(propsPrediction, linesMap, homeTeam, awayTeam) {
+  if (!propsPrediction?.available || !linesMap || Object.keys(linesMap).length === 0) {
+    return { enriched: propsPrediction, recommendations: [] };
+  }
+
+  const _decToAm = d => d >= 2 ? Math.round((d - 1) * 100) : Math.round(-100 / (d - 1));
+
+  const enrichSide = (players, teamName) => {
+    return players.map(p => {
+      const norm = _normalizeName(p.name);
+      const line = linesMap[norm];
+      if (!line || !Number.isFinite(line.line)) return p;
+
+      const diff    = p.projected_pts - line.line;
+      // stdev joueur ~ 5 pts · tanh(diff/5) * 0.20 → cap ±20% swing
+      const overProb  = Math.min(0.85, Math.max(0.15, 0.50 + Math.tanh(diff / 5) * 0.20));
+      const underProb = 1 - overProb;
+
+      const overImplied  = line.over?.decimal  ? 1 / line.over.decimal  : null;
+      const underImplied = line.under?.decimal ? 1 / line.under.decimal : null;
+      const overEdge  = overImplied  != null ? Math.round((overProb  - overImplied)  * 100) : null;
+      const underEdge = underImplied != null ? Math.round((underProb - underImplied) * 100) : null;
+
+      return {
+        ...p,
+        team_full:      teamName,
+        market: {
+          line:          line.line,
+          over_decimal:  line.over?.decimal  ?? null,
+          under_decimal: line.under?.decimal ?? null,
+          over_book:     line.over?.book     ?? null,
+          under_book:    line.under?.book    ?? null,
+          diff:          Math.round(diff * 10) / 10,
+          over_prob:     Math.round(overProb  * 1000) / 1000,
+          under_prob:    Math.round(underProb * 1000) / 1000,
+          over_edge:     overEdge,
+          under_edge:    underEdge,
+        },
+      };
+    });
+  };
+
+  const homeEnriched = enrichSide(propsPrediction.home_players ?? [], homeTeam);
+  const awayEnriched = enrichSide(propsPrediction.away_players ?? [], awayTeam);
+
+  const recommendations = [];
+  for (const p of [...homeEnriched, ...awayEnriched]) {
+    if (!p.market) continue;
+    const { over_edge: oe, under_edge: ue, line } = p.market;
+    const best = (oe ?? -99) >= (ue ?? -99)
+      ? { side: 'OVER',  edge: oe, prob: p.market.over_prob,  decimal: p.market.over_decimal,  book: p.market.over_book }
+      : { side: 'UNDER', edge: ue, prob: p.market.under_prob, decimal: p.market.under_decimal, book: p.market.under_book };
+    if (best.edge == null || best.edge < 5 || !best.decimal) continue;
+
+    recommendations.push({
+      type:          'PLAYER_POINTS',
+      player:        p.name,
+      team:          p.team,
+      side:          best.side,
+      line,
+      projected_pts: p.projected_pts,
+      motor_prob:    Math.round(best.prob * 100),
+      implied_prob:  Math.round((1 / best.decimal) * 100),
+      odds_decimal:  best.decimal,
+      odds_line:     _decToAm(best.decimal),
+      odds_source:   best.book,
+      edge:          best.edge,
+      has_value:     true,
+    });
+  }
+
+  recommendations.sort((a, b) => b.edge - a.edge);
+
+  return {
+    enriched: {
+      ...propsPrediction,
+      home_players: homeEnriched,
+      away_players: awayEnriched,
+    },
+    recommendations,
   };
 }
 
@@ -4126,7 +4400,7 @@ async function handlePaperPlaceBet(request, env, origin) {
     // silencieusement current_bankroll en NaN et casse tous les calculs downstream.
     const stake = Number(bet.stake);
     const odds  = Number(bet.odds_taken);
-    const VALID_MARKETS = ['MONEYLINE', 'SPREAD', 'OVER_UNDER'];
+    const VALID_MARKETS = ['MONEYLINE', 'SPREAD', 'OVER_UNDER', 'PLAYER_POINTS'];
 
     if (!isFinite(stake) || stake <= 0)
       return jsonResponse({ error: 'stake invalide — doit être un nombre > 0' }, 400, origin);

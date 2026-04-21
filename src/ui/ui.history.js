@@ -329,7 +329,7 @@ function _renderBetRow(bet, isFirstInGroup, groupSize) {
   const resultColor = bet.result === 'WIN' ? 'var(--color-success)' : bet.result === 'LOSS' ? 'var(--color-danger)' : bet.result === 'PUSH' ? 'var(--color-muted)' : 'var(--color-warning)';
   const resultLabel = { WIN: '\u2713 Gagn\u00e9', LOSS: '\u2717 Perdu', PUSH: '\u2014 Push', PENDING: '\u23f3 En attente' };
   const oddsDecimal = _americanToDecimal(bet.odds_taken);
-  const marketLabel = { MONEYLINE: 'Vainqueur', SPREAD: 'Handicap', OVER_UNDER: 'Total pts' };
+  const marketLabel = { MONEYLINE: 'Vainqueur', SPREAD: 'Handicap', OVER_UNDER: 'Total pts', PLAYER_POINTS: 'Props joueur' };
 
   // Score du match si disponible
   const scoreStr = (!isPending && bet.home_score != null && bet.away_score != null)
@@ -399,7 +399,7 @@ function _renderBetModal() {
 
 function _renderBetDetail(bet) {
   const oddsDecimal = _americanToDecimal(bet.odds_taken);
-  const marketLabel = { MONEYLINE: 'Vainqueur du match', SPREAD: 'Handicap (spread)', OVER_UNDER: 'Total de points' };
+  const marketLabel = { MONEYLINE: 'Vainqueur du match', SPREAD: 'Handicap (spread)', OVER_UNDER: 'Total de points', PLAYER_POINTS: 'Points joueur' };
   const resultLabel = { WIN: '\u2713 Gagn\u00e9', LOSS: '\u2717 Perdu', PUSH: '\u2014 Push', PENDING: '\u23f3 En attente' };
   const resultColor = bet.result === 'WIN' ? 'var(--color-success)' : bet.result === 'LOSS' ? 'var(--color-danger)' : bet.result === 'PUSH' ? 'var(--color-muted)' : 'var(--color-warning)';
 
