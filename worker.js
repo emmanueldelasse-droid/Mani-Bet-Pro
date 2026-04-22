@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — Cloudflare Worker v6.60
+ * MANI BET PRO — Cloudflare Worker v6.61
  *
  * CORRECTIONS v6.39 :
  *   1. Fix critique bot — emaLambda non défini dans _botEngineCompute.
@@ -387,7 +387,7 @@ export default {
         return jsonResponse({
           status:    'ok',
           worker:    'mani-bet-pro',
-          version:   '6.60.0',
+          version:   '6.61.0',
           timestamp: new Date().toISOString(),
           routes: [
             'GET /nba/matches', 'GET /nba/team/:id/stats', 'GET /nba/team/:id/recent',
@@ -3662,6 +3662,36 @@ async function _botSettleDate(env, dateStr) {
         clvPostMatch = Math.round((log.motor_prob / 100 - impliedHome) * 10000) / 100;
       }
 
+      // ── Settlement PLAYER_POINTS — fetch box score ESPN si recs props ─────
+      const ppRecs = (log.betting_recommendations?.recommendations ?? []).filter(r => r.type === 'PLAYER_POINTS');
+      const hasPPPred = log.player_props_prediction?.available === true;
+      let ppSettled = 0;
+      if (ppRecs.length > 0 || hasPPPred) {
+        try {
+          const box = await _fetchESPNBoxScore(result.id);
+          if (box && box.length > 0) {
+            // Enrichir chaque reco PLAYER_POINTS avec actual_pts + was_right
+            for (const rec of ppRecs) {
+              const match = box.find(b => _normalizeName(b.name) === _normalizeName(rec.player));
+              if (!match) continue;
+              rec.actual_pts = match.pts;
+              rec.actual_mins = match.mins;
+              rec.was_right = rec.side === 'OVER' ? match.pts > rec.line : match.pts < rec.line;
+              if (rec.was_right !== null) ppSettled++;
+            }
+            // Enrichir projections (tous les joueurs, pas que ceux avec reco)
+            if (hasPPPred) {
+              const enrich = (players) => (players ?? []).map(p => {
+                const m = box.find(b => _normalizeName(b.name) === _normalizeName(p.name));
+                return m ? { ...p, actual_pts: m.pts, actual_mins: m.mins } : p;
+              });
+              log.player_props_prediction.home_players = enrich(log.player_props_prediction.home_players);
+              log.player_props_prediction.away_players = enrich(log.player_props_prediction.away_players);
+            }
+          }
+        } catch (err) { console.warn(`[BOT] PP settle ${result.id}:`, err.message); }
+      }
+
       log.result_home_score = homeScore;
       log.result_away_score = awayScore;
       log.result_winner     = winner;
@@ -3673,6 +3703,7 @@ async function _botSettleDate(env, dateStr) {
       log.ou_was_right      = ouWasRight;
       log.spread_was_right  = spreadWasRight;
       log.clv_post_match    = clvPostMatch;
+      log.pp_recs_settled   = ppSettled;
       // Calibration modèle O/U : est_total_nba vs résultat réel (indépendant de la reco)
       if (log.est_total_nba != null && totalPts != null) {
         const modelOver = log.est_total_nba > (log.ou_line_nba ?? log.est_total_nba);
@@ -3687,6 +3718,42 @@ async function _botSettleDate(env, dateStr) {
   }
 
   return { settled, date: dateStr };
+}
+
+// Fetch box score ESPN pour un eventId · retour liste { name, team, pts, mins }
+async function _fetchESPNBoxScore(eventId) {
+  if (!eventId) return null;
+  try {
+    const data = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=${eventId}`);
+    if (!data?.boxscore?.players) return null;
+
+    const out = [];
+    for (const teamGroup of data.boxscore.players) {
+      const teamAbv = String(teamGroup.team?.abbreviation ?? '').toUpperCase() || null;
+      for (const section of (teamGroup.statistics ?? [])) {
+        const keys = section.keys ?? [];
+        const ptsIdx = keys.indexOf('points');
+        const minIdx = keys.indexOf('minutes');
+        if (ptsIdx === -1) continue;
+
+        for (const athlete of (section.athletes ?? [])) {
+          const name = athlete.athlete?.displayName ?? athlete.athlete?.shortName ?? null;
+          if (!name) continue;
+          const rawPts = athlete.stats?.[ptsIdx];
+          const pts    = rawPts != null && rawPts !== '--' ? parseInt(rawPts, 10) : null;
+          const rawMin = minIdx >= 0 ? athlete.stats?.[minIdx] : null;
+          const mins   = rawMin != null && rawMin !== '--' ? parseInt(rawMin, 10) : null;
+          if (Number.isFinite(pts)) {
+            out.push({ name, team: teamAbv, pts, mins });
+          }
+        }
+      }
+    }
+    return out;
+  } catch (err) {
+    console.warn(`ESPN box score fetch error for ${eventId}:`, err.message);
+    return null;
+  }
 }
 
 async function handleBotSettleLogs(request, env, origin) {
