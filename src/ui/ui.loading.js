@@ -39,23 +39,4 @@ export class LoadingUI {
     if (bar) bar.style.width = '0%';
   }
 
-  /**
-   * Génère le HTML du loader à injecter dans index.html.
-   * @returns {string}
-   */
-  static renderHTML() {
-    return `
-      <div id="loading-overlay" class="loading-overlay hidden">
-        <div class="loading-overlay__content">
-          <div class="loading-overlay__logo">Mani Bet Pro</div>
-          <div class="loading-overlay__bar">
-            <div id="loading-bar-fill" class="loading-overlay__bar-fill"></div>
-          </div>
-          <div id="loading-message" class="loading-overlay__message text-muted">
-            Chargement…
-          </div>
-        </div>
-      </div>
-    `;
-  }
 }

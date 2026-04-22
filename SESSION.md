@@ -1,50 +1,65 @@
 # Mani Bet Pro
 
+## Règles update SESSION (IA OBLIGATOIRE)
+Début tâche → "En cours" étape 1/N · Fin étape → +1 · Merge → vider "En cours" + bump version + cocher TODO · User mentionne future → ajouter TODO + demander P · Commit SESSION si step >5min ou >3 tool calls.
+
+## En cours
+néant
+
+## TODO
+néant (demander P quand user ajoute)
+
 ## État
-Worker `manibetpro` v6.70 · `manibetpro.workers.dev`
-Front: GitHub Pages · KV `PAPER_TRADING` id=`17eb7ddc41a949dd99bd840142832cfd`
-Stack: CF Worker + KV + Tank01 (RapidAPI) + ESPN + Claude API + Telegram
+Worker `manibetpro` v6.71 · `manibetpro.emmanueldelasse.workers.dev` · Front GH Pages
+KV `PAPER_TRADING` id=`17eb7ddc41a949dd99bd840142832cfd`
+Stack: CF Worker + KV + Tank01 + ESPN + Claude API + Telegram
 
 ## Routes
-- `/health`
-- `/nba/matches?date=YYYYMMDD` · `/odds` · `/injuries` · `/standings`
-- `/nba/team-detail?home=X&away=Y[&bust=1]` → last10/splits/H2H/top10
-- `/nba/teams/stats` · `/roster-injuries` · `/ai-injuries` · `/nba/player-points?event_id=X`
-- `/mlb/matches` · `/odds` · `/pitchers` · `/standings`
-- `/bot/run` POST · `/logs` · `/settle-logs` POST · `/logs/export.csv` · `/odds-history?matchId=X`
-- `/tennis/sports-list|odds|stats`
-- Cron `0 * * * *` · bot NBA+MLB · 10h UTC nightly-settle J-1/J-2 · snapshot cotes ESPN→KV `odds_snap_{matchId}`
+- `/health` · `/nba/{matches,odds,injuries,standings,results,team-detail,teams/stats,roster-injuries,ai-injuries[-batch],ai-player-props,player-points}`
+- `/nba/{roster,boxscore,schedule}-debug` · `/debug/basketusa` (`?secret=X` obligatoire)
+- `/mlb/{matches,odds,pitchers,standings,team-stats,bullpen-stats,weather}`
+- `/bot/{run POST,logs,settle-logs POST,logs/export.csv,odds-history?matchId=X,calibration}`
+- `/tennis/{sports-list,odds,stats}`
+- Cron `0 * * * *` · bot NBA+MLB · 10-11h UTC nightly-settle J-1/J-2 · 22h UTC AI props · snapshot ESPN→KV `odds_snap_{id}`
 
 ## Fichiers
-- `worker.js` backend monolithe (~4900L) · `wrangler.jsonc` config CF
-- `src/ui/` → ui.match-detail.teamdetail.js · ui.dashboard.js · ui.bot.js
+- `worker.js` ~7263L monolithe · `wrangler.jsonc`
+- `src/ui/` → match-detail.teamdetail · dashboard · bot · history · match-detail.helpers
+- `src/utils/utils.odds.js` → source canonique conversions cotes
 
 ## Pièges Tank01
-- `team.Roster` **R majuscule** (pas `roster`)
-- `getNBATeams` requiert `statsToGet=averages` pour ppg/reb/ast
-- `teamAbv` avec espaces → `.trim().toUpperCase()` systématique
-- Quota limité → cache 24h KV obligatoire rosters
-- `?bust=1` vide cache team-detail + roster
-- Cache team-detail 6h/8h · roster 24h
-- Box scores: 5 derniers/équipe cachés KV 7j par `gameID` → `last5_ppg` actif, ~5 calls max premier hit, ~0 ensuite
-- Bundle calls séquentiels (anti rate-limit)
+- `team.Roster` R maj (fallback `.roster`) · `statsToGet=averages` obligatoire
+- `teamAbv.trim().toUpperCase()` systématique · cache KV rosters 6h · team-detail 6/8h · box 7j
+- `?bust=1` force refetch, overwrite si data>0 · bundle calls séquentiels anti rate-limit
+- `parseFloat(ppg)` → `Number.isFinite` (sinon NaN cascade)
 
 ## Pièges TheOddsAPI
-- `player_points` sans `bookmakers=` → API renvoie books dispo · avec filtre spécifique → 422 si book absent (worker.js:2463)
+- `player_points` sans `bookmakers=` → books dispo · filtre spécifique → 422 si absent (worker.js:2450)
+
+## Pièges MLB
+- `_mlbSeason()` dynamique · jamais hardcoder (nov-fév = saison précédente)
+- Double-header : pitcher keyé teamName → warn + garde 1er (refacto futur)
+- IP baseball `X.Y` = X innings + Y outs · `parseFloat` faux
+- MLB Stats API `date=YYYY-MM-DD` · ESPN `YYYYMMDD` · logs MLB stockent YYYYMMDD (aligné NBA)
+
+## Pièges Timezone
+- `getTodayET` + `_botFormatDate` via `Intl.DateTimeFormat` · DST auto
+- Nightly-settle fenêtre 10-11h UTC · idempotent KV
+
+## Sécu
+- Debug routes → `_denyIfNoDebugAuth()` · refuse si DEBUG_SECRET unset/wrong
+- Params user → regex avant KV key (`matchId [a-zA-Z0-9_-]+` · `date \d{8}`)
+- UI innerHTML → `escapeHtml` (helpers.js) pour data tierce
 
 ## Bugs actifs
-- néant
+néant
 
 ## Deploy
 `git push origin main` → CF auto-deploy · pas de `wrangler deploy`.
 
 ## Hors SESSION (charger à la demande)
-- Secrets/reprise nouveau compte → `.claude/onboarding.md`
+- Secrets/nouveau compte → `.claude/onboarding.md`
 - Historique → `git log --oneline`
-- TODO → GitHub issues
 
-## Règle
-Merge main → update SI impact critique. Format: voir CLAUDE.md.
-
-## Règle OBLIGATOIRE réponses user
-Vocabulaire simple · exemples concrets · détails CLI explicités. Voir CLAUDE.md.
+## Règle format
+CLAUDE.md · télégraphique · `·` sep · `→` cause · refs `file:line` · < 3000 octets

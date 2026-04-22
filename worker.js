@@ -122,10 +122,8 @@ const PAPER_KV_KEY        = 'paper_trading_state';
 const QUOTA_KV_KEY        = 'odds_quota_state';
 const TANK01_KV_KEY       = 'tank01_teams_stats';
 const TANK01_INJURIES_KEY = 'tank01_injuries_impact';
-const TANK01_QUOTA_KEY    = 'tank01_quota_state';
 const TANK01_ROSTER_KEY   = 'tank01_roster_injuries_v1';
 const TENNIS_CSV_KEY      = 'tennis_csv_stats';
-const AI_INJURIES_KEY     = 'ai_injuries_cache';
 const TENNIS_ODDS_KEY     = 'tennis_odds_cache';
 
 const PAPER_BETS_INDEX_KEY = 'paper_bets_index';
@@ -430,8 +428,8 @@ export default {
  * Cache KV 6h read / 8h write. ~23 appels Tank01 max sur cache miss.
  */
 async function handleNBATeamDetail(url, env, origin) {
-  const homeRaw = String(url.searchParams.get('home') || '').toUpperCase();
-  const awayRaw = String(url.searchParams.get('away') || '').toUpperCase();
+  const homeRaw = String(url.searchParams.get('home') || '').trim().toUpperCase();
+  const awayRaw = String(url.searchParams.get('away') || '').trim().toUpperCase();
 
   if (!homeRaw || !awayRaw) {
     return jsonResponse({ error: 'missing_home_or_away' }, 400, origin);
@@ -440,7 +438,7 @@ async function handleNBATeamDetail(url, env, origin) {
   const home = normalizeTank01TeamAbv(homeRaw);
   const away = normalizeTank01TeamAbv(awayRaw);
 
-  const cacheKey    = `team_detail_v7_${awayRaw}_${homeRaw}`;
+  const cacheKey    = `team_detail_v7_${away}_${home}`;
   const kv          = env.PAPER_TRADING;
   const now         = Date.now();
   const READ_TTL_MS = 6 * 60 * 60 * 1000;
@@ -584,28 +582,6 @@ function _teamDetailExtractGameDate(game) {
   if (/^\d{8}$/.test(raw)) return `${raw.slice(0,4)}-${raw.slice(4,6)}-${raw.slice(6,8)}`;
   const d = new Date(raw);
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
-}
-
-function _teamDetailExtractScoreFromBoxScore(body, teamAbv, oppAbv) {
-  const candidates = [
-    { home: body?.homePts, away: body?.awayPts, homeAbv: body?.home, awayAbv: body?.away },
-    { home: body?.homeScore, away: body?.awayScore, homeAbv: body?.home, awayAbv: body?.away },
-    { home: body?.homeTeamScore, away: body?.awayTeamScore, homeAbv: body?.home, awayAbv: body?.away },
-    { home: body?.homeTeam?.score, away: body?.awayTeam?.score, homeAbv: body?.home, awayAbv: body?.away },
-  ];
-
-  for (const c of candidates) {
-    const home = _teamDetailSafeNum(c.home);
-    const away = _teamDetailSafeNum(c.away);
-    if (home === null || away === null) continue;
-    const homeAbv = String(c.homeAbv ?? '').toUpperCase();
-    const awayAbv = String(c.awayAbv ?? '').toUpperCase();
-    if (homeAbv && awayAbv) {
-      if (homeAbv === teamAbv && awayAbv === oppAbv) return { teamPts: home, oppPts: away, homeAway: 'home' };
-      if (awayAbv === teamAbv && homeAbv === oppAbv) return { teamPts: away, oppPts: home, homeAway: 'away' };
-    }
-  }
-  return null;
 }
 
 function _teamDetailExtractPlayerBoxScores(body) {
@@ -860,6 +836,7 @@ async function handleNBAMatches(url, origin) {
   const dateStr   = dateParam
     ? dateParam.replace(/-/g, '')
     : formatDateESPN(new Date());
+  if (!/^\d{8}$/.test(dateStr)) return errorResponse('invalid date format · YYYYMMDD ou YYYY-MM-DD', 400, origin);
 
   const data = await espnFetch(`${ESPN_SCOREBOARD}?dates=${dateStr}&limit=25`);
   if (!data) return errorResponse('ESPN fetch failed', 502, origin);
@@ -878,6 +855,16 @@ function _getTank01Key(env) {
   if (env.TANK01_API_KEY2) return env.TANK01_API_KEY2;
   if (env.TANK01_API_KEY3) return env.TANK01_API_KEY3;
   return env.TANK01_API_KEY ?? null;
+}
+
+// Guard debug strict : refuse si DEBUG_SECRET absent OU incorrect.
+// Retourne Response erreur si KO, null sinon.
+function _denyIfNoDebugAuth(url, env, origin) {
+  const provided = url.searchParams.get('secret');
+  if (!env.DEBUG_SECRET || !provided || provided !== env.DEBUG_SECRET) {
+    return errorResponse('Unauthorized', 401, origin);
+  }
+  return null;
 }
 
 async function _tank01FetchWithFallback(url, env, timeout = 10000) {
@@ -1092,7 +1079,7 @@ async function handleNBARosterInjuries(env, origin) {
     const playerMap = {};
 
     for (const team of teams) {
-      const roster  = team.roster ?? {};
+      const roster  = team.Roster ?? team.roster ?? {};
       const players = Array.isArray(roster) ? roster : Object.values(roster);
 
       for (const player of players) {
@@ -1917,34 +1904,11 @@ async function _callClaudeWithWebSearch(apiKey, systemPrompt, userPrompt, maxTok
   return finalText || null;
 }
 
-function _validateAIInjuryList(list, teamsAbv) {
-  if (!Array.isArray(list)) return [];
-  return list.filter(p => {
-    if (!p || typeof p !== 'object') return false;
-    if (!p.name || typeof p.name !== 'string' || p.name.trim() === '') return false;
-    if (!p.team || typeof p.team !== 'string') return false;
-    if (p.ppg !== null && p.ppg !== undefined) {
-      const ppg = parseFloat(p.ppg);
-      if (isNaN(ppg) || ppg < 0 || ppg > 60) { p.ppg = null; }
-      else { p.ppg = Math.round(ppg * 10) / 10; }
-    }
-    return true;
-  }).map(p => ({
-    name:   p.name.trim(),
-    team:   p.team.trim().toUpperCase(),
-    status: p.status ?? 'OUT',
-    ppg:    p.ppg ?? null,
-    source: p.source ?? 'claude_web_search',
-    note:   p.note ?? null,
-  }));
-}
-
 // ── HANDLER : PLAYER TEST ─────────────────────────────────────────────────────
 
 async function handleNBAPlayerTest(url, env, origin) {
-  // Guard debug — CORRECTION v6.33
-  if (env.DEBUG_SECRET && url.searchParams.get('secret') !== env.DEBUG_SECRET)
-    return errorResponse('Unauthorized', 401, origin);
+  const authDeny = _denyIfNoDebugAuth(url, env, origin);
+  if (authDeny) return authDeny;
   const tank01Key  = _getTank01Key(env);
   if (!tank01Key) {
     return jsonResponse({ available: false, note: 'TANK01_API_KEY not configured' }, 200, origin);
@@ -1979,9 +1943,8 @@ async function handleNBAPlayerTest(url, env, origin) {
 // ── HANDLER : ROSTER DEBUG ────────────────────────────────────────────────────
 
 async function handleNBARosterDebug(url, env, origin) {
-  // Guard debug — CORRECTION v6.33
-  if (env.DEBUG_SECRET && url.searchParams.get('secret') !== env.DEBUG_SECRET)
-    return errorResponse('Unauthorized', 401, origin);
+  const authDeny = _denyIfNoDebugAuth(url, env, origin);
+  if (authDeny) return authDeny;
   const teamAbv  = url.searchParams.get('team') ?? 'LAL';
   const debugUrl = `${TANK01_BASE}/getNBATeams?rosters=true&schedules=false&statsToGet=averages&topPerformers=false&teamStats=false`;
 
@@ -2002,7 +1965,7 @@ async function handleNBARosterDebug(url, env, origin) {
     }, 200, origin);
   }
 
-  const roster  = team.roster ?? {};
+  const roster  = team.Roster ?? team.roster ?? {};
   const players = Array.isArray(roster) ? roster : Object.values(roster);
   const sample  = players.slice(0, 3).map(p => ({
     playerID:   p.playerID,
@@ -2332,8 +2295,10 @@ function _buildLatestGameSummary(teamAbv, game) {
 }
 
 async function handleDebugBasketUSA(url, env, origin) {
-  const home = String(url.searchParams.get('home') ?? '').toUpperCase();
-  const away = String(url.searchParams.get('away') ?? '').toUpperCase();
+  const authDeny = _denyIfNoDebugAuth(url, env, origin);
+  if (authDeny) return authDeny;
+  const home = String(url.searchParams.get('home') ?? '').trim().toUpperCase();
+  const away = String(url.searchParams.get('away') ?? '').trim().toUpperCase();
 
   if (!home || !away) {
     return jsonResponse({ error: 'home and away params required' }, 400, origin);
@@ -2472,9 +2437,8 @@ function normalizeTank01TeamAbv(abv = '') {
 // Retourne la structure brute du body Tank01 getNBABoxScore pour diagnostiquer
 // les champs playerStats, homePts, awayPts, etc.
 async function handleNBABoxscoreDebug(url, env, origin) {
-  // Guard debug — CORRECTION v6.33
-  if (env.DEBUG_SECRET && url.searchParams.get('secret') !== env.DEBUG_SECRET)
-    return errorResponse('Unauthorized', 401, origin);
+  const authDeny = _denyIfNoDebugAuth(url, env, origin);
+  if (authDeny) return authDeny;
   const gameID = url.searchParams.get('gameID');
   if (!gameID) {
     return jsonResponse({ error: 'gameID param required (ex: CHA@DET_20260408)' }, 400, origin);
@@ -2531,9 +2495,8 @@ async function handleNBABoxscoreDebug(url, env, origin) {
 // Retourne les 3 premiers matchs du schedule pour voir les champs disponibles
 // (homeTeamScore, awayTeamScore, gameResult, etc.)
 async function handleNBAScheduleDebug(url, env, origin) {
-  // Guard debug — CORRECTION v6.33
-  if (env.DEBUG_SECRET && url.searchParams.get('secret') !== env.DEBUG_SECRET)
-    return errorResponse('Unauthorized', 401, origin);
+  const authDeny = _denyIfNoDebugAuth(url, env, origin);
+  if (authDeny) return authDeny;
   const teamAbv = url.searchParams.get('team') ?? 'CHA';
 
   const res = await _tank01FetchWithFallback(
@@ -2619,8 +2582,10 @@ async function handleNBATeamsStats(env, origin) {
     const teams = {};
 
     for (const team of (data.body ?? [])) {
-      const ppg  = parseFloat(team.ppg)  ?? null;
-      const oppg = parseFloat(team.oppg) ?? null;
+      const ppgRaw  = parseFloat(team.ppg);
+      const oppgRaw = parseFloat(team.oppg);
+      const ppg  = Number.isFinite(ppgRaw)  ? ppgRaw  : null;
+      const oppg = Number.isFinite(oppgRaw) ? oppgRaw : null;
       teams[team.teamAbv] = {
         teamID:            team.teamID,
         teamAbv:           team.teamAbv,
@@ -3159,10 +3124,10 @@ async function handleNBAStandings(origin) {
 //     motor_was_right, clv_post_match, settled_at }
 
 async function _runBotCron(env, forceRun = false) {
-  const nowParis = _botNowParis();
-  const dateStr  = _botFormatDate(nowParis);
+  const now     = new Date();
+  const dateStr = _botFormatDate(now);
 
-  console.log(`[BOT] Cron démarré — ${nowParis.toISOString()} Paris, date NBA: ${dateStr}`);
+  console.log(`[BOT] Cron démarré — ${now.toISOString()}, date NBA (Paris): ${dateStr}`);
 
   // Charger les matchs du jour
   const espnData = await espnFetch(`${ESPN_SCOREBOARD}?dates=${dateStr}&limit=25`);
@@ -3641,8 +3606,9 @@ async function _botSettleDate(env, dateStr, options = {}) {
       // force=true : re-settle même si déjà settlé (pour enrichir avec nouveaux champs)
       if (!force && log.motor_was_right !== null) continue;
 
-      const homeScore = parseInt(result.home_team?.score ?? 0);
-      const awayScore = parseInt(result.away_team?.score ?? 0);
+      const homeScore = parseInt(result.home_team?.score ?? '', 10);
+      const awayScore = parseInt(result.away_team?.score ?? '', 10);
+      if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore) || homeScore === awayScore) continue;
       const winner    = homeScore > awayScore ? 'HOME' : 'AWAY';
       const margin    = homeScore - awayScore;
       const totalPts  = homeScore + awayScore;
@@ -3672,7 +3638,8 @@ async function _botSettleDate(env, dateStr, options = {}) {
 
       let clvPostMatch = null;
       if (log.motor_prob !== null && log.odds_at_analysis?.home_ml) {
-        const impliedHome = 100 / (Math.abs(log.odds_at_analysis.home_ml) + 100);
+        const ml = log.odds_at_analysis.home_ml;
+        const impliedHome = ml < 0 ? Math.abs(ml) / (Math.abs(ml) + 100) : 100 / (ml + 100);
         clvPostMatch = Math.round((log.motor_prob / 100 - impliedHome) * 10000) / 100;
       }
 
@@ -3719,9 +3686,9 @@ async function _botSettleDate(env, dateStr, options = {}) {
       log.clv_post_match    = clvPostMatch;
       log.pp_recs_settled   = ppSettled;
       // Calibration modèle O/U : est_total_nba vs résultat réel (indépendant de la reco)
-      if (log.est_total_nba != null && totalPts != null) {
-        const modelOver = log.est_total_nba > (log.ou_line_nba ?? log.est_total_nba);
-        const actualOver = totalPts > (log.ou_line_nba ?? log.est_total_nba);
+      if (log.est_total_nba != null && log.ou_line_nba != null && totalPts != null) {
+        const modelOver = log.est_total_nba > log.ou_line_nba;
+        const actualOver = totalPts > log.ou_line_nba;
         log.ou_model_was_right = modelOver === actualOver;
       }
       log.settled_at        = new Date().toISOString();
@@ -4009,7 +3976,8 @@ async function _runNightlySettle(env) {
   if (!env.PAPER_TRADING) return;
   try {
     const now = new Date();
-    if (now.getUTCHours() !== 10) return; // cron horaire, on ne tourne que 1x/j
+    const h = now.getUTCHours();
+    if (h < 10 || h > 11) return; // fenêtre 10-11h UTC · idempotent via NIGHTLY_SETTLE_RUN_KEY
 
     const todayStr = formatDateESPN(now);
     const lastRun = await env.PAPER_TRADING.get(NIGHTLY_SETTLE_RUN_KEY);
@@ -4200,7 +4168,9 @@ async function _getAIPlayerPropsLines(dateStr, gameKey, env) {
 async function handleOddsHistory(url, env, origin) {
   if (!env.PAPER_TRADING) return jsonResponse({ error: 'KV not configured' }, 500, origin);
   const matchId = url.searchParams.get('matchId');
-  if (!matchId) return jsonResponse({ error: 'matchId required' }, 400, origin);
+  if (!matchId || !/^[a-zA-Z0-9_-]+$/.test(matchId)) {
+    return jsonResponse({ error: 'invalid matchId' }, 400, origin);
+  }
   try {
     const raw = await env.PAPER_TRADING.get(`${ODDS_SNAP_PREFIX}${matchId}`);
     if (!raw) return jsonResponse({ available: false, snapshots: [], movement: null }, 200, origin);
@@ -5217,13 +5187,20 @@ function _botGetMarketOdds(oddsData, homeName, awayName) {
   ) ?? null;
 }
 
-function _botNowParis() {
-  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
+// Retourne date YYYYMMDD pour Europe/Paris (DST géré via Intl)
+// Remplace l'ancien _botNowParis + _botFormatDate qui dépendaient d'un reparse fragile.
+function _botFormatDate(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date);
+  const y = parts.find(p => p.type === 'year').value;
+  const m = parts.find(p => p.type === 'month').value;
+  const d = parts.find(p => p.type === 'day').value;
+  return `${y}${m}${d}`;
 }
-
-function _botFormatDate(date) {
-  return date.toISOString().slice(0, 10).replace(/-/g, '');
-}
+// Legacy : _botNowParis renvoyait un Date dont les champs UTC étaient les heures Paris.
+// Remplacé par appels directs à Date + _botFormatDate pour éviter ambiguïté.
+function _botNowParis() { return new Date(); }
 
 // ── PAPER TRADING ─────────────────────────────────────────────────────────────
 
@@ -5269,8 +5246,8 @@ async function handlePaperPlaceBet(request, env, origin) {
     bet.clv       = null;
 
     state.bets.push(bet);
-    state.current_bankroll -= bet.stake;
-    state.total_staked     += bet.stake;
+    state.current_bankroll = Math.round((state.current_bankroll - bet.stake) * 100) / 100;
+    state.total_staked     = Math.round((state.total_staked + bet.stake) * 100) / 100;
 
     await env.PAPER_TRADING.put(PAPER_KV_KEY, JSON.stringify(state));
 
@@ -5302,8 +5279,8 @@ async function handlePaperSettleBet(request, betId, env, origin) {
       return jsonResponse({ error: 'Bet already settled — use force:true to override' }, 404, origin);
     }
     if (force && bet.result !== 'PENDING') {
-      state.current_bankroll -= (bet.stake + oldPnl);
-      state.total_pnl         = Math.round((state.total_pnl - oldPnl) * 100) / 100;
+      state.current_bankroll = Math.round((state.current_bankroll - bet.stake - oldPnl) * 100) / 100;
+      state.total_pnl        = Math.round((state.total_pnl - oldPnl) * 100) / 100;
     }
 
     bet.result       = body.result;
@@ -5330,8 +5307,8 @@ async function handlePaperSettleBet(request, betId, env, origin) {
       bet.clv = Math.round((bet.motor_prob / 100 - impliedClosing) * 10000) / 100;
     }
 
-    state.current_bankroll += bet.stake + bet.pnl;
-    state.total_pnl         = Math.round((state.total_pnl + bet.pnl) * 100) / 100;
+    state.current_bankroll = Math.round((state.current_bankroll + bet.stake + bet.pnl) * 100) / 100;
+    state.total_pnl        = Math.round((state.total_pnl + bet.pnl) * 100) / 100;
 
     await env.PAPER_TRADING.put(PAPER_KV_KEY, JSON.stringify(state));
 
@@ -5895,8 +5872,14 @@ function formatDateESPN(date) {
 }
 
 function getTodayET() {
-  const now = new Date();
-  return new Date(now.getTime() + (-5) * 3600000).toISOString().slice(0, 10);
+  // YYYY-MM-DD America/New_York · DST géré par Intl
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date());
+  const y = parts.find(p => p.type === 'year').value;
+  const m = parts.find(p => p.type === 'month').value;
+  const d = parts.find(p => p.type === 'day').value;
+  return `${y}-${m}-${d}`;
 }
 
 function currentSeason() {
@@ -5912,6 +5895,12 @@ const MLB_STATS_API        = 'https://statsapi.mlb.com/api/v1';
 const MLB_ODDS_KV_KEY      = 'mlb_odds_cache';
 const MLB_PITCHER_KV_KEY   = 'mlb_pitchers_cache';
 const MLB_TEAM_STATS_KV_KEY = 'mlb_team_stats_cache';
+// Saison MLB dynamique : mars-décembre = saison courante · janvier-février = saison précédente
+function _mlbSeason() {
+  const d = new Date();
+  const y = d.getUTCFullYear();
+  return d.getUTCMonth() < 2 ? y - 1 : y;
+}
 
 // ── ROUTES (à ajouter dans le router) ────────────────────────────────────────
 // GET  /mlb/matches
@@ -5996,7 +5985,7 @@ function parseMLBTeamStats(competitor) {
     return s ? parseFloat(s.displayValue) : null;
   };
   return {
-    runs_per_game:   get('batting.avg') ?? null,
+    runs_per_game:   null, // ESPN ne fournit pas ce champ · source = MLB standings
     batting_avg:     get('batting.avg') ?? null,
     era:             get('pitching.era') ?? null,
     win_pct:         competitor.records?.find(r => r.type === 'total')?.pct ?? null,
@@ -6065,7 +6054,13 @@ async function handleMLBPitchers(url, env, origin) {
       );
       results.forEach((r, idx) => {
         if (r.status === 'fulfilled' && r.value) {
-          pitchers[batch[idx].name] = r.value;
+          const teamName = batch[idx].name;
+          if (pitchers[teamName]) {
+            // Double-header : garder premier pitcher · logguer collision pour détection manuelle
+            console.warn(`[MLB] double-header pitcher collision pour ${teamName} · garde ${pitchers[teamName].name} · ignore ${r.value.name}`);
+          } else {
+            pitchers[teamName] = r.value;
+          }
         }
       });
     }
@@ -6095,7 +6090,7 @@ async function _enrichMLBPitcher(pitcher, env) {
   try {
     // Appel séparé pour les stats saison — le hydrate(stats) du schedule ne les retourne pas
     const resp = await fetchTimeout(
-      `${MLB_STATS_API}/people/${pitcher.id}/stats?stats=season&group=pitching&season=2026`,
+      `${MLB_STATS_API}/people/${pitcher.id}/stats?stats=season&group=pitching&season=${_mlbSeason()}`,
       {}, 8000
     );
     if (!resp?.ok) return { id: pitcher.id, name: pitcher.fullName, era: null, fip: null, whip: null, source: 'mlb_stats_api' };
@@ -6221,7 +6216,7 @@ function _parseMLBOddsResponse(data) {
 async function handleMLBStandings(origin) {
   try {
     const resp = await fetchTimeout(
-      `${MLB_STATS_API}/standings?leagueId=103,104&season=2026&standingsTypes=regularSeason&hydrate=team,records(home,away,last10)`,
+      `${MLB_STATS_API}/standings?leagueId=103,104&season=${_mlbSeason()}&standingsTypes=regularSeason&hydrate=team,records(home,away,last10)`,
       {}, 10000
     );
     if (!resp?.ok) return jsonResponse({ available: false }, 200, origin);
@@ -6282,8 +6277,8 @@ async function handleMLBBullpenStats(env, origin) {
   try {
     // Essai : stats=season avec subGroup=starter et reliever séparément
     const [starterResp, relieverResp] = await Promise.all([
-      fetchTimeout(`${MLB_STATS_API}/teams/stats?season=2026&sportId=1&stats=season&group=pitching&subGroup=starter`, {}, 10000),
-      fetchTimeout(`${MLB_STATS_API}/teams/stats?season=2026&sportId=1&stats=season&group=pitching&subGroup=reliever`, {}, 10000),
+      fetchTimeout(`${MLB_STATS_API}/teams/stats?season=${_mlbSeason()}&sportId=1&stats=season&group=pitching&subGroup=starter`, {}, 10000),
+      fetchTimeout(`${MLB_STATS_API}/teams/stats?season=${_mlbSeason()}&sportId=1&stats=season&group=pitching&subGroup=reliever`, {}, 10000),
     ]);
 
     const teams = {};
@@ -6334,8 +6329,8 @@ async function handleMLBTeamStats(env, origin) {
   try {
     // 2 appels parallèles : hitting + pitching (1 call chacun pour les 30 équipes)
     const [hitResp, pitResp] = await Promise.all([
-      fetchTimeout(`${MLB_STATS_API}/teams/stats?season=2026&sportId=1&stats=season&group=hitting`, {}, 10000),
-      fetchTimeout(`${MLB_STATS_API}/teams/stats?season=2026&sportId=1&stats=season&group=pitching`, {}, 10000),
+      fetchTimeout(`${MLB_STATS_API}/teams/stats?season=${_mlbSeason()}&sportId=1&stats=season&group=hitting`, {}, 10000),
+      fetchTimeout(`${MLB_STATS_API}/teams/stats?season=${_mlbSeason()}&sportId=1&stats=season&group=pitching`, {}, 10000),
     ]);
 
     const teams = {};
@@ -6504,8 +6499,9 @@ async function _fetchWeatherForVenue(venue, env) {
 // ── CRON MLB BOT ──────────────────────────────────────────────────────────────
 async function _runMLBBotCron(env, forceRun = false) {
   const now     = new Date();
-  const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD
-  const dateESPN = dateStr.replace(/-/g, '');       // YYYYMMDD
+  const dateStr = _botFormatDate(now);                  // YYYYMMDD Paris (aligné NBA)
+  const dateISO = `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)}`; // YYYY-MM-DD pour MLB Stats API
+  const dateESPN = dateStr;
 
   console.log(`[MLB BOT] Démarré — ${now.toISOString()}, date: ${dateStr}`);
 
@@ -6545,7 +6541,7 @@ async function _runMLBBotCron(env, forceRun = false) {
 
   // 4. Charger données en parallèle — appels directs aux fonctions
   const fakeOrigin = 'https://manibetpro.emmanueldelasse.workers.dev';
-  const fakeUrl    = new URL(`https://manibetpro.emmanueldelasse.workers.dev/mlb/pitchers?date=${dateStr}`);
+  const fakeUrl    = new URL(`https://manibetpro.emmanueldelasse.workers.dev/mlb/pitchers?date=${dateISO}`);
   const fakeOddsUrl = new URL('https://manibetpro.emmanueldelasse.workers.dev/mlb/odds/comparison');
   const fakeStandUrl = new URL('https://manibetpro.emmanueldelasse.workers.dev/mlb/standings');
 
@@ -6893,7 +6889,7 @@ function _mlbEngineCompute(matchData) {
   const pitcherRed = 1 - Math.min(0.30, Math.max(0, (8 - (hFIP + aFIP) / 2) / 20));
   const estTotal   = (hRPG + aRPG) * parkFact * pitcherRed;
 
-  const ouBk = market_odds?.bookmakers?.[0];
+  const ouBk = market_odds?.bookmakers?.find(b => b?.total_line != null) ?? market_odds?.bookmakers?.[0];
   const ouLine = ouBk?.total_line ?? null;
   if (ouLine) {
     const diff     = estTotal - ouLine;
@@ -6964,8 +6960,12 @@ function _botPredictMLBStrikeouts(matchData) {
   // IP attendu par starter (cap 5.5-7 selon qualité)
   const expectedIP = (pitcher) => {
     if (!pitcher) return null;
-    const gs  = pitcher.games || pitcher.innings ? parseFloat(pitcher.innings) / Math.max(1, pitcher.games) : null;
-    if (gs && Number.isFinite(gs)) return Math.min(7.5, Math.max(3.5, gs));
+    const games   = parseFloat(pitcher.games);
+    const innings = parseFloat(pitcher.innings);
+    const gs = (Number.isFinite(games) && games > 0 && Number.isFinite(innings) && innings > 0)
+      ? innings / games
+      : null;
+    if (gs !== null) return Math.min(7.5, Math.max(3.5, gs));
     // Fallback : basé sur FIP (bon pitcher → plus d'IP)
     const fip = pitcher.fip ?? pitcher.era ?? 4.5;
     if (fip < 3.5)      return 6.2;
@@ -7110,8 +7110,9 @@ async function _mlbBotSettleDate(env, dateStr, options = {}) {
       const log = JSON.parse(raw);
       if (!force && log.motor_was_right !== null) continue;
 
-      const homeScore = parseInt(result.home_team?.score ?? 0);
-      const awayScore = parseInt(result.away_team?.score ?? 0);
+      const homeScore = parseInt(result.home_team?.score ?? '', 10);
+      const awayScore = parseInt(result.away_team?.score ?? '', 10);
+      if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore) || homeScore === awayScore) continue;
       const winner    = homeScore > awayScore ? 'HOME' : 'AWAY';
       const margin    = homeScore - awayScore;
       const totalRuns = homeScore + awayScore;
