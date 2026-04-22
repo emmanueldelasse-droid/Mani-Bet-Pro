@@ -37,7 +37,14 @@ function _renderShell() {
       <div class="page-header">
         <div class="page-header__eyebrow">MANI BET PRO</div>
         <div class="page-header__title">Bot — Calibration</div>
-        <div class="page-header__sub">Analyses automatiques · Tous les matchs NBA</div>
+        <div class="page-header__sub" id="bot-sub-label">Analyses automatiques · NBA</div>
+      </div>
+
+      <div class="toolbar" style="margin-bottom:8px">
+        <div class="bot-sport-toggle">
+          <button class="bot-sport-btn active" data-sport="nba">🏀 NBA</button>
+          <button class="bot-sport-btn" data-sport="mlb">⚾ MLB</button>
+        </div>
       </div>
 
       <div class="toolbar">
@@ -65,6 +72,23 @@ function _renderShell() {
     </div>
 
     <style>
+      /* Sport toggle — NBA / MLB */
+      .bot-sport-toggle {
+        display: flex; gap: 6px;
+      }
+      .bot-sport-btn {
+        background: var(--color-card); color: var(--color-text-secondary);
+        border: 1px solid var(--color-border-default);
+        font-size: 13px; font-weight: 600;
+        padding: 6px 14px; border-radius: 8px; cursor: pointer;
+        transition: all 0.15s;
+      }
+      .bot-sport-btn:hover { background: var(--color-bg-elevated); }
+      .bot-sport-btn.active {
+        background: var(--color-signal); color: #fff;
+        border-color: var(--color-signal);
+      }
+
       /* Filtres pill — spécifiques bot */
       .bot-filter-btn {
         font-size: 12px; padding: 5px 12px; border-radius: 20px;
@@ -169,10 +193,17 @@ function _renderShell() {
 async function _loadAndRender(container, filter = 'all') {
   const logsEl = container.querySelector('#bot-logs-container');
   const statsEl = container.querySelector('#bot-stats-container');
+  const subEl   = container.querySelector('#bot-sub-label');
   if (!logsEl) return;
 
+  // Sport courant stocké sur le container (default: nba)
+  const sport   = container.dataset.sport || 'nba';
+  const logsUrl = sport === 'mlb' ? `${WORKER}/mlb/bot/logs` : `${WORKER}/bot/logs`;
+
+  if (subEl) subEl.textContent = `Analyses automatiques · ${sport.toUpperCase()}`;
+
   try {
-    const resp = await fetch(`${WORKER}/bot/logs`, { headers: { Accept: 'application/json' } });
+    const resp = await fetch(logsUrl, { headers: { Accept: 'application/json' } });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
 
@@ -180,14 +211,14 @@ async function _loadAndRender(container, filter = 'all') {
     const stats   = data.stats ?? {};
 
     // Stats globales
-    statsEl.innerHTML = _renderStats(stats, allLogs);
+    statsEl.innerHTML = _renderStats(stats, allLogs, sport);
 
     // Panneau analyse approfondie — filtre phase stocké sur le container
     const analysisEl = container.querySelector('#bot-analysis-container');
     if (analysisEl) {
       const phaseFilter = analysisEl.dataset.phaseFilter || 'all';
-      analysisEl.innerHTML = _renderDeepAnalysis(allLogs, phaseFilter);
-      _bindAnalysisPhaseToggle(analysisEl, allLogs);
+      analysisEl.innerHTML = _renderDeepAnalysis(allLogs, phaseFilter, sport);
+      _bindAnalysisPhaseToggle(analysisEl, allLogs, sport);
     }
 
     // Filtrer
@@ -219,9 +250,13 @@ function _filterLogs(logs, filter) {
 
 // ── STATS GLOBALES ────────────────────────────────────────────────────────────
 
-function _renderStats(stats, logs) {
+function _renderStats(stats, logs, sport = 'nba') {
   const edgeCount = logs.filter(l => l.best_edge && l.best_edge >= 5).length;
-  const highConf  = logs.filter(l => l.confidence_level === 'HIGH').length;
+  // NBA : confidence_level · MLB : data_quality
+  const highConf  = sport === 'mlb'
+    ? logs.filter(l => l.data_quality === 'HIGH').length
+    : logs.filter(l => l.confidence_level === 'HIGH').length;
+  const highLabel = sport === 'mlb' ? 'Data quality HIGH' : 'Conf. HIGH';
 
   return `<div class="bot-stats">
     <div class="stat-card">
@@ -246,18 +281,23 @@ function _renderStats(stats, logs) {
     </div>
     <div class="stat-card">
       <div class="stat-card__value" style="color:var(--color-volatility)">${highConf}</div>
-      <div class="stat-card__label">Conf. HIGH</div>
+      <div class="stat-card__label">${highLabel}</div>
     </div>
   </div>`;
 }
 
 // ── ANALYSE APPROFONDIE ───────────────────────────────────────────────────────
 
-function _renderDeepAnalysis(logs, phaseFilter = 'all') {
+function _renderDeepAnalysis(logs, phaseFilter = 'all', sport = 'nba') {
   if (!logs?.length) return '';
 
-  // Filtrer par phase choisie
+  // MLB n'a pas la même notion de phase que NBA (pas de "playin" dans logs actuels)
+  // Pour MLB, on garde le toggle mais phases = "all" seulement pertinent
+  const isNBA = sport !== 'mlb';
+
+  // Filtrer par phase choisie (NBA only)
   const matchPhase = (log) => {
+    if (!isNBA) return true;  // MLB : pas de filtre
     const p = log.nba_phase;
     if (phaseFilter === 'regular')  return p === 'regular';
     if (phaseFilter === 'playoffs') return p === 'playin' || p === 'playoff';
@@ -265,18 +305,18 @@ function _renderDeepAnalysis(logs, phaseFilter = 'all') {
   };
   const logsForPhase = logs.filter(matchPhase);
 
-  // Compteurs pour le toggle (sur TOUS les logs, pas juste settled)
-  const counts = {
+  // Compteurs pour le toggle (NBA seulement)
+  const counts = isNBA ? {
     all:      logs.length,
     regular:  logs.filter(l => l.nba_phase === 'regular').length,
     playoffs: logs.filter(l => l.nba_phase === 'playin' || l.nba_phase === 'playoff').length,
-  };
+  } : null;
 
-  const toggleHtml = `<div class="bot-phase-toggle">
+  const toggleHtml = isNBA ? `<div class="bot-phase-toggle">
     <button class="bot-phase-btn ${phaseFilter === 'all' ? 'active' : ''}" data-phase="all">Tous (${counts.all})</button>
     <button class="bot-phase-btn ${phaseFilter === 'regular' ? 'active' : ''}" data-phase="regular">Saison régulière (${counts.regular})</button>
     <button class="bot-phase-btn ${phaseFilter === 'playoffs' ? 'active' : ''}" data-phase="playoffs">Playoffs & Play-in (${counts.playoffs})</button>
-  </div>`;
+  </div>` : '';
 
   const settled = logsForPhase.filter(l => l.motor_was_right !== null);
   if (settled.length === 0) {
@@ -523,14 +563,14 @@ function _renderDeepAnalysis(logs, phaseFilter = 'all') {
   </style>`;
 }
 
-function _bindAnalysisPhaseToggle(analysisEl, allLogs) {
+function _bindAnalysisPhaseToggle(analysisEl, allLogs, sport = 'nba') {
   const buttons = analysisEl.querySelectorAll('.bot-phase-btn');
   buttons.forEach(btn => {
     btn.addEventListener('click', () => {
       const newPhase = btn.dataset.phase;
       analysisEl.dataset.phaseFilter = newPhase;
-      analysisEl.innerHTML = _renderDeepAnalysis(allLogs, newPhase);
-      _bindAnalysisPhaseToggle(analysisEl, allLogs);  // re-bind après re-render
+      analysisEl.innerHTML = _renderDeepAnalysis(allLogs, newPhase, sport);
+      _bindAnalysisPhaseToggle(analysisEl, allLogs, sport);  // re-bind après re-render
     });
   });
 }
@@ -766,8 +806,25 @@ function _fmtVal(variable, value) {
 // ── EVENTS ────────────────────────────────────────────────────────────────────
 
 function _bindEvents(container, storeInstance) {
-  // Filtres
+  const getSport  = () => container.dataset.sport || 'nba';
+  const settleUrl = () => getSport() === 'mlb' ? `${WORKER}/mlb/bot/settle-logs` : `${WORKER}/bot/settle-logs`;
+  const runUrl    = () => getSport() === 'mlb' ? `${WORKER}/mlb/bot/run` : `${WORKER}/bot/run`;
+
+  // Sport toggle
   container.addEventListener('click', async (e) => {
+    const sportBtn = e.target.closest('.bot-sport-btn');
+    if (sportBtn) {
+      container.querySelectorAll('.bot-sport-btn').forEach(b => b.classList.remove('active'));
+      sportBtn.classList.add('active');
+      container.dataset.sport = sportBtn.dataset.sport;
+      // Reset phase filter et filter
+      const analysisEl = container.querySelector('#bot-analysis-container');
+      if (analysisEl) analysisEl.dataset.phaseFilter = 'all';
+      await _loadAndRender(container, 'all');
+      return;
+    }
+
+    // Filtres
     const filterBtn = e.target.closest('.bot-filter-btn');
     if (filterBtn) {
       container.querySelectorAll('.bot-filter-btn').forEach(b => b.classList.remove('active'));
@@ -782,7 +839,7 @@ function _bindEvents(container, storeInstance) {
       settleBtn.disabled = true;
       settleBtn.textContent = '⟳ Settlement…';
       try {
-        const resp = await fetch(`${WORKER}/bot/settle-logs`, {
+        const resp = await fetch(settleUrl(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({}),
@@ -808,7 +865,7 @@ function _bindEvents(container, storeInstance) {
       runBtn.disabled = true;
       runBtn.textContent = '▶ Lancement…';
       try {
-        await fetch(`${WORKER}/bot/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+        await fetch(runUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json' } });
         runBtn.textContent = '✓ Lancé';
         setTimeout(() => {
           runBtn.textContent = '▶ Run';
