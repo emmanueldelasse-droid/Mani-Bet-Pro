@@ -4,7 +4,7 @@
 Début tâche → "En cours": branche + étape 1/N · Fin étape → incrémenter · Merge/push → vider "En cours" + bump version + cocher TODO · User mentionne future tâche → ajouter TODO sans P · demander priorité · Commit SESSION après chaque step >5min ou >3 tool calls.
 
 ## En cours
-néant
+Audit forteresse · branche `claude/resume-session-Sg1z7` · étape 1/4 agents parallèles (4×reviewer + 1×debugger)
 
 ## TODO
 néant (demander P quand user ajoute)
