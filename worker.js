@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — Cloudflare Worker v6.62
+ * MANI BET PRO — Cloudflare Worker v6.63
  *
  * CORRECTIONS v6.39 :
  *   1. Fix critique bot — emaLambda non défini dans _botEngineCompute.
@@ -390,7 +390,7 @@ export default {
         return jsonResponse({
           status:    'ok',
           worker:    'mani-bet-pro',
-          version:   '6.62.0',
+          version:   '6.63.0',
           timestamp: new Date().toISOString(),
           routes: [
             'GET /nba/matches', 'GET /nba/team/:id/stats', 'GET /nba/team/:id/recent',
@@ -6316,26 +6316,32 @@ function _mlbAnalyzeMatch(match, dateStr, pitchersData, oddsData, standingsData,
     away_pitcher_fip: awayPit?.fip ?? null,
     home_prob:       analysis.home_prob,
     away_prob:       analysis.away_prob,
+    motor_prob:      analysis.home_prob,  // alias NBA pour UI réutilisable
     data_quality:    analysis.data_quality,
     missing_vars:    analysis.missing_vars,
     variables:       analysis.variables,
     est_total_runs:  analysis.est_total_runs,
     betting_recommendations: {
-      all:  analysis.recommendations,
-      best: analysis.best,
+      recommendations: analysis.recommendations,  // alias NBA pour réutilisation UI
+      all:             analysis.recommendations,  // rétrocompatibilité
+      best:            analysis.best,
     },
-    best_edge: analysis.best?.edge ?? null,
+    best_edge:   analysis.best?.edge ?? null,
+    best_market: analysis.best?.type ?? null,     // parité NBA (MONEYLINE / OVER_UNDER)
+    best_side:   analysis.best?.side ?? null,
     // Pour le settler
-    result_home_score: null,
-    result_away_score: null,
-    result_winner:     null,
-    result_margin:     null,
-    result_total:      null,
-    motor_was_right:   null,
-    prob_delta_pts:    null,
-    upset:             null,
-    ou_was_right:      null,
-    settled_at:        null,
+    result_home_score:   null,
+    result_away_score:   null,
+    result_winner:       null,
+    result_margin:       null,
+    result_total:        null,
+    motor_was_right:     null,
+    prob_delta_pts:      null,
+    upset:               null,
+    ou_was_right:        null,
+    ou_model_was_right:  null,
+    clv_post_match:      null,
+    settled_at:          null,
   };
 }
 
