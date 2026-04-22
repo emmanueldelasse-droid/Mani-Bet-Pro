@@ -10,7 +10,7 @@ Stack: CF Worker + KV + Tank01 (RapidAPI) + ESPN + Claude API + Telegram
 - `/nba/matches?date=YYYYMMDD` · `/odds` · `/injuries` · `/standings`
 - `/nba/team-detail?home=X&away=Y[&bust=1]` → last10/splits/H2H/top10
 - `/nba/teams/stats` · `/roster-injuries` · `/ai-injuries` · `/nba/player-points?event_id=X`
-- `/mlb/matches` · `/odds` · `/pitchers` · `/standings`
+- `/mlb/matches` · `/odds` · `/pitchers` · `/standings` · `/mlb/team-stats`
 - `/bot/run` POST · `/logs` · `/settle-logs` POST · `/logs/export.csv` · `/odds-history?matchId=X`
 - `/tennis/sports-list|odds|stats`
 - Cron `0 * * * *` · bot NBA+MLB · 10h UTC nightly-settle J-1/J-2 · snapshot cotes ESPN→KV `odds_snap_{matchId}`
@@ -38,13 +38,8 @@ Stack: CF Worker + KV + Tank01 (RapidAPI) + ESPN + Claude API + Telegram
 ## Deploy
 `git push origin main` → CF auto-deploy · pas de `wrangler deploy`.
 
-## Hors SESSION (charger à la demande)
-- Secrets/reprise nouveau compte → `.claude/onboarding.md`
-- Historique → `git log --oneline`
-- TODO → GitHub issues
+## Hors SESSION
+Secrets → `.claude/onboarding.md` · Historique → `git log` · TODO → GitHub issues
 
-## Règle
-Merge main → update SI impact critique. Format: voir CLAUDE.md.
-
-## Règle OBLIGATOIRE réponses user
-Vocabulaire simple · exemples concrets · détails CLI explicités. Voir CLAUDE.md.
+## Règles
+Merge → update SI impact critique · réponses user : vocabulaire simple, exemples concrets. Voir CLAUDE.md.
