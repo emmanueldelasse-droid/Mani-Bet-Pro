@@ -138,7 +138,7 @@ async function _loadAndRenderMLBStats(container, match, storeInstance) {
     const matchingLog = (botLogs?.logs ?? []).find(l => l.match_id === match.id);
     const strikeoutsPrediction = matchingLog?.pitcher_strikeouts_prediction ?? null;
 
-    el.innerHTML = _renderMLBMatchDetail({
+    el.innerHTML = _renderMLBMarches(matchingLog, match) + _renderMLBMatchDetail({
       homeName, awayName,
       homeStats, awayStats,
       homeStand, awayStand,
@@ -149,6 +149,166 @@ async function _loadAndRenderMLBStats(container, match, storeInstance) {
     console.warn('[MatchDetail MLB] load error:', err.message);
     el.innerHTML = `<div class="bot-error" style="padding:20px">Erreur chargement stats MLB: ${err.message}</div>`;
   }
+}
+
+// Render Marchés MLB — reproduit le tableau NBA avec adaptation structure log MLB
+// Si log dispo : montre analyse + edge + fiabilité · sinon juste les cotes book
+function _renderMLBMarches(log, match) {
+  const homeAbbr = match?.home_team?.abbreviation ?? 'DOM';
+  const awayAbbr = match?.away_team?.abbreviation ?? 'EXT';
+  const marketOdds = match?.market_odds ?? null;
+
+  const recs = log?.betting_recommendations?.recommendations ?? log?.betting_recommendations?.all ?? [];
+  const dq   = log?.data_quality ?? null;
+
+  const homeProb = log?.home_prob ?? null;
+  const awayProb = homeProb != null ? 100 - homeProb : null;
+
+  // Reliability multiplier basé sur data_quality (1.00 par défaut si pas de log)
+  const dqMult = dq === 'HIGH' ? 1.20 : dq === 'MEDIUM' ? 1.00 : dq === 'LOW' ? 0.70 : 1.00;
+  const dqLabel = dq ?? 'N/A (analyse bot pas encore effectuée)';
+
+  // Étoiles selon score fiabilité
+  const starsFor = (edge) => {
+    const score = edge * dqMult;
+    if (score >= 12) return '⭐⭐⭐⭐⭐';
+    if (score >= 9)  return '⭐⭐⭐⭐';
+    if (score >= 7)  return '⭐⭐⭐';
+    if (score >= 5)  return '⭐⭐';
+    return '⭐';
+  };
+
+  const edgeColor = (e) => e >= 10 ? 'var(--color-success)'
+                        : e >= 7  ? 'var(--color-warning)'
+                        : e >= 5  ? 'var(--color-signal)'
+                        : e >= 0  ? 'var(--color-text-secondary)'
+                        : 'var(--color-danger)';
+
+  const row = (label, prob, cote, edge, source, rec) => {
+    if (cote == null) return '';
+    const reliability = edge != null && edge > 0 ? Math.round(edge * dqMult * 10) / 10 : null;
+    const stars = reliability != null && reliability >= 5 ? starsFor(edge) : '';
+
+    return `
+      <div style="display:grid;grid-template-columns:1fr auto auto auto auto;gap:8px;align-items:center;padding:9px 10px;background:${edge >= 7 ? 'rgba(34,197,94,0.06)' : 'var(--color-bg)'};border-radius:8px;border:1px solid ${edge >= 7 ? 'rgba(34,197,94,0.3)' : 'transparent'};margin-bottom:6px">
+        <div style="min-width:0">
+          <div style="font-size:13px;font-weight:600">${label}</div>
+          <div style="font-size:10px;color:var(--color-text-secondary)">${prob != null ? prob + '% analyse' : '—'}</div>
+        </div>
+        <div style="text-align:center;min-width:48px">
+          <div style="font-size:14px;font-weight:700;color:var(--color-signal)">${typeof cote === 'number' ? cote.toFixed(2) : cote}</div>
+          <div style="font-size:9px;color:var(--color-text-secondary)">${source ?? 'book'}</div>
+        </div>
+        <div style="text-align:center;min-width:50px">
+          ${edge != null ? `<div style="font-size:14px;font-weight:800;color:${edgeColor(edge)}">${edge > 0 ? '+' : ''}${edge}%</div>` : '<div style="color:var(--color-muted)">—</div>'}
+        </div>
+        <div style="text-align:center;min-width:60px">
+          ${stars ? `<div style="font-size:11px">${stars}</div><div style="font-size:9px;color:var(--color-muted)">${reliability}</div>` : '<div style="color:var(--color-muted);font-size:10px">—</div>'}
+        </div>
+        <div></div>
+      </div>`;
+  };
+
+  // Extraction depuis market_odds (fallback si recos vides)
+  const bkPriority = ['pinnacle', 'draftkings', 'fanduel', 'betmgm'];
+  const getBook = (field) => {
+    if (!marketOdds?.bookmakers?.length) return null;
+    for (const key of bkPriority) {
+      const bk = marketOdds.bookmakers.find(b => b.key === key);
+      if (bk?.[field] && bk[field] > 1) return { value: bk[field], title: bk.title ?? bk.key, line: bk.total_line };
+    }
+    const first = marketOdds.bookmakers[0];
+    return first?.[field] ? { value: first[field], title: first.title ?? first.key, line: first.total_line } : null;
+  };
+
+  // Vainqueur (MONEYLINE)
+  const mlHome  = recs.find(r => r.type === 'MONEYLINE' && r.side === 'HOME');
+  const mlAway  = recs.find(r => r.type === 'MONEYLINE' && r.side === 'AWAY');
+  const bkHome  = getBook('home_ml');
+  const bkAway  = getBook('away_ml');
+  const mlHomeOdds = mlHome?.odds_decimal ?? bkHome?.value ?? null;
+  const mlAwayOdds = mlAway?.odds_decimal ?? bkAway?.value ?? null;
+  const mlHomeEdge = mlHome?.edge ?? null;
+  const mlAwayEdge = mlAway?.edge ?? null;
+  const mlHomeSource = mlHome?.odds_source ?? bkHome?.title ?? 'book';
+  const mlAwaySource = mlAway?.odds_source ?? bkAway?.title ?? 'book';
+
+  // Total (runs)
+  const ouOver  = recs.find(r => r.type === 'OVER_UNDER' && r.side === 'OVER');
+  const ouUnder = recs.find(r => r.type === 'OVER_UNDER' && r.side === 'UNDER');
+  const bkOver  = getBook('over_total');
+  const bkUnder = getBook('under_total');
+  const ouOverOdds  = ouOver?.odds_decimal  ?? bkOver?.value  ?? null;
+  const ouUnderOdds = ouUnder?.odds_decimal ?? bkUnder?.value ?? null;
+  const ouOverEdge  = ouOver?.edge  ?? null;
+  const ouUnderEdge = ouUnder?.edge ?? null;
+  const ouLine  = ouOver?.ou_line ?? ouUnder?.ou_line ?? bkOver?.line ?? bkUnder?.line ?? null;
+  const ouOverSource  = ouOver?.odds_source  ?? bkOver?.title  ?? 'book';
+  const ouUnderSource = ouUnder?.odds_source ?? bkUnder?.title ?? 'book';
+
+  const mlSection = (mlHomeOdds || mlAwayOdds) ? `
+    <div style="font-size:9px;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.06em;padding:6px 10px 2px">Vainqueur</div>
+    ${mlHomeOdds ? row(`${homeAbbr} vainqueur`, homeProb, mlHomeOdds, mlHomeEdge, mlHomeSource, mlHome) : ''}
+    ${mlAwayOdds ? row(`${awayAbbr} vainqueur`, awayProb, mlAwayOdds, mlAwayEdge, mlAwaySource, mlAway) : ''}` : '';
+
+  const ouSection = (ouOverOdds || ouUnderOdds) ? `
+    <div style="font-size:9px;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.06em;padding:6px 10px 2px">Total (runs)${ouLine ? ` · ${ouLine}` : ''}</div>
+    ${ouOverOdds ? row(`Plus de ${ouLine ?? '—'} runs`, ouOver?.motor_prob ?? null, ouOverOdds, ouOverEdge, ouOverSource, ouOver) : ''}
+    ${ouUnderOdds ? row(`Moins de ${ouLine ?? '—'} runs`, ouUnder?.motor_prob ?? null, ouUnderOdds, ouUnderEdge, ouUnderSource, ouUnder) : ''}` : '';
+
+  // Strikeouts pitcher (projection seule — pas de ligne marché pour l'instant)
+  const ksPred = log?.pitcher_strikeouts_prediction;
+  const ksSection = ksPred?.available ? `
+    <div style="font-size:9px;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.06em;padding:6px 10px 2px">Strikeouts pitcher (projection)</div>
+    ${[ksPred.home_pitcher, ksPred.away_pitcher].filter(Boolean).map(p => `
+      <div style="padding:8px 10px;background:var(--color-bg);border-radius:8px;margin-bottom:6px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-size:13px;font-weight:600">${p.name ?? '—'}</div>
+            <div style="font-size:10px;color:var(--color-text-secondary)">K/9 ${p.k_per_9} · IP ${p.expected_ip}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:16px;font-weight:800;color:var(--color-signal)">${p.projected_ks} K</div>
+            ${p.opponent_mult !== 1 ? `<div style="font-size:10px;color:var(--color-text-secondary)">matchup ×${p.opponent_mult}</div>` : ''}
+          </div>
+        </div>
+      </div>`).join('')}` : '';
+
+  if (!mlSection && !ouSection && !ksSection) {
+    return `<div class="card match-detail__bloc">
+      <div class="bloc-header" style="margin-bottom:var(--space-2)">
+        <span class="bloc-header__title">Marchés</span>
+      </div>
+      <div style="font-size:12px;color:var(--color-muted);text-align:center;padding:16px">
+        Pas de cotes disponibles pour ce match. Vérifie que TheOddsAPI a bien chargé.
+      </div>
+    </div>`;
+  }
+
+  const dqColor = dq === 'HIGH' ? 'var(--color-success)' : dq === 'MEDIUM' ? 'var(--color-warning)' : dq === 'LOW' ? 'var(--color-danger)' : 'var(--color-muted)';
+
+  return `<div class="card match-detail__bloc">
+    <div class="bloc-header" style="margin-bottom:var(--space-2)">
+      <span class="bloc-header__title">Marchés</span>
+      <span style="font-size:10px;color:var(--color-text-secondary)">% analyse · book = prob. bookmaker</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;margin-bottom:8px;background:var(--color-bg);border-radius:6px;font-size:11px">
+      <span style="color:var(--color-text-secondary)">Fiabilité data :</span>
+      <span style="font-weight:700;color:${dqColor}">${dqLabel}</span>
+      ${dq ? `<span style="color:var(--color-muted)">·</span>
+      <span style="color:var(--color-text-secondary)">Multiplicateur fiabilité : ×${dqMult}</span>` : ''}
+    </div>
+    <div style="display:grid;grid-template-columns:1fr auto auto auto auto;gap:4px;padding:0 10px 4px">
+      <div></div>
+      <div style="font-size:10px;color:var(--color-text-secondary);text-align:center">Cote</div>
+      <div style="font-size:10px;color:var(--color-text-secondary);text-align:center">Edge</div>
+      <div style="font-size:10px;color:var(--color-text-secondary);text-align:center">Fiabilité</div>
+      <div></div>
+    </div>
+    ${mlSection}
+    ${ouSection}
+    ${ksSection}
+  </div>`;
 }
 
 function _renderMLBMatchDetail(data) {
@@ -283,10 +443,10 @@ function renderShell(match, analysis, storeInstance) {
 
       ${renderBlocSyntheseSummary(analysis, match)}
       ${renderBlocProbas(analysis, match)}
-      <div id="bloc-tous-paris">${renderBlocTousLesParis(analysis, match)}</div>
       ${isMLB
-        ? `<div id="mlb-stats-container" class="card match-detail__bloc"><div class="bot-loading" style="padding:20px">Chargement stats MLB…</div></div>`
-        : `<div id="team-detail-container">${renderBlocTeamDetailSkeleton()}</div>`}
+        ? `<div id="mlb-stats-container"><div class="bot-loading" style="padding:20px">Chargement marchés + stats MLB…</div></div>`
+        : `<div id="bloc-tous-paris">${renderBlocTousLesParis(analysis, match)}</div>
+           <div id="team-detail-container">${renderBlocTeamDetailSkeleton()}</div>`}
       ${renderBlocFiabiliteEtSynthese(analysis, match)}
     </div>
   `;
