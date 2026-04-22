@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — Cloudflare Worker v6.61
+ * MANI BET PRO — Cloudflare Worker v6.62
  *
  * CORRECTIONS v6.39 :
  *   1. Fix critique bot — emaLambda non défini dans _botEngineCompute.
@@ -334,6 +334,9 @@ export default {
       if (path === '/mlb/standings' && request.method === 'GET')
         return await handleMLBStandings(origin);
 
+      if (path === '/mlb/team-stats' && request.method === 'GET')
+        return await handleMLBTeamStats(env, origin);
+
       if (path === '/mlb/bot/run' && request.method === 'POST')
         return await handleMLBBotRun(request, env, origin);
 
@@ -387,7 +390,7 @@ export default {
         return jsonResponse({
           status:    'ok',
           worker:    'mani-bet-pro',
-          version:   '6.61.0',
+          version:   '6.62.0',
           timestamp: new Date().toISOString(),
           routes: [
             'GET /nba/matches', 'GET /nba/team/:id/stats', 'GET /nba/team/:id/recent',
@@ -5690,6 +5693,7 @@ const ESPN_MLB_SCOREBOARD  = 'https://site.api.espn.com/apis/site/v2/sports/base
 const MLB_STATS_API        = 'https://statsapi.mlb.com/api/v1';
 const MLB_ODDS_KV_KEY      = 'mlb_odds_cache';
 const MLB_PITCHER_KV_KEY   = 'mlb_pitchers_cache';
+const MLB_TEAM_STATS_KV_KEY = 'mlb_team_stats_cache';
 
 // ── ROUTES (à ajouter dans le router) ────────────────────────────────────────
 // GET  /mlb/matches
@@ -5999,7 +6003,7 @@ function _parseMLBOddsResponse(data) {
 async function handleMLBStandings(origin) {
   try {
     const resp = await fetchTimeout(
-      `${MLB_STATS_API}/standings?leagueId=103,104&season=2026&standingsTypes=regularSeason&hydrate=team`,
+      `${MLB_STATS_API}/standings?leagueId=103,104&season=2026&standingsTypes=regularSeason&hydrate=team,records(home,away,last10)`,
       {}, 10000
     );
     if (!resp?.ok) return jsonResponse({ available: false }, 200, origin);
@@ -6010,6 +6014,13 @@ async function handleMLBStandings(origin) {
       for (const teamRecord of record.teamRecords ?? []) {
         const name = teamRecord.team?.name;
         if (!name) continue;
+
+        // Extraction splits home/away/last10 (hydrate records fournit ces données)
+        const splits = teamRecord.records?.splitRecords ?? [];
+        const homeSplit = splits.find(s => s.type === 'home');
+        const awaySplit = splits.find(s => s.type === 'away');
+        const last10    = splits.find(s => s.type === 'lastTen');
+
         standings[name] = {
           wins:        teamRecord.wins,
           losses:      teamRecord.losses,
@@ -6019,12 +6030,93 @@ async function handleMLBStandings(origin) {
           runs_allowed: teamRecord.runsAllowed,
           division:    record.division?.name ?? null,
           league:      record.league?.name ?? null,
+          home_wins:   homeSplit?.wins ?? null,
+          home_losses: homeSplit?.losses ?? null,
+          away_wins:   awaySplit?.wins ?? null,
+          away_losses: awaySplit?.losses ?? null,
+          last10_wins: last10?.wins ?? null,
+          last10_losses: last10?.losses ?? null,
         };
       }
     }
     return jsonResponse({ available: true, standings, source: 'mlb_stats_api' }, 200, origin);
   } catch (err) {
     return jsonResponse({ available: false, note: err.message }, 200, origin);
+  }
+}
+
+// ── HANDLER : TEAM STATS MLB (hitting + pitching, saison) ─────────────────────
+// Fetch team-level offensive et défensive stats · cache KV 6h
+async function handleMLBTeamStats(env, origin) {
+  if (env.PAPER_TRADING) {
+    try {
+      const cached = await env.PAPER_TRADING.get(MLB_TEAM_STATS_KV_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Date.now() - parsed.fetched_at < 6 * 3600 * 1000) {
+          return jsonResponse({ ...parsed, source: 'cache' }, 200, origin);
+        }
+      }
+    } catch (_) {}
+  }
+
+  try {
+    // 2 appels parallèles : hitting + pitching (1 call chacun pour les 30 équipes)
+    const [hitResp, pitResp] = await Promise.all([
+      fetchTimeout(`${MLB_STATS_API}/teams/stats?season=2026&sportId=1&stats=season&group=hitting`, {}, 10000),
+      fetchTimeout(`${MLB_STATS_API}/teams/stats?season=2026&sportId=1&stats=season&group=pitching`, {}, 10000),
+    ]);
+
+    const teams = {};
+
+    if (hitResp?.ok) {
+      const hitData = await hitResp.json();
+      for (const split of (hitData.stats?.[0]?.splits ?? [])) {
+        const name = split.team?.name;
+        if (!name) continue;
+        const s = split.stat ?? {};
+        teams[name] = {
+          ops:         parseFloat(s.ops)          || null,
+          obp:         parseFloat(s.obp)          || null,
+          slg:         parseFloat(s.slg)          || null,
+          avg:         parseFloat(s.avg)          || null,
+          runs:        parseInt(s.runs)           || null,
+          home_runs:   parseInt(s.homeRuns)       || null,
+          hits:        parseInt(s.hits)           || null,
+          strikeouts:  parseInt(s.strikeOuts)     || null,
+          walks:       parseInt(s.baseOnBalls)    || null,
+          games:       parseInt(s.gamesPlayed)    || null,
+        };
+      }
+    }
+
+    if (pitResp?.ok) {
+      const pitData = await pitResp.json();
+      for (const split of (pitData.stats?.[0]?.splits ?? [])) {
+        const name = split.team?.name;
+        if (!name) continue;
+        const s = split.stat ?? {};
+        if (!teams[name]) teams[name] = {};
+        teams[name].team_era      = parseFloat(s.era)               || null;
+        teams[name].team_whip     = parseFloat(s.whip)              || null;
+        teams[name].team_k_per_9  = parseFloat(s.strikeoutsPer9Inn) || null;
+        teams[name].team_bb_per_9 = parseFloat(s.walksPer9Inn)      || null;
+        teams[name].team_hr_per_9 = parseFloat(s.homeRunsPer9)      || null;
+        teams[name].team_innings  = parseFloat(s.inningsPitched)    || null;
+      }
+    }
+
+    const result = { available: true, teams, fetched_at: Date.now() };
+
+    if (env.PAPER_TRADING) {
+      try {
+        await env.PAPER_TRADING.put(MLB_TEAM_STATS_KV_KEY, JSON.stringify(result), { expirationTtl: 6 * 3600 });
+      } catch (_) {}
+    }
+
+    return jsonResponse({ ...result, source: 'mlb_stats_api' }, 200, origin);
+  } catch (err) {
+    return jsonResponse({ available: false, note: err.message, teams: {} }, 200, origin);
   }
 }
 
@@ -6097,17 +6189,19 @@ async function _runMLBBotCron(env, forceRun = false) {
   const fakeOddsUrl = new URL('https://manibetpro.emmanueldelasse.workers.dev/mlb/odds/comparison');
   const fakeStandUrl = new URL('https://manibetpro.emmanueldelasse.workers.dev/mlb/standings');
 
-  const [pitchersResp, oddsResp, standingsResp] = await Promise.allSettled([
+  const [pitchersResp, oddsResp, standingsResp, teamStatsResp] = await Promise.allSettled([
     handleMLBPitchers(fakeUrl, env, fakeOrigin),
     handleMLBOdds(fakeOddsUrl, env, fakeOrigin),
     handleMLBStandings(fakeOrigin),
+    handleMLBTeamStats(env, fakeOrigin),
   ]);
 
   const pitchersData  = pitchersResp.status  === 'fulfilled' ? await pitchersResp.value.json()  : null;
   const oddsData      = oddsResp.status      === 'fulfilled' ? await oddsResp.value.json()      : null;
   const standingsData = standingsResp.status === 'fulfilled' ? await standingsResp.value.json() : null;
+  const teamStatsData = teamStatsResp.status === 'fulfilled' ? await teamStatsResp.value.json() : null;
 
-  console.log(`[MLB BOT] Pitchers: ${Object.keys(pitchersData?.pitchers ?? {}).length}, Odds: ${oddsData?.matches?.length ?? 0}`);
+  console.log(`[MLB BOT] Pitchers: ${Object.keys(pitchersData?.pitchers ?? {}).length}, Odds: ${oddsData?.matches?.length ?? 0}, Team stats: ${Object.keys(teamStatsData?.teams ?? {}).length}`);
 
   // 5. Analyser chaque match
   const logs       = [];
@@ -6115,7 +6209,7 @@ async function _runMLBBotCron(env, forceRun = false) {
 
   for (const match of matches) {
     try {
-      const log = _mlbAnalyzeMatch(match, dateStr, pitchersData, oddsData, standingsData);
+      const log = _mlbAnalyzeMatch(match, dateStr, pitchersData, oddsData, standingsData, teamStatsData);
       if (!log) continue;
       if (env.PAPER_TRADING) {
         await env.PAPER_TRADING.put(
@@ -6146,20 +6240,49 @@ async function _runMLBBotCron(env, forceRun = false) {
 }
 
 // ── ANALYSER UN MATCH MLB ─────────────────────────────────────────────────────
-function _mlbAnalyzeMatch(match, dateStr, pitchersData, oddsData, standingsData) {
+function _mlbAnalyzeMatch(match, dateStr, pitchersData, oddsData, standingsData, teamStatsData) {
   const homeName = match.home_team?.name;
   const awayName = match.away_team?.name;
   if (!homeName || !awayName) return null;
 
   const pitchers   = pitchersData?.pitchers ?? {};
   const standings  = standingsData?.standings ?? {};
+  const teamStats  = teamStatsData?.teams ?? {};
   const homePit    = pitchers[homeName]  ?? match.home_pitcher ?? null;
   const awayPit    = pitchers[awayName]  ?? match.away_pitcher ?? null;
   const homeStand  = standings[homeName] ?? null;
   const awayStand  = standings[awayName] ?? null;
+  const homeStats  = teamStats[homeName] ?? null;
+  const awayStats  = teamStats[awayName] ?? null;
 
   // Trouver les cotes pour ce match
   const marketOdds = _mlbGetMarketOdds(oddsData, homeName, awayName);
+
+  // Build season data avec splits + team stats
+  const buildSeason = (stand, tstats) => {
+    if (!stand && !tstats) return null;
+    const games = (stand?.wins ?? 0) + (stand?.losses ?? 0);
+    return {
+      // Standings
+      run_diff:      stand?.run_diff ?? null,
+      win_pct:       parseFloat(stand?.pct ?? 0) || null,
+      runs_per_game: stand?.runs_scored && games > 0 ? stand.runs_scored / games : null,
+      runs_allowed_per_game: stand?.runs_allowed && games > 0 ? stand.runs_allowed / games : null,
+      home_wins:     stand?.home_wins ?? null,
+      home_losses:   stand?.home_losses ?? null,
+      away_wins:     stand?.away_wins ?? null,
+      away_losses:   stand?.away_losses ?? null,
+      last10_wins:   stand?.last10_wins ?? null,
+      last10_losses: stand?.last10_losses ?? null,
+      // Team stats (MLB Stats API)
+      ops:           tstats?.ops ?? null,
+      obp:           tstats?.obp ?? null,
+      slg:           tstats?.slg ?? null,
+      team_era:      tstats?.team_era ?? null,
+      team_whip:     tstats?.team_whip ?? null,
+      team_k_per_9:  tstats?.team_k_per_9 ?? null,
+    };
+  };
 
   const matchData = {
     match_id:     match.id,
@@ -6168,23 +6291,9 @@ function _mlbAnalyzeMatch(match, dateStr, pitchersData, oddsData, standingsData)
     venue:        match.venue,
     home_pitcher: homePit,
     away_pitcher: awayPit,
-    home_lineup:  null, // lineups non dispo sans API payante
-    away_lineup:  null,
-    home_bullpen: null, // bullpen non dispo gratuitement
-    away_bullpen: null,
-    home_season: homeStand ? {
-      run_diff:      homeStand.run_diff,
-      win_pct:       parseFloat(homeStand.pct ?? 0),
-      runs_per_game: homeStand.runs_scored ? homeStand.runs_scored / Math.max(1, homeStand.wins + homeStand.losses) : null,
-      runs_allowed:  homeStand.runs_allowed,
-    } : null,
-    away_season: awayStand ? {
-      run_diff:      awayStand.run_diff,
-      win_pct:       parseFloat(awayStand.pct ?? 0),
-      runs_per_game: awayStand.runs_scored ? awayStand.runs_scored / Math.max(1, awayStand.wins + awayStand.losses) : null,
-      runs_allowed:  awayStand.runs_allowed,
-    } : null,
-    market_odds: marketOdds,
+    home_season:  buildSeason(homeStand, homeStats),
+    away_season:  buildSeason(awayStand, awayStats),
+    market_odds:  marketOdds,
   };
 
   // Appeler le moteur inline (version simplifiée portée dans le worker)
@@ -6238,32 +6347,72 @@ function _mlbGetMarketOdds(oddsData, homeName, awayName) {
   ) ?? null;
 }
 
-// ── MOTEUR MLB INLINE (porté dans le worker sans import) ─────────────────────
+// ── MOTEUR MLB INLINE (enrichi v6.62) ─────────────────────────────────────────
+// Variables : starter FIP · rest · run_diff · team OPS · team ERA ·
+//             home/away split · last10 form
 function _mlbEngineCompute(matchData) {
   const { home_pitcher, away_pitcher, home_season, away_season, venue, market_odds } = matchData;
 
+  // 1. Starting pitcher FIP edge (cœur du moteur MLB · poids 0.20)
   const hFIP = home_pitcher?.fip ?? home_pitcher?.era ?? 4.20;
   const aFIP = away_pitcher?.fip ?? away_pitcher?.era ?? 4.20;
   const fipDiff    = aFIP - hFIP;
   const pitcherAdv = Math.tanh(fipDiff / 2) * 0.20;
 
+  // 2. Rest days starter
   const hRest  = home_pitcher?.rest_days ?? 4;
   const aRest  = away_pitcher?.rest_days ?? 4;
   const rScore = (r) => r < 3 ? -0.03 : r < 4 ? -0.01 : r <= 6 ? 0 : -0.01;
   const restAdv = rScore(hRest) - rScore(aRest);
 
+  // 3. Run differential saison (poids 0.07)
   const hRunDiff   = home_season?.run_diff ?? 0;
   const aRunDiff   = away_season?.run_diff ?? 0;
   const runDiffAdv = Math.tanh((hRunDiff - aRunDiff) / 50) * 0.07;
 
-  let homeProb = 0.536 + pitcherAdv + restAdv + runDiffAdv;
+  // 4. Team OPS différentiel (offensive, poids 0.08)
+  let opsAdv = 0;
+  if (home_season?.ops != null && away_season?.ops != null) {
+    opsAdv = Math.tanh((home_season.ops - away_season.ops) / 0.050) * 0.08;
+  }
+
+  // 5. Team ERA différentiel (défensif global, inclut bullpen · poids 0.07)
+  let teamEraAdv = 0;
+  if (home_season?.team_era != null && away_season?.team_era != null) {
+    teamEraAdv = Math.tanh((away_season.team_era - home_season.team_era) / 1.0) * 0.07;
+  }
+
+  // 6. Home/away split (spécifique performance chez soi / en déplacement · poids 0.05)
+  let splitAdv = 0;
+  const hHomeGames = (home_season?.home_wins ?? 0) + (home_season?.home_losses ?? 0);
+  const aAwayGames = (away_season?.away_wins ?? 0) + (away_season?.away_losses ?? 0);
+  if (hHomeGames >= 20 && aAwayGames >= 20) {
+    const hHomePct = home_season.home_wins / hHomeGames;
+    const aAwayPct = away_season.away_wins / aAwayGames;
+    splitAdv = Math.tanh((hHomePct - aAwayPct) / 0.200) * 0.05;
+  }
+
+  // 7. Forme récente — last10 record (poids 0.04)
+  let formAdv = 0;
+  const hLast10Games = (home_season?.last10_wins ?? 0) + (home_season?.last10_losses ?? 0);
+  const aLast10Games = (away_season?.last10_wins ?? 0) + (away_season?.last10_losses ?? 0);
+  if (hLast10Games >= 5 && aLast10Games >= 5) {
+    const hLast10Pct = home_season.last10_wins / hLast10Games;
+    const aLast10Pct = away_season.last10_wins / aLast10Games;
+    formAdv = Math.tanh((hLast10Pct - aLast10Pct) / 0.300) * 0.04;
+  }
+
+  let homeProb = 0.536 + pitcherAdv + restAdv + runDiffAdv + opsAdv + teamEraAdv + splitAdv + formAdv;
   homeProb     = Math.max(0.20, Math.min(0.80, homeProb));
 
   const missing = [];
   let dataQuality = 'MEDIUM';
   if (!home_pitcher?.fip && !home_pitcher?.era) { missing.push('home_pitcher'); dataQuality = 'LOW'; }
   if (!away_pitcher?.fip && !away_pitcher?.era) { missing.push('away_pitcher'); dataQuality = 'LOW'; }
-  if (home_pitcher?.fip) dataQuality = 'HIGH';
+  if (home_season?.ops == null || away_season?.ops == null) missing.push('team_ops');
+  if (home_season?.team_era == null || away_season?.team_era == null) missing.push('team_era');
+  if (hLast10Games < 5 || aLast10Games < 5) missing.push('last10_form');
+  if (home_pitcher?.fip && home_season?.ops != null && home_season?.team_era != null) dataQuality = 'HIGH';
 
   const recommendations = [];
   const BOOK_PRIORITY_W = ['pinnacle', 'draftkings', 'fanduel', 'betmgm'];
@@ -6336,7 +6485,19 @@ function _mlbEngineCompute(matchData) {
     away_prob:    Math.round((1 - homeProb) * 100),
     data_quality: dataQuality,
     missing_vars: missing,
-    variables:    { pitcher_fip_diff: Math.round(fipDiff * 100) / 100, run_diff_adv: Math.round(runDiffAdv * 100), park_factor: MLB_PARK_FACTORS_W[venue] ?? 100, home_pitcher: home_pitcher?.name ?? null, away_pitcher: away_pitcher?.name ?? null },
+    variables:    {
+      pitcher_fip_diff:  Math.round(fipDiff * 100) / 100,
+      pitcher_adv_pct:   Math.round(pitcherAdv * 1000) / 10,
+      rest_adv_pct:      Math.round(restAdv * 1000) / 10,
+      run_diff_adv_pct:  Math.round(runDiffAdv * 1000) / 10,
+      ops_adv_pct:       Math.round(opsAdv * 1000) / 10,
+      team_era_adv_pct:  Math.round(teamEraAdv * 1000) / 10,
+      home_away_split_pct: Math.round(splitAdv * 1000) / 10,
+      last10_form_pct:   Math.round(formAdv * 1000) / 10,
+      park_factor:       MLB_PARK_FACTORS_W[venue] ?? 100,
+      home_pitcher:      home_pitcher?.name ?? null,
+      away_pitcher:      away_pitcher?.name ?? null,
+    },
     recommendations,
     best:          recommendations[0] ?? null,
     est_total_runs: Math.round(estTotal * 10) / 10,
@@ -6382,9 +6543,27 @@ async function handleMLBBotLogs(url, env, origin) {
       ? Math.round(logs.filter(l => l.best_edge).reduce((s, l) => s + l.best_edge, 0) / logs.filter(l => l.best_edge).length * 10) / 10
       : null;
 
+    // Brier score sur logs settled avec home_prob + result_winner
+    const brierValid = settled.filter(l => l.home_prob !== null && l.result_winner !== null);
+    let brierScore = null;
+    if (brierValid.length > 0) {
+      const sum = brierValid.reduce((s, l) => {
+        const p      = l.home_prob / 100;
+        const actual = l.result_winner === 'HOME' ? 1 : 0;
+        return s + Math.pow(p - actual, 2);
+      }, 0);
+      brierScore = Math.round(sum / brierValid.length * 10000) / 10000;
+    }
+
     return jsonResponse({
       logs,
-      stats: { total_analyzed: logs.length, total_settled: settled.length, hit_rate: hitRate, avg_edge: avgEdge },
+      stats: {
+        total_analyzed: logs.length,
+        total_settled:  settled.length,
+        hit_rate:       hitRate,
+        avg_edge:       avgEdge,
+        brier_score:    brierScore,
+      },
     }, 200, origin);
   } catch (err) { return jsonResponse({ error: err.message }, 500, origin); }
 }
@@ -6420,23 +6599,42 @@ async function _mlbBotSettleDate(env, dateStr) {
         : null;
       const upset = log.home_prob !== null && Math.abs(log.home_prob - 50) > 5 && !motorWasRight;
 
+      // Settlement OU reco — fix : type='OVER_UNDER' (au lieu de market='total')
       let ouWasRight = null;
-      const recBest = log.betting_recommendations?.best;
-      if (recBest?.market === 'total' && recBest?.line !== undefined && recBest?.side) {
-        const over = totalRuns > recBest.line;
-        ouWasRight = recBest.side === 'OVER' ? over : !over;
+      const recs = log.betting_recommendations?.all ?? [];
+      const ouReco = recs.find(r => r.type === 'OVER_UNDER');
+      if (ouReco && ouReco.ou_line != null && ouReco.side) {
+        const over = totalRuns > ouReco.ou_line;
+        ouWasRight = ouReco.side === 'OVER' ? over : !over;
       }
 
-      log.result_home_score = homeScore;
-      log.result_away_score = awayScore;
-      log.result_winner     = winner;
-      log.result_margin     = margin;
-      log.result_total      = totalRuns;
-      log.motor_was_right   = motorWasRight;
-      log.prob_delta_pts    = probDelta;
-      log.upset             = upset;
-      log.ou_was_right      = ouWasRight;
-      log.settled_at        = new Date().toISOString();
+      // Calibration modèle O/U (indép. reco) : est_total_runs vs ligne marché
+      let ouModelWasRight = null;
+      if (log.est_total_runs != null && ouReco?.ou_line != null) {
+        const modelOver  = log.est_total_runs > ouReco.ou_line;
+        const actualOver = totalRuns > ouReco.ou_line;
+        ouModelWasRight = modelOver === actualOver;
+      }
+
+      // CLV : écart entre prob moteur et prob implicite ML à l'analyse
+      let clvPostMatch = null;
+      const homeMlReco = recs.find(r => r.type === 'MONEYLINE' && r.side === 'HOME');
+      if (log.home_prob !== null && homeMlReco?.implied_prob != null) {
+        clvPostMatch = Math.round((log.home_prob - homeMlReco.implied_prob) * 100) / 100;
+      }
+
+      log.result_home_score   = homeScore;
+      log.result_away_score   = awayScore;
+      log.result_winner       = winner;
+      log.result_margin       = margin;
+      log.result_total        = totalRuns;
+      log.motor_was_right     = motorWasRight;
+      log.prob_delta_pts      = probDelta;
+      log.upset               = upset;
+      log.ou_was_right        = ouWasRight;
+      log.ou_model_was_right  = ouModelWasRight;
+      log.clv_post_match      = clvPostMatch;
+      log.settled_at          = new Date().toISOString();
 
       await env.PAPER_TRADING.put(key, JSON.stringify(log), { expirationTtl: 90 * 24 * 3600 });
       settled++;
