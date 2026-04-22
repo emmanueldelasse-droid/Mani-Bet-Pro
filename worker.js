@@ -122,10 +122,8 @@ const PAPER_KV_KEY        = 'paper_trading_state';
 const QUOTA_KV_KEY        = 'odds_quota_state';
 const TANK01_KV_KEY       = 'tank01_teams_stats';
 const TANK01_INJURIES_KEY = 'tank01_injuries_impact';
-const TANK01_QUOTA_KEY    = 'tank01_quota_state';
 const TANK01_ROSTER_KEY   = 'tank01_roster_injuries_v1';
 const TENNIS_CSV_KEY      = 'tennis_csv_stats';
-const AI_INJURIES_KEY     = 'ai_injuries_cache';
 const TENNIS_ODDS_KEY     = 'tennis_odds_cache';
 
 const PAPER_BETS_INDEX_KEY = 'paper_bets_index';
@@ -584,28 +582,6 @@ function _teamDetailExtractGameDate(game) {
   if (/^\d{8}$/.test(raw)) return `${raw.slice(0,4)}-${raw.slice(4,6)}-${raw.slice(6,8)}`;
   const d = new Date(raw);
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
-}
-
-function _teamDetailExtractScoreFromBoxScore(body, teamAbv, oppAbv) {
-  const candidates = [
-    { home: body?.homePts, away: body?.awayPts, homeAbv: body?.home, awayAbv: body?.away },
-    { home: body?.homeScore, away: body?.awayScore, homeAbv: body?.home, awayAbv: body?.away },
-    { home: body?.homeTeamScore, away: body?.awayTeamScore, homeAbv: body?.home, awayAbv: body?.away },
-    { home: body?.homeTeam?.score, away: body?.awayTeam?.score, homeAbv: body?.home, awayAbv: body?.away },
-  ];
-
-  for (const c of candidates) {
-    const home = _teamDetailSafeNum(c.home);
-    const away = _teamDetailSafeNum(c.away);
-    if (home === null || away === null) continue;
-    const homeAbv = String(c.homeAbv ?? '').toUpperCase();
-    const awayAbv = String(c.awayAbv ?? '').toUpperCase();
-    if (homeAbv && awayAbv) {
-      if (homeAbv === teamAbv && awayAbv === oppAbv) return { teamPts: home, oppPts: away, homeAway: 'home' };
-      if (awayAbv === teamAbv && homeAbv === oppAbv) return { teamPts: away, oppPts: home, homeAway: 'away' };
-    }
-  }
-  return null;
 }
 
 function _teamDetailExtractPlayerBoxScores(body) {
@@ -1926,28 +1902,6 @@ async function _callClaudeWithWebSearch(apiKey, systemPrompt, userPrompt, maxTok
   }
 
   return finalText || null;
-}
-
-function _validateAIInjuryList(list, teamsAbv) {
-  if (!Array.isArray(list)) return [];
-  return list.filter(p => {
-    if (!p || typeof p !== 'object') return false;
-    if (!p.name || typeof p.name !== 'string' || p.name.trim() === '') return false;
-    if (!p.team || typeof p.team !== 'string') return false;
-    if (p.ppg !== null && p.ppg !== undefined) {
-      const ppg = parseFloat(p.ppg);
-      if (isNaN(ppg) || ppg < 0 || ppg > 60) { p.ppg = null; }
-      else { p.ppg = Math.round(ppg * 10) / 10; }
-    }
-    return true;
-  }).map(p => ({
-    name:   p.name.trim(),
-    team:   p.team.trim().toUpperCase(),
-    status: p.status ?? 'OUT',
-    ppg:    p.ppg ?? null,
-    source: p.source ?? 'claude_web_search',
-    note:   p.note ?? null,
-  }));
 }
 
 // ── HANDLER : PLAYER TEST ─────────────────────────────────────────────────────

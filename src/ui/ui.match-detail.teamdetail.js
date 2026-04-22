@@ -20,9 +20,6 @@
  */
 
 import { Logger } from '../utils/utils.logger.js';
-import {
-  resolveLatestAnalysisForMatch,
-} from './ui.match-detail.helpers.js';
 
 // ── LOADER ASYNCHRONE ─────────────────────────────────────────────────────────
 

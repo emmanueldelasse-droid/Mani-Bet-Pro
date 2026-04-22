@@ -1404,11 +1404,6 @@ function _buildSynthese(analysis, match) {
   return `${escapeHtml(phrase1)} ${escapeHtml(phrase2)} ${escapeHtml(phrase3)}`;
 }
 
-// Anciennes fonctions conservées pour compatibilité interne (non utilisées dans le shell)
-function renderBlocFiabilite(analysis) { return renderBlocFiabiliteEtSynthese(analysis, null); }
-function renderBlocSources(analysis) { return ''; }
-function renderBlocIA(analysis, match) { return ''; }
-
 // ── COTES MULTI-BOOKS ─────────────────────────────────────────────────────────
 
 async function _loadAndRenderMultiBookOdds(container, match, analysis) {
