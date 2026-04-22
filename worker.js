@@ -430,8 +430,8 @@ export default {
  * Cache KV 6h read / 8h write. ~23 appels Tank01 max sur cache miss.
  */
 async function handleNBATeamDetail(url, env, origin) {
-  const homeRaw = String(url.searchParams.get('home') || '').toUpperCase();
-  const awayRaw = String(url.searchParams.get('away') || '').toUpperCase();
+  const homeRaw = String(url.searchParams.get('home') || '').trim().toUpperCase();
+  const awayRaw = String(url.searchParams.get('away') || '').trim().toUpperCase();
 
   if (!homeRaw || !awayRaw) {
     return jsonResponse({ error: 'missing_home_or_away' }, 400, origin);
@@ -440,7 +440,7 @@ async function handleNBATeamDetail(url, env, origin) {
   const home = normalizeTank01TeamAbv(homeRaw);
   const away = normalizeTank01TeamAbv(awayRaw);
 
-  const cacheKey    = `team_detail_v7_${awayRaw}_${homeRaw}`;
+  const cacheKey    = `team_detail_v7_${away}_${home}`;
   const kv          = env.PAPER_TRADING;
   const now         = Date.now();
   const READ_TTL_MS = 6 * 60 * 60 * 1000;
@@ -1092,7 +1092,7 @@ async function handleNBARosterInjuries(env, origin) {
     const playerMap = {};
 
     for (const team of teams) {
-      const roster  = team.roster ?? {};
+      const roster  = team.Roster ?? team.roster ?? {};
       const players = Array.isArray(roster) ? roster : Object.values(roster);
 
       for (const player of players) {
@@ -2002,7 +2002,7 @@ async function handleNBARosterDebug(url, env, origin) {
     }, 200, origin);
   }
 
-  const roster  = team.roster ?? {};
+  const roster  = team.Roster ?? team.roster ?? {};
   const players = Array.isArray(roster) ? roster : Object.values(roster);
   const sample  = players.slice(0, 3).map(p => ({
     playerID:   p.playerID,
@@ -2619,8 +2619,10 @@ async function handleNBATeamsStats(env, origin) {
     const teams = {};
 
     for (const team of (data.body ?? [])) {
-      const ppg  = parseFloat(team.ppg)  ?? null;
-      const oppg = parseFloat(team.oppg) ?? null;
+      const ppgRaw  = parseFloat(team.ppg);
+      const oppgRaw = parseFloat(team.oppg);
+      const ppg  = Number.isFinite(ppgRaw)  ? ppgRaw  : null;
+      const oppg = Number.isFinite(oppgRaw) ? oppgRaw : null;
       teams[team.teamAbv] = {
         teamID:            team.teamID,
         teamAbv:           team.teamAbv,
@@ -5915,6 +5917,12 @@ const MLB_STATS_API        = 'https://statsapi.mlb.com/api/v1';
 const MLB_ODDS_KV_KEY      = 'mlb_odds_cache';
 const MLB_PITCHER_KV_KEY   = 'mlb_pitchers_cache';
 const MLB_TEAM_STATS_KV_KEY = 'mlb_team_stats_cache';
+// Saison MLB dynamique : mars-décembre = saison courante · janvier-février = saison précédente
+function _mlbSeason() {
+  const d = new Date();
+  const y = d.getUTCFullYear();
+  return d.getUTCMonth() < 2 ? y - 1 : y;
+}
 
 // ── ROUTES (à ajouter dans le router) ────────────────────────────────────────
 // GET  /mlb/matches
@@ -5999,7 +6007,7 @@ function parseMLBTeamStats(competitor) {
     return s ? parseFloat(s.displayValue) : null;
   };
   return {
-    runs_per_game:   get('batting.avg') ?? null,
+    runs_per_game:   null, // ESPN ne fournit pas ce champ · source = MLB standings
     batting_avg:     get('batting.avg') ?? null,
     era:             get('pitching.era') ?? null,
     win_pct:         competitor.records?.find(r => r.type === 'total')?.pct ?? null,
@@ -6068,7 +6076,13 @@ async function handleMLBPitchers(url, env, origin) {
       );
       results.forEach((r, idx) => {
         if (r.status === 'fulfilled' && r.value) {
-          pitchers[batch[idx].name] = r.value;
+          const teamName = batch[idx].name;
+          if (pitchers[teamName]) {
+            // Double-header : garder premier pitcher · logguer collision pour détection manuelle
+            console.warn(`[MLB] double-header pitcher collision pour ${teamName} · garde ${pitchers[teamName].name} · ignore ${r.value.name}`);
+          } else {
+            pitchers[teamName] = r.value;
+          }
         }
       });
     }
@@ -6098,7 +6112,7 @@ async function _enrichMLBPitcher(pitcher, env) {
   try {
     // Appel séparé pour les stats saison — le hydrate(stats) du schedule ne les retourne pas
     const resp = await fetchTimeout(
-      `${MLB_STATS_API}/people/${pitcher.id}/stats?stats=season&group=pitching&season=2026`,
+      `${MLB_STATS_API}/people/${pitcher.id}/stats?stats=season&group=pitching&season=${_mlbSeason()}`,
       {}, 8000
     );
     if (!resp?.ok) return { id: pitcher.id, name: pitcher.fullName, era: null, fip: null, whip: null, source: 'mlb_stats_api' };
@@ -6224,7 +6238,7 @@ function _parseMLBOddsResponse(data) {
 async function handleMLBStandings(origin) {
   try {
     const resp = await fetchTimeout(
-      `${MLB_STATS_API}/standings?leagueId=103,104&season=2026&standingsTypes=regularSeason&hydrate=team,records(home,away,last10)`,
+      `${MLB_STATS_API}/standings?leagueId=103,104&season=${_mlbSeason()}&standingsTypes=regularSeason&hydrate=team,records(home,away,last10)`,
       {}, 10000
     );
     if (!resp?.ok) return jsonResponse({ available: false }, 200, origin);
@@ -6285,8 +6299,8 @@ async function handleMLBBullpenStats(env, origin) {
   try {
     // Essai : stats=season avec subGroup=starter et reliever séparément
     const [starterResp, relieverResp] = await Promise.all([
-      fetchTimeout(`${MLB_STATS_API}/teams/stats?season=2026&sportId=1&stats=season&group=pitching&subGroup=starter`, {}, 10000),
-      fetchTimeout(`${MLB_STATS_API}/teams/stats?season=2026&sportId=1&stats=season&group=pitching&subGroup=reliever`, {}, 10000),
+      fetchTimeout(`${MLB_STATS_API}/teams/stats?season=${_mlbSeason()}&sportId=1&stats=season&group=pitching&subGroup=starter`, {}, 10000),
+      fetchTimeout(`${MLB_STATS_API}/teams/stats?season=${_mlbSeason()}&sportId=1&stats=season&group=pitching&subGroup=reliever`, {}, 10000),
     ]);
 
     const teams = {};
@@ -6337,8 +6351,8 @@ async function handleMLBTeamStats(env, origin) {
   try {
     // 2 appels parallèles : hitting + pitching (1 call chacun pour les 30 équipes)
     const [hitResp, pitResp] = await Promise.all([
-      fetchTimeout(`${MLB_STATS_API}/teams/stats?season=2026&sportId=1&stats=season&group=hitting`, {}, 10000),
-      fetchTimeout(`${MLB_STATS_API}/teams/stats?season=2026&sportId=1&stats=season&group=pitching`, {}, 10000),
+      fetchTimeout(`${MLB_STATS_API}/teams/stats?season=${_mlbSeason()}&sportId=1&stats=season&group=hitting`, {}, 10000),
+      fetchTimeout(`${MLB_STATS_API}/teams/stats?season=${_mlbSeason()}&sportId=1&stats=season&group=pitching`, {}, 10000),
     ]);
 
     const teams = {};
@@ -6897,7 +6911,7 @@ function _mlbEngineCompute(matchData) {
   const pitcherRed = 1 - Math.min(0.30, Math.max(0, (8 - (hFIP + aFIP) / 2) / 20));
   const estTotal   = (hRPG + aRPG) * parkFact * pitcherRed;
 
-  const ouBk = market_odds?.bookmakers?.[0];
+  const ouBk = market_odds?.bookmakers?.find(b => b?.total_line != null) ?? market_odds?.bookmakers?.[0];
   const ouLine = ouBk?.total_line ?? null;
   if (ouLine) {
     const diff     = estTotal - ouLine;
@@ -6968,8 +6982,12 @@ function _botPredictMLBStrikeouts(matchData) {
   // IP attendu par starter (cap 5.5-7 selon qualité)
   const expectedIP = (pitcher) => {
     if (!pitcher) return null;
-    const gs  = pitcher.games || pitcher.innings ? parseFloat(pitcher.innings) / Math.max(1, pitcher.games) : null;
-    if (gs && Number.isFinite(gs)) return Math.min(7.5, Math.max(3.5, gs));
+    const games   = parseFloat(pitcher.games);
+    const innings = parseFloat(pitcher.innings);
+    const gs = (Number.isFinite(games) && games > 0 && Number.isFinite(innings) && innings > 0)
+      ? innings / games
+      : null;
+    if (gs !== null) return Math.min(7.5, Math.max(3.5, gs));
     // Fallback : basé sur FIP (bon pitcher → plus d'IP)
     const fip = pitcher.fip ?? pitcher.era ?? 4.5;
     if (fip < 3.5)      return 6.2;
