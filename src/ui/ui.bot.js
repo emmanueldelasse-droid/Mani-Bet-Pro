@@ -384,6 +384,23 @@ function _renderDeepAnalysis(logs, phaseFilter = 'all') {
   const withPPRec = logsForPhase.filter(l => (l.betting_recommendations?.recommendations ?? []).some(r => r.type === 'PLAYER_POINTS')).length;
   const totalPPRecs = logsForPhase.reduce((s, l) => s + ((l.betting_recommendations?.recommendations ?? []).filter(r => r.type === 'PLAYER_POINTS').length), 0);
 
+  // Settlement PLAYER_POINTS — agrège toutes les recs settled sur les logs phase-filtrés
+  const allPPRecs = logsForPhase.flatMap(l => (l.betting_recommendations?.recommendations ?? []).filter(r => r.type === 'PLAYER_POINTS'));
+  const ppSettled = allPPRecs.filter(r => r.was_right !== null && r.was_right !== undefined);
+  const ppCorrect = ppSettled.filter(r => r.was_right === true).length;
+  const ppPct     = ppSettled.length > 0 ? Math.round(ppCorrect / ppSettled.length * 1000) / 10 : null;
+  const ppColor   = ppPct != null ? (ppPct >= 60 ? 'var(--color-success)' : ppPct >= 50 ? 'var(--color-warning)' : 'var(--color-danger)') : 'var(--color-muted)';
+
+  // Ventilation props par confidence label
+  const ppByConf = { high: { t: 0, c: 0 }, medium: { t: 0, c: 0 }, low: { t: 0, c: 0 } };
+  for (const r of ppSettled) {
+    const lbl = r.confidence_label ?? 'medium';
+    if (ppByConf[lbl]) {
+      ppByConf[lbl].t++;
+      if (r.was_right === true) ppByConf[lbl].c++;
+    }
+  }
+
   const phaseLabel = phaseFilter === 'regular' ? ' · Saison régulière' : phaseFilter === 'playoffs' ? ' · Playoffs & Play-in' : '';
 
   return `<div class="bot-analysis-panel">
@@ -431,11 +448,19 @@ function _renderDeepAnalysis(logs, phaseFilter = 'all') {
       </div>
 
       <div class="bot-analysis-section">
-        <div class="bot-analysis-subtitle">Props joueur · en attente</div>
-        <div class="bot-analysis-help">Les props (points d'un joueur) n'ont pas encore de système de settlement. On verra les résultats plus tard.</div>
+        <div class="bot-analysis-subtitle">Props joueur</div>
+        <div class="bot-analysis-help">Un joueur a-t-il dépassé (ou pas) sa ligne de points ? Settlement automatique via box scores ESPN après chaque match.</div>
+        ${ppPct != null ? `
+        <div class="bot-analysis-row" style="font-weight:600;background:var(--color-bg-elevated);padding-left:6px;padding-right:6px;border-radius:4px;margin-bottom:4px">
+          <span>Hit rate (recos edge ≥ 5%)</span>
+          <span style="color:${ppColor};font-weight:800">${ppCorrect}/${ppSettled.length} · ${ppPct}%</span>
+        </div>
+        ${ppByConf.high.t > 0 ? `<div class="bot-analysis-row"><span>Confidence HIGH</span><span style="font-weight:700">${ppByConf.high.c}/${ppByConf.high.t}</span></div>` : ''}
+        ${ppByConf.medium.t > 0 ? `<div class="bot-analysis-row"><span>Confidence MEDIUM</span><span style="font-weight:700">${ppByConf.medium.c}/${ppByConf.medium.t}</span></div>` : ''}
+        ${ppByConf.low.t > 0 ? `<div class="bot-analysis-row"><span>Confidence LOW</span><span style="font-weight:700">${ppByConf.low.c}/${ppByConf.low.t}</span></div>` : ''}
+        ` : `<div class="bot-analysis-row"><span style="color:var(--color-muted);font-size:11px">Aucune reco PLAYER_POINTS settlée pour le moment</span></div>`}
         <div class="bot-analysis-row"><span>Matchs avec projections</span><span style="font-weight:700">${withPP}</span></div>
-        <div class="bot-analysis-row"><span>Matchs avec reco</span><span style="font-weight:700">${withPPRec}</span></div>
-        <div class="bot-analysis-row"><span>Recos totales</span><span style="font-weight:700">${totalPPRecs}</span></div>
+        <div class="bot-analysis-row"><span>Recos PLAYER_POINTS total</span><span style="font-weight:700">${totalPPRecs}</span></div>
       </div>
     </div>
   </div>
