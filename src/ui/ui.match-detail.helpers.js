@@ -15,17 +15,23 @@ export { americanToDecimal, decimalToAmerican };
 export const WORKER_URL = 'https://manibetpro.emmanueldelasse.workers.dev';
 
 export const SIGNAL_LABELS = {
-  'recent_form_ema':   'Forme récente',
-  'home_away_split':   'Avantage terrain',
-  'efg_diff':          'Efficacité au tir',
-  'net_rating_diff':   'Niveau général',
-  'win_pct_diff':      'Bilan victoires/défaites',
-  'absences_impact':   'Blessures',
-  'ts_diff':           'Efficacité offensive',
-  'avg_pts_diff':      'Points marqués',
-  'defensive_diff':    'Défense',
-  'back_to_back':      'Fatigue (match consécutif)',
-  'rest_days_diff':    'Repos',
+  'recent_form_ema':       'Forme récente',
+  'home_away_split':       'Avantage terrain',
+  'efg_diff':              'Efficacité au tir',
+  'net_rating_diff':       'Niveau général',
+  'win_pct_diff':          'Bilan victoires/défaites',
+  'absences_impact':       'Blessures',
+  'ts_diff':               'Efficacité offensive',
+  'avg_pts_diff':          'Points marqués',
+  'defensive_diff':        'Défense',
+  'back_to_back':          'Fatigue (match consécutif)',
+  'rest_days_diff':        'Repos',
+  // Tennis
+  'ranking_elo_diff':      'Niveau joueur (Elo)',
+  'surface_winrate_diff':  'Réussite sur la surface',
+  'h2h_surface':           'Confrontations directes',
+  'service_dominance':     'Dominance au service',
+  'fatigue_index':         'Fatigue / repos',
 };
 
 export function simplifyLabel(label, variable) {
