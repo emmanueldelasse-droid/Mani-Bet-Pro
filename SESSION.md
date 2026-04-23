@@ -6,8 +6,11 @@ Début tâche → "En cours" étape 1/N · Fin étape → +1 · Merge → vider 
 ## En cours
 néant
 
-## TODO
-néant (demander P quand user ajoute)
+## TODO (bot calibration — diag Alon pré-v6.78)
+- [ ] P1 reduire `recent_form_ema` 0.24→0.15 en playin/playoff (worker.js:4406) · bruité
+- [ ] P1 bump `net_rating_diff` 0.06→0.16 (worker.js:4406) · stat stable
+- [ ] P2 gate `confidence=INCONCLUSIVE` si `data_quality<0.55` (worker.js:5185)
+- [ ] P3 relancer Alon après 50+ logs post-v6.78 · mesurer effet shrinkage+data fix
 
 ## État
 Worker `manibetpro` v6.78 · `manibetpro.emmanueldelasse.workers.dev` · Front GH Pages
