@@ -354,6 +354,8 @@ export default {
         return await handleTennisSportsList(url, env, origin);
       if (path === '/tennis/csv-test' && request.method === 'GET')
         return await handleTennisCSVTest(url, env, origin);
+      if (path === '/tennis/tournaments' && request.method === 'GET')
+        return await handleTennisTournaments(url, env, origin);
       if (path === '/tennis/odds' && request.method === 'GET')
         return await handleTennisOdds(url, env, origin);
       if (path === '/tennis/stats' && request.method === 'GET')
@@ -2010,6 +2012,7 @@ const BU_DEBUG_TEAMS = {
   MIN: ['minnesota timberwolves', 'minnesota', 'timberwolves', 'wolves'],
   NOP: ['new orleans pelicans', 'new orleans', 'pelicans', 'pels'],
   NYK: ['new york knicks', 'new york', 'knicks', 'ny knicks'],
+  NY:  ['new york knicks', 'new york', 'knicks', 'ny knicks'],
   OKC: ['oklahoma city thunder', 'oklahoma city', 'thunder', 'okc'],
   ORL: ['orlando magic', 'orlando', 'magic'],
   PHI: ['philadelphia 76ers', 'philadelphia', '76ers', 'sixers', 'philly', 'philadelphie sixers'],
@@ -2069,7 +2072,23 @@ function _buExtractCandidatesFromHtml(html, baseUrl) {
 }
 
 function _buScoreCandidate(article, home, away) {
-  const text = _buNormalizeText(`${article.title}`);
+  // Truncate au 1er marqueur fréquent d'extrait WordPress (date FR, categorie, tiret long)
+  // pour éviter les faux-positifs sur keywords dans l'extrait (ex: "Game 1" mentionné pour un
+  // autre match).
+  const rawTitle = String(article.title ?? '');
+  const cutMarkers = [
+    /\s+Le\s+\d{1,2}\s+[a-zéèêûîôâù]+\s+\d{4}/i,  // "Le 22 avril 2026"
+    /\s+-\s+[A-Z]+\s+-\s+/,                         // " NBA - "
+    /\s+\|\s+/,                                     // " | "
+  ];
+  let cleanTitle = rawTitle;
+  for (const re of cutMarkers) {
+    const m = cleanTitle.match(re);
+    if (m && m.index != null) cleanTitle = cleanTitle.slice(0, m.index);
+  }
+  if (cleanTitle.length > 140) cleanTitle = cleanTitle.slice(0, 140);
+
+  const text = _buNormalizeText(cleanTitle);
   const homeAliases = BU_DEBUG_TEAMS[home] ?? [];
   const awayAliases = BU_DEBUG_TEAMS[away] ?? [];
   let score = 0;
@@ -2092,6 +2111,9 @@ function _buScoreCandidate(article, home, away) {
       break;
     }
   }
+
+  // Filtre dur : sans aucune mention équipe, reject (évite articles sans rapport)
+  if (!homeHit && !awayHit) return -999;
 
   if (homeHit && awayHit) score += 2;
 
@@ -5617,6 +5639,125 @@ function buildTimestamps(date) {
 
 // ── TENNIS ────────────────────────────────────────────────────────────────────
 
+// Source unique de vérité pour les tournois tennis couverts.
+// Dates saison 2026 · chaque entrée mappe key interne → sport_key TheOddsAPI.
+// Ajout d'un tournoi : une ligne ici + vérif sport_key via /tennis/sports-list.
+const TENNIS_TOURNAMENTS = [
+  // ── ATP Grand Slams ──
+  { key: 'atp_australian_open', label: 'Australian Open',       tour: 'atp', surface: 'Hard',  start: '2026-01-19', end: '2026-02-01', sport_key: 'tennis_atp_aus_open_singles' },
+  { key: 'atp_french_open',     label: 'Roland Garros',          tour: 'atp', surface: 'Clay',  start: '2026-05-25', end: '2026-06-08', sport_key: 'tennis_atp_french_open' },
+  { key: 'atp_wimbledon',       label: 'Wimbledon',              tour: 'atp', surface: 'Grass', start: '2026-06-29', end: '2026-07-12', sport_key: 'tennis_atp_wimbledon' },
+  { key: 'atp_us_open',         label: 'US Open',                tour: 'atp', surface: 'Hard',  start: '2026-08-31', end: '2026-09-13', sport_key: 'tennis_atp_us_open' },
+  // ── ATP Masters 1000 ──
+  { key: 'atp_indian_wells',    label: 'Indian Wells Masters',   tour: 'atp', surface: 'Hard',  start: '2026-03-09', end: '2026-03-22', sport_key: 'tennis_atp_indian_wells' },
+  { key: 'atp_miami',           label: 'Miami Open',             tour: 'atp', surface: 'Hard',  start: '2026-03-23', end: '2026-04-05', sport_key: 'tennis_atp_miami_open' },
+  { key: 'atp_monte_carlo',     label: 'Monte-Carlo Masters',    tour: 'atp', surface: 'Clay',  start: '2026-04-13', end: '2026-04-20', sport_key: 'tennis_atp_monte_carlo_masters' },
+  { key: 'atp_madrid',          label: 'Madrid Open',            tour: 'atp', surface: 'Clay',  start: '2026-04-28', end: '2026-05-10', sport_key: 'tennis_atp_madrid_open' },
+  { key: 'atp_rome',            label: 'Rome Masters',           tour: 'atp', surface: 'Clay',  start: '2026-05-11', end: '2026-05-18', sport_key: 'tennis_atp_italian_open' },
+  { key: 'atp_canadian',        label: 'Canadian Open',          tour: 'atp', surface: 'Hard',  start: '2026-07-27', end: '2026-08-09', sport_key: 'tennis_atp_canadian_open' },
+  { key: 'atp_cincinnati',      label: 'Cincinnati Open',        tour: 'atp', surface: 'Hard',  start: '2026-08-10', end: '2026-08-17', sport_key: 'tennis_atp_cincinnati_open' },
+  { key: 'atp_shanghai',        label: 'Shanghai Masters',       tour: 'atp', surface: 'Hard',  start: '2026-10-05', end: '2026-10-18', sport_key: 'tennis_atp_shanghai_masters' },
+  { key: 'atp_paris_masters',   label: 'Paris Masters',          tour: 'atp', surface: 'Hard',  start: '2026-10-26', end: '2026-11-01', sport_key: 'tennis_atp_paris_masters' },
+  // ── ATP 500 ──
+  { key: 'atp_barcelona',       label: 'Barcelona Open',         tour: 'atp', surface: 'Clay',  start: '2026-04-20', end: '2026-04-27', sport_key: 'tennis_atp_barcelona_open' },
+  { key: 'atp_dubai',           label: 'Dubai Championships',    tour: 'atp', surface: 'Hard',  start: '2026-02-23', end: '2026-03-01', sport_key: 'tennis_atp_dubai' },
+  { key: 'atp_qatar',           label: 'Qatar Open (Doha)',      tour: 'atp', surface: 'Hard',  start: '2026-02-16', end: '2026-02-22', sport_key: 'tennis_atp_qatar_open' },
+  { key: 'atp_china',           label: 'China Open (Beijing)',   tour: 'atp', surface: 'Hard',  start: '2026-09-28', end: '2026-10-04', sport_key: 'tennis_atp_china_open' },
+  // ── ATP 250 (actuellement visibles sur TheOddsAPI) ──
+  { key: 'atp_munich',          label: 'BMW Open Munich',        tour: 'atp', surface: 'Clay',  start: '2026-04-20', end: '2026-04-26', sport_key: 'tennis_atp_munich' },
+
+  // ── WTA Grand Slams ──
+  { key: 'wta_australian_open', label: 'WTA Australian Open',    tour: 'wta', surface: 'Hard',  start: '2026-01-19', end: '2026-02-01', sport_key: 'tennis_wta_aus_open_singles' },
+  { key: 'wta_french_open',     label: 'WTA Roland Garros',      tour: 'wta', surface: 'Clay',  start: '2026-05-25', end: '2026-06-08', sport_key: 'tennis_wta_french_open' },
+  { key: 'wta_wimbledon',       label: 'WTA Wimbledon',          tour: 'wta', surface: 'Grass', start: '2026-06-29', end: '2026-07-12', sport_key: 'tennis_wta_wimbledon' },
+  { key: 'wta_us_open',         label: 'WTA US Open',            tour: 'wta', surface: 'Hard',  start: '2026-08-31', end: '2026-09-13', sport_key: 'tennis_wta_us_open' },
+  // ── WTA 1000 ──
+  { key: 'wta_indian_wells',    label: 'WTA Indian Wells',       tour: 'wta', surface: 'Hard',  start: '2026-03-09', end: '2026-03-22', sport_key: 'tennis_wta_indian_wells' },
+  { key: 'wta_miami',           label: 'WTA Miami Open',         tour: 'wta', surface: 'Hard',  start: '2026-03-23', end: '2026-04-05', sport_key: 'tennis_wta_miami_open' },
+  { key: 'wta_madrid',          label: 'WTA Madrid Open',        tour: 'wta', surface: 'Clay',  start: '2026-04-28', end: '2026-05-10', sport_key: 'tennis_wta_madrid_open' },
+  { key: 'wta_rome',            label: 'WTA Rome',               tour: 'wta', surface: 'Clay',  start: '2026-05-11', end: '2026-05-18', sport_key: 'tennis_wta_italian_open' },
+  { key: 'wta_canadian',        label: 'WTA Canadian Open',      tour: 'wta', surface: 'Hard',  start: '2026-07-27', end: '2026-08-09', sport_key: 'tennis_wta_canadian_open' },
+  { key: 'wta_cincinnati',      label: 'WTA Cincinnati',         tour: 'wta', surface: 'Hard',  start: '2026-08-10', end: '2026-08-17', sport_key: 'tennis_wta_cincinnati_open' },
+  { key: 'wta_china',           label: 'WTA China Open',         tour: 'wta', surface: 'Hard',  start: '2026-09-28', end: '2026-10-04', sport_key: 'tennis_wta_china_open' },
+  { key: 'wta_dubai',           label: 'WTA Dubai Championships',tour: 'wta', surface: 'Hard',  start: '2026-02-16', end: '2026-02-22', sport_key: 'tennis_wta_dubai' },
+  { key: 'wta_qatar',           label: 'WTA Qatar Open (Doha)',  tour: 'wta', surface: 'Hard',  start: '2026-02-09', end: '2026-02-15', sport_key: 'tennis_wta_qatar_open' },
+  // ── WTA 500 ──
+  { key: 'wta_stuttgart',       label: 'WTA Stuttgart',          tour: 'wta', surface: 'Clay',  start: '2026-04-20', end: '2026-04-27', sport_key: 'tennis_wta_stuttgart_open' },
+  { key: 'wta_charleston',      label: 'WTA Charleston',         tour: 'wta', surface: 'Clay',  start: '2026-03-30', end: '2026-04-05', sport_key: 'tennis_wta_charleston_open' },
+];
+
+function _activeTennisTournaments(dateStr) {
+  return TENNIS_TOURNAMENTS.filter(t => dateStr >= t.start && dateStr <= t.end);
+}
+
+async function handleTennisTournaments(url, env, origin) {
+  const date       = url.searchParams.get('date') ?? new Date().toISOString().slice(0, 10);
+  const tourFilter = url.searchParams.get('tour');  // optionnel : 'atp' ou 'wta'
+  const validate   = url.searchParams.get('validate') === '1';
+  const all        = !!url.searchParams.get('all');  // ?all=1 retourne tous, pas juste actifs
+  const inWindow   = _activeTennisTournaments(date);
+
+  let candidates = (all ? TENNIS_TOURNAMENTS : inWindow)
+    .filter(t => !tourFilter || t.tour === tourFilter);
+
+  let tournaments = candidates;
+  let availableTennisKeys = null;
+
+  if (validate) {
+    const oddsKey = env.ODDS_API_KEY_1 ?? env.ODDS_API_KEY_2;
+    if (!oddsKey) {
+      tournaments = candidates.map(t => ({ ...t, validated: null, note: 'no_api_key' }));
+    } else {
+      try {
+        const resp = await fetchTimeout(
+          `https://api.the-odds-api.com/v4/sports/?apiKey=${oddsKey}&all=true`,
+          { headers: { Accept: 'application/json' } }, 10000
+        );
+        if (resp.ok) {
+          const sports = await resp.json();
+          const arr    = Array.isArray(sports) ? sports : [];
+          const existingKeys = new Set(arr.map(s => s.key));
+          const activeKeys   = new Set(arr.filter(s => s.active).map(s => s.key));
+
+          // Mode actif (non ?all=1) : union fenetre hardcodee + tournois actifs
+          // sur TheOddsAPI (dates pas toujours alignees · bets ouverts en avance)
+          if (!all) {
+            const inWindowKeys = new Set(inWindow.map(t => t.key));
+            const extraActive  = TENNIS_TOURNAMENTS.filter(t =>
+              !inWindowKeys.has(t.key) &&
+              activeKeys.has(t.sport_key) &&
+              (!tourFilter || t.tour === tourFilter)
+            );
+            candidates = [...candidates, ...extraActive];
+          }
+
+          tournaments = candidates.map(t => ({
+            ...t,
+            key_exists:       existingKeys.has(t.sport_key),
+            currently_active: activeKeys.has(t.sport_key),
+            validated:        existingKeys.has(t.sport_key),
+          }));
+          availableTennisKeys = arr
+            .filter(s => s.key && s.key.includes('tennis'))
+            .map(s => ({ key: s.key, title: s.title, active: s.active }));
+        }
+      } catch (err) {
+        tournaments = candidates.map(t => ({ ...t, validated: null, note: err.message }));
+      }
+    }
+    if (!all) tournaments = tournaments.filter(t => t.validated !== false);
+  }
+
+  return jsonResponse({
+    available: true,
+    date,
+    active_count:  tournaments.length,
+    tournaments,
+    all_count:     TENNIS_TOURNAMENTS.length,
+    ...(availableTennisKeys ? { available_tennis_keys: availableTennisKeys } : {}),
+  }, 200, origin);
+}
+
 async function handleTennisCSVTest(url, env, origin) {
   const results = {};
   const urls = {
@@ -5655,23 +5796,26 @@ async function handleTennisSportsList(url, env, origin) {
 }
 
 async function handleTennisOdds(url, env, origin) {
-  const tournamentParam = url.searchParams.get('tournament') ?? 'monte_carlo';
-  const TOURNAMENT_KEYS = {
-    monte_carlo: 'tennis_atp_monte_carlo_masters', madrid: 'tennis_atp_madrid_open',
-    rome: 'tennis_atp_italian_open', french_open: 'tennis_atp_french_open',
-    wimbledon: 'tennis_atp_wimbledon', us_open: 'tennis_atp_us_open',
+  const tournamentParam = url.searchParams.get('tournament') ?? 'atp_monte_carlo';
+  // Alias legacy (anciennes clés sans préfixe atp_)
+  const LEGACY_ALIASES = {
+    monte_carlo: 'atp_monte_carlo', madrid: 'atp_madrid', rome: 'atp_rome',
+    french_open: 'atp_french_open', wimbledon: 'atp_wimbledon', us_open: 'atp_us_open',
   };
-  const sportKey = TOURNAMENT_KEYS[tournamentParam];
-  if (!sportKey) return jsonResponse({ available: false, note: `Tournoi inconnu: ${tournamentParam}` }, 200, origin);
+  const resolvedKey = LEGACY_ALIASES[tournamentParam] ?? tournamentParam;
+  const tournament  = TENNIS_TOURNAMENTS.find(t => t.key === resolvedKey);
+  if (!tournament) return jsonResponse({ available: false, note: `Tournoi inconnu: ${tournamentParam}` }, 200, origin);
+  const sportKey = tournament.sport_key;
 
-  const cacheKey = `${TENNIS_ODDS_KEY}_${tournamentParam}`;
+  const cacheKey = `${TENNIS_ODDS_KEY}_${resolvedKey}`;
   if (env.PAPER_TRADING) {
     try {
       const cached = await env.PAPER_TRADING.get(cacheKey);
       if (cached) {
         const parsed = JSON.parse(cached);
         if (Date.now() - parsed.fetched_at < 3 * 3600 * 1000) {
-          return jsonResponse({ available: true, source: 'cache', tournament: tournamentParam,
+          return jsonResponse({ available: true, source: 'cache', tournament: resolvedKey,
+            tour: tournament.tour, surface: tournament.surface,
             matches: parsed.matches, fetched_at: new Date(parsed.fetched_at).toISOString() }, 200, origin);
         }
       }
@@ -5698,8 +5842,8 @@ async function handleTennisOdds(url, env, origin) {
       }
       return {
         id: event.id, home_player: event.home_team, away_player: event.away_team,
-        commence_time: event.commence_time, tournament: tournamentParam, sport_key: sportKey,
-        surface: 'Clay', sport: 'TENNIS',
+        commence_time: event.commence_time, tournament: resolvedKey, sport_key: sportKey,
+        surface: tournament.surface, tour: tournament.tour, sport: 'TENNIS',
         odds: bestP1 ? { h2h: { p1: bestP1, p2: bestP2 }, source: bestBook } : null,
       };
     });
@@ -5709,7 +5853,8 @@ async function handleTennisOdds(url, env, origin) {
           { expirationTtl: 3 * 3600 });
       } catch (err) { console.warn('Tennis odds cache write:', err.message); }
     }
-    return jsonResponse({ available: true, source: 'the_odds_api', tournament: tournamentParam,
+    return jsonResponse({ available: true, source: 'the_odds_api', tournament: resolvedKey,
+      tour: tournament.tour, surface: tournament.surface,
       matches, fetched_at: new Date().toISOString() }, 200, origin);
   } catch (err) { return jsonResponse({ available: false, note: err.message }, 200, origin); }
 }
@@ -5717,17 +5862,19 @@ async function handleTennisOdds(url, env, origin) {
 async function handleTennisStats(url, env, origin) {
   const playersParam = url.searchParams.get('players') ?? '';
   const surface      = url.searchParams.get('surface') ?? 'Clay';
+  const tourParam    = String(url.searchParams.get('tour') ?? 'atp').toLowerCase();
+  const tour         = tourParam === 'wta' ? 'wta' : 'atp';
   const players      = playersParam.split(',').map(p => p.trim()).filter(Boolean);
   if (!players.length) return jsonResponse({ available: false, note: 'players parameter required' }, 400, origin);
 
-  const cacheKey = `${TENNIS_CSV_KEY}_${surface}_${[...players].sort().join('_')}`.slice(0, 512);
+  const cacheKey = `${TENNIS_CSV_KEY}_${tour}_${surface}_${[...players].sort().join('_')}`.slice(0, 512);
   if (env.PAPER_TRADING) {
     try {
       const cached = await env.PAPER_TRADING.get(cacheKey);
       if (cached) {
         const parsed = JSON.parse(cached);
         if (Date.now() - parsed.fetched_at < 12 * 3600 * 1000) {
-          return jsonResponse({ available: true, source: 'cache',
+          return jsonResponse({ available: true, source: 'cache', tour, surface,
             stats: parsed.stats, fetched_at: new Date(parsed.fetched_at).toISOString() }, 200, origin);
         }
       }
@@ -5735,8 +5882,11 @@ async function handleTennisStats(url, env, origin) {
   }
 
   try {
-    const CSV_2026 = 'https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_matches_2026.csv';
-    const CSV_2025 = 'https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_matches_2025.csv';
+    // Sackmann : repo tennis_atp (fichiers atp_matches_YYYY.csv) · tennis_wta (fichiers wta_matches_YYYY.csv)
+    const repoSlug   = tour === 'wta' ? 'tennis_wta'  : 'tennis_atp';
+    const fileSlug   = tour === 'wta' ? 'wta_matches' : 'atp_matches';
+    const CSV_2026 = `https://raw.githubusercontent.com/JeffSackmann/${repoSlug}/master/${fileSlug}_2026.csv`;
+    const CSV_2025 = `https://raw.githubusercontent.com/JeffSackmann/${repoSlug}/master/${fileSlug}_2025.csv`;
     const [r2026, r2025] = await Promise.allSettled([
       fetchTimeout(CSV_2026, {}, 15000),
       fetchTimeout(CSV_2025, {}, 15000),
@@ -5747,11 +5897,21 @@ async function handleTennisStats(url, env, origin) {
       const rows2025 = _parseTennisCSV(await r2025.value.text()).filter(r => parseInt(r.tourney_date || '0') >= 20250601);
       allRows = allRows.concat(rows2025);
     }
-    if (!allRows.length) return jsonResponse({ available: false, note: 'CSV Sackmann indisponible' }, 200, origin);
+    if (!allRows.length) return jsonResponse({ available: false, note: `CSV Sackmann ${tour.toUpperCase()} indisponible` }, 200, origin);
 
     const today = new Date();
+    const eloTable = _computeTennisEloTable(allRows);
     const stats = {};
-    for (const pName of players) stats[pName] = _computeTennisPlayerStats(allRows, pName, surface, today);
+    for (const pName of players) {
+      const s = _computeTennisPlayerStats(allRows, pName, surface, today);
+      if (s && eloTable[pName]) {
+        s.elo_overall         = eloTable[pName].elo_overall;
+        s.elo_surface         = eloTable[pName].elo_surface[surface] ?? null;
+        s.elo_surface_matches = eloTable[pName].elo_surface_matches[surface] ?? 0;
+        s.elo_matches         = eloTable[pName].elo_matches;
+      }
+      stats[pName] = s;
+    }
     if (players.length === 2 && stats[players[0]] && stats[players[1]]) {
       const h2h = _computeTennisH2H(allRows, players[0], players[1], surface);
       stats[players[0]].h2h = { [players[1]]: { p1_wins: h2h.p1_wins, p2_wins: h2h.p2_wins } };
@@ -5763,7 +5923,7 @@ async function handleTennisStats(url, env, origin) {
           { expirationTtl: 12 * 3600 });
       } catch (err) { console.warn('Tennis CSV cache write:', err.message); }
     }
-    return jsonResponse({ available: true, source: 'sackmann_csv_github', surface, players, stats,
+    return jsonResponse({ available: true, source: `sackmann_${tour}_csv_github`, tour, surface, players, stats,
       fetched_at: new Date().toISOString(), rows_analyzed: allRows.length }, 200, origin);
   } catch (err) { return jsonResponse({ available: false, note: err.message }, 200, origin); }
 }
@@ -5835,6 +5995,54 @@ function _computeTennisH2H(rows, p1, p2, surface) {
     r.surface === surface
   );
   return { p1_wins: h2h.filter(r => r.winner_name === p1).length, p2_wins: h2h.filter(r => r.winner_name === p2).length };
+}
+
+// Elo overall + par surface · K=32 · init 1500 · walk chronologique · surfaces: Hard/Clay/Grass
+// Absolue noise élevé avec 1-2 ans de données, mais DIFF entre joueurs actifs reste informatif.
+function _computeTennisEloTable(rows) {
+  const sorted = [...rows].sort((a, b) =>
+    parseInt(a.tourney_date || '0') - parseInt(b.tourney_date || '0')
+  );
+  const INIT = 1500, K = 32;
+  const SURFACES = ['Hard', 'Clay', 'Grass'];
+  const elo = new Map();
+  const get = (n) => {
+    let e = elo.get(n);
+    if (!e) {
+      e = { overall: INIT, matches: 0, surface: {}, surfaceMatches: {} };
+      for (const s of SURFACES) { e.surface[s] = INIT; e.surfaceMatches[s] = 0; }
+      elo.set(n, e);
+    }
+    return e;
+  };
+  const exp = (a, b) => 1 / (1 + Math.pow(10, (b - a) / 400));
+  for (const r of sorted) {
+    const w = r.winner_name, l = r.loser_name;
+    if (!w || !l) continue;
+    const we = get(w), le = get(l);
+    const eW = exp(we.overall, le.overall);
+    we.overall += K * (1 - eW);
+    le.overall += K * (0 - (1 - eW));
+    we.matches += 1; le.matches += 1;
+    const surf = r.surface;
+    if (surf && SURFACES.includes(surf)) {
+      const eWs = exp(we.surface[surf], le.surface[surf]);
+      we.surface[surf] += K * (1 - eWs);
+      le.surface[surf] += K * (0 - (1 - eWs));
+      we.surfaceMatches[surf] += 1;
+      le.surfaceMatches[surf] += 1;
+    }
+  }
+  const out = {};
+  for (const [name, e] of elo.entries()) {
+    out[name] = {
+      elo_overall:          Math.round(e.overall),
+      elo_matches:          e.matches,
+      elo_surface:          { Hard: Math.round(e.surface.Hard), Clay: Math.round(e.surface.Clay), Grass: Math.round(e.surface.Grass) },
+      elo_surface_matches:  { Hard: e.surfaceMatches.Hard,      Clay: e.surfaceMatches.Clay,      Grass: e.surfaceMatches.Grass },
+    };
+  }
+  return out;
 }
 
 // ── UTILITAIRES ───────────────────────────────────────────────────────────────

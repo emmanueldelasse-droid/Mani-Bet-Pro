@@ -467,10 +467,40 @@ function renderShell(match, analysis, storeInstance) {
           <span class="text-muted" style="font-size:12px">${formatMatchTime(match)}</span>
         </div>
         ${seriesHeaderBadge}
+        ${(() => {
+          // MLB : cotes dans match.market_odds.bookmakers (décimal direct via TheOddsAPI)
+          // NBA : cotes dans match.odds.home_ml (format américain via ESPN) ou home_ml_decimal
+          const pickMlbBook = () => {
+            const books = match?.market_odds?.bookmakers ?? [];
+            if (!books.length) return null;
+            const priority = ['pinnacle', 'draftkings', 'fanduel', 'betmgm'];
+            for (const key of priority) {
+              const b = books.find(x => x.key === key);
+              if (b?.home_ml && b?.away_ml) return b;
+            }
+            return books.find(b => b.home_ml && b.away_ml) ?? null;
+          };
+          const mlbBook   = isMLB ? pickMlbBook() : null;
+          const homeMlDec = mlbBook?.home_ml
+                         ?? match?.odds?.home_ml_decimal
+                         ?? _americanToDecimal(match?.odds?.home_ml)
+                         ?? null;
+          const awayMlDec = mlbBook?.away_ml
+                         ?? match?.odds?.away_ml_decimal
+                         ?? _americanToDecimal(match?.odds?.away_ml)
+                         ?? null;
+          const fmt = (d) => d ? Number(d).toFixed(2) : null;
+          const homeStr = fmt(homeMlDec);
+          const awayStr = fmt(awayMlDec);
+          const favHome = homeMlDec && awayMlDec && homeMlDec < awayMlDec;
+          const favAway = homeMlDec && awayMlDec && awayMlDec < homeMlDec;
+          const pill = (label, isFav) => `<div style="display:inline-flex;align-self:${label === 'home' ? 'flex-start' : 'flex-end'};align-items:center;gap:4px;font-size:10px;font-weight:700;color:${isFav ? 'var(--color-signal)' : 'var(--color-text-secondary)'};background:var(--color-bg);border:1px solid ${isFav ? 'var(--color-signal)' : 'var(--color-border)'};border-radius:4px;padding:2px 7px;margin-top:3px"><span style="font-size:9px;font-weight:600;color:var(--color-text-secondary);letter-spacing:0.04em">Cote</span><span>${label === 'home' ? homeStr : awayStr}</span></div>`;
+          return `
         <div class="match-detail__teams">
           <div class="match-detail__team">
             <div class="match-detail__team-abbr">${match.home_team?.abbreviation ?? '—'}</div>
             <div class="match-detail__team-name">${match.home_team?.name ?? '—'}</div>
+            ${homeStr ? pill('home', favHome) : ''}
             <div style="display:inline-flex;align-self:flex-start;align-items:center;font-size:10px;font-weight:600;color:var(--color-text-secondary);background:var(--color-bg);border:1px solid var(--color-border);border-radius:4px;padding:1px 6px;margin-top:2px">🏠 Domicile</div>
             <div class="text-muted mono" style="font-size:11px;margin-top:2px">${match.home_team?.record ?? ''}</div>
           </div>
@@ -480,20 +510,23 @@ function renderShell(match, analysis, storeInstance) {
           <div class="match-detail__team match-detail__team--away">
             <div class="match-detail__team-abbr">${match.away_team?.abbreviation ?? '—'}</div>
             <div class="match-detail__team-name">${match.away_team?.name ?? '—'}</div>
+            ${awayStr ? pill('away', favAway) : ''}
             <div style="display:inline-flex;align-self:flex-end;align-items:center;font-size:10px;font-weight:600;color:var(--color-text-secondary);background:var(--color-bg);border:1px solid var(--color-border);border-radius:4px;padding:1px 6px;margin-top:2px">✈️ Extérieur</div>
             <div class="text-muted mono" style="font-size:11px;margin-top:2px">${match.away_team?.record ?? ''}</div>
           </div>
-        </div>
+        </div>`;
+        })()}
         ${match.odds ? renderOddsBar(match.odds) : ''}
       </div>
 
       ${renderBlocSyntheseSummary(analysis, match)}
       ${renderBlocProbas(analysis, match)}
+      ${renderBlocSynthese(analysis, match)}
       ${isMLB
         ? `<div id="mlb-stats-container"><div class="bot-loading" style="padding:20px">Chargement marchés + stats MLB…</div></div>`
         : `<div id="bloc-tous-paris">${renderBlocTousLesParis(analysis, match)}</div>
            <div id="team-detail-container">${renderBlocTeamDetailSkeleton()}</div>`}
-      ${renderBlocFiabiliteEtSynthese(analysis, match)}
+      ${renderBlocFiabilite(analysis, match)}
     </div>
   `;
 }
@@ -848,6 +881,12 @@ function _getSignalDetail(signal, vars, match, isHome, homeName, awayName) {
     }
     case 'recent_form_ema': {
       if (val === null) return null;
+      // Si données tennis dispo (p1_ema / p2_ema en %), afficher chiffres précis
+      const e1 = v?.p1_ema, e2 = v?.p2_ema;
+      if (e1 != null && e2 != null) {
+        const fav = isHome ? e1 : e2, oth = isHome ? e2 : e1;
+        return `${favTeam} gagne <strong>${fav}%</strong> de ses 10 derniers matchs, contre <strong>${oth}%</strong> pour ${othTeam}.`;
+      }
       const absVal = Math.abs(val);
       if (absVal > 0.5) return `${favTeam} est en très grande forme en ce moment — série de victoires récentes.`;
       if (absVal > 0.2) return `${favTeam} est en bonne forme sur ses derniers matchs.`;
@@ -883,6 +922,55 @@ function _getSignalDetail(signal, vars, match, isHome, homeName, awayName) {
     case 'back_to_back':   return `${othTeam} joue son deuxième match en deux jours — fatigue accumulée.`;
     case 'rest_days_diff': { if (val === null) return null; const j = Math.abs(Math.round(val)); return `${favTeam} a eu <strong>${j} jour${j > 1 ? 's' : ''} de repos</strong> de plus que ${othTeam}.`; }
     case 'defensive_diff': return val !== null ? `${favTeam} encaisse moins de points par match que ${othTeam} — meilleure défense.` : null;
+    // ── TENNIS ────────────────────────────────────────────────────────────
+    case 'ranking_elo_diff': {
+      if (val === null) return null;
+      const src = v?.source ?? '';
+      const prob = v?.expected_p1_win ?? null;
+      const p1Elo = v?.p1_elo ?? null;
+      const p2Elo = v?.p2_elo ?? null;
+      if (src.startsWith('elo_') && src !== 'elo_overall' && p1Elo && p2Elo && prob !== null) {
+        const favProb = isHome ? prob : (100 - prob);
+        const diff = Math.abs(p1Elo - p2Elo);
+        return `${favTeam} est noté <strong>${diff} points d'Elo</strong> au-dessus de ${othTeam} sur cette surface (chance de victoire estimée <strong>${favProb}%</strong>).`;
+      }
+      if (src === 'elo_overall' && p1Elo && p2Elo && prob !== null) {
+        const favProb = isHome ? prob : (100 - prob);
+        return `${favTeam} a un Elo global supérieur à ${othTeam} — chance de victoire estimée <strong>${favProb}%</strong>.`;
+      }
+      const r1 = v?.p1_rank, r2 = v?.p2_rank;
+      if (r1 && r2) return `${favTeam} est mieux classé·e (${isHome ? r1 : r2}e) que ${othTeam} (${isHome ? r2 : r1}e).`;
+      return null;
+    }
+    case 'surface_winrate_diff': {
+      if (val === null) return null;
+      const wr1 = v?.p1_wr, wr2 = v?.p2_wr, n1 = v?.p1_n, n2 = v?.p2_n, surf = v?.surface ?? 'cette surface';
+      const surfFr = { Clay: 'terre battue', Hard: 'dur', Grass: 'gazon' }[surf] ?? surf;
+      if (wr1 != null && wr2 != null) {
+        const fav = isHome ? wr1 : wr2, oth = isHome ? wr2 : wr1;
+        const nFav = isHome ? n1 : n2, nOth = isHome ? n2 : n1;
+        return `${favTeam} gagne <strong>${fav}%</strong> de ses matchs sur ${surfFr} (${nFav} matchs) contre <strong>${oth}%</strong> pour ${othTeam} (${nOth} matchs).`;
+      }
+      return null;
+    }
+    case 'h2h_surface': {
+      const p1w = v?.p1_wins, p2w = v?.p2_wins, tot = v?.total;
+      if (!tot) return null;
+      const favW = isHome ? p1w : p2w, othW = isHome ? p2w : p1w;
+      return `Dans leurs confrontations sur cette surface, ${favTeam} mène <strong>${favW}-${othW}</strong>.`;
+    }
+    case 'service_dominance': {
+      const s1 = v?.p1_score, s2 = v?.p2_score;
+      if (s1 == null || s2 == null) return null;
+      const fav = isHome ? s1 : s2, oth = isHome ? s2 : s1;
+      return `${favTeam} domine davantage sur son service (<strong>${fav}/100</strong>) que ${othTeam} (${oth}/100).`;
+    }
+    case 'fatigue_index': {
+      const d1 = v?.p1_days, d2 = v?.p2_days;
+      if (d1 == null || d2 == null) return null;
+      const favD = isHome ? d1 : d2, othD = isHome ? d2 : d1;
+      return `${favTeam} est plus reposé·e (<strong>${favD} jours</strong> depuis le dernier match) que ${othTeam} (${othD} jours).`;
+    }
     default: return null;
   }
 }
@@ -1345,14 +1433,29 @@ export function renderBlocAbsences(analysis, match, storeInstance) {
     </div>`;
 }
 
-// ── BLOC FIABILITÉ + SOURCES + SYNTHÈSE (fusionné) ───────────────────────────
+// ── BLOC SYNTHÈSE (placé haut) ───────────────────────────────────────────────
 
-function renderBlocFiabiliteEtSynthese(analysis, match) {
+function renderBlocSynthese(analysis, match) {
+  if (!analysis) return '';
+  const lines = _buildSyntheseLines(analysis, match);
+  if (!lines.length) return '';
+  return `
+    <div class="card match-detail__bloc">
+      <div class="bloc-header" style="margin-bottom:var(--space-2)">
+        <span class="bloc-header__title">Synthèse</span>
+        <span style="font-size:10px;color:var(--color-text-secondary)">Analyse locale</span>
+      </div>
+      <div style="font-size:13px;line-height:1.7;color:var(--color-text)">${lines.join('')}</div>
+    </div>`;
+}
+
+// ── BLOC FIABILITÉ + SOURCES (placé bas) ─────────────────────────────────────
+
+function renderBlocFiabilite(analysis, match) {
   const isMLB = String(match?.sport ?? '').toUpperCase() === 'MLB';
 
   let score = null;
   if (isMLB) {
-    // MLB : mappe data_quality (HIGH/MEDIUM/LOW) → score numérique
     const dq = analysis?.data_quality;
     if      (dq === 'HIGH')   score = 85;
     else if (dq === 'MEDIUM') score = 60;
@@ -1370,18 +1473,12 @@ function renderBlocFiabiliteEtSynthese(analysis, match) {
   else                  { fiabLabel = 'Faible';  fiabColor = 'var(--color-danger)'; }
 
   const missingSimple = (analysis?.missing_variables ?? []).map(v => SIGNAL_LABELS[v] ?? v).slice(0, 2);
-
-  // Synthèse en paragraphe fluide
-  const synthese = _buildSynthese(analysis, match);
-
-  // Sources — toujours visibles sous forme de tags compacts
   const sourcesList = ['ESPN', 'BallDontLie', 'Tank01', 'Pinnacle'];
 
   return `
     <div class="card match-detail__bloc">
-      <!-- Fiabilité -->
       <div class="bloc-header" style="margin-bottom:var(--space-2)">
-        <span class="bloc-header__title">Fiabilité</span>
+        <span class="bloc-header__title">Fiabilité & sources</span>
         ${score !== null ? `<span style="font-weight:700;color:${fiabColor}">${fiabLabel} · ${score}%</span>` : ''}
       </div>
       ${score !== null ? `
@@ -1390,64 +1487,66 @@ function renderBlocFiabiliteEtSynthese(analysis, match) {
         </div>
         ${missingSimple.length ? `<div style="font-size:11px;color:var(--color-warning);padding:5px 8px;background:rgba(255,165,0,0.08);border-radius:5px;margin-bottom:10px">⚠ Données manquantes : ${missingSimple.join(' · ')}</div>` : ''}
       ` : ''}
-
-      <!-- Sources visibles -->
-      <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:14px">
+      <div style="display:flex;gap:5px;flex-wrap:wrap">
         ${sourcesList.map(s => `<span style="font-size:10px;padding:2px 8px;border-radius:10px;background:var(--color-bg);border:1px solid var(--color-border);color:var(--color-text-secondary)">${s}</span>`).join('')}
       </div>
-
-      <!-- Séparateur -->
-      <div style="height:1px;background:var(--color-border);margin-bottom:12px"></div>
-
-      <!-- Synthèse -->
-      <div class="bloc-header" style="margin-bottom:var(--space-2)">
-        <span class="bloc-header__title">Synthèse</span>
-      </div>
-      <div style="font-size:13px;line-height:1.8;color:var(--color-text)">${synthese}</div>
-      <div style="font-size:10px;color:var(--color-text-secondary);margin-top:8px">Analyse locale · pas d'IA utilisée ici</div>
     </div>`;
 }
 
-function _buildSynthese(analysis, match) {
-  if (!analysis) return '<span style="color:var(--color-text-secondary)">Analyse non disponible.</span>';
-
+function _buildSyntheseLines(analysis, match) {
   const home       = match?.home_team?.name ?? 'Domicile';
   const away       = match?.away_team?.name ?? 'Extérieur';
   const predictive = analysis.predictive_score != null ? Math.round(analysis.predictive_score * 100) : null;
   const keySignals = (analysis.key_signals ?? []).slice(0, 2).map(s => _simplifyLabel(s.label, s.variable)).filter(Boolean);
   const best       = analysis.betting_recommendations?.best ?? null;
 
-  // Phrase 1 — favori
-  let phrase1;
-  if (predictive == null)        phrase1 = 'Données insuffisantes pour déterminer un favori.';
-  else if (predictive > 55)      phrase1 = `${home} ressort favori à ${predictive}% de probabilité.`;
-  else if (predictive < 45)      phrase1 = `${away} ressort favori à ${100 - predictive}% de probabilité.`;
-  else                           phrase1 = 'Match très serré — les deux équipes sont à niveau comparable.';
+  const lines = [];
+  const line = (icon, text) => `<div style="display:flex;gap:8px;padding:4px 0"><span style="flex-shrink:0">${icon}</span><div>${text}</div></div>`;
 
-  // Phrase 2 — signaux + raison
-  const signalStr = keySignals.length ? keySignals.join(' et ') : 'les données disponibles';
-  const phrase2   = `Le signal dominant est ${signalStr}.`;
-
-  // Phrase 3 — recommandation avec raison
-  let phrase3;
-  if (!best) {
-    phrase3 = 'Aucune cote sous-évaluée détectée sur ce match.';
+  // Ligne 1 — qui est favori et à combien
+  if (predictive != null) {
+    const favName  = predictive > 50 ? home : away;
+    const favProb  = predictive > 50 ? predictive : 100 - predictive;
+    const othProb  = 100 - favProb;
+    if (Math.abs(predictive - 50) < 5) {
+      lines.push(line('⚖️', `Match équilibré selon notre analyse : <strong>${escapeHtml(home)}</strong> ${predictive}% contre <strong>${escapeHtml(away)}</strong> ${100 - predictive}%.`));
+    } else {
+      lines.push(line('🎯', `Favori : <strong>${escapeHtml(favName)}</strong> à <strong>${favProb}%</strong> de chances estimées (vs ${othProb}%).`));
+    }
   } else {
-    const typeLabel = best.type === 'MONEYLINE' ? 'la victoire'
-                    : best.type === 'SPREAD' ? 'le handicap'
-                    : best.type === 'PLAYER_POINTS' ? `les points de ${best.player}`
-                    : 'le total de points';
-    const sideLabel = best.type === 'PLAYER_POINTS' ? `${best.side === 'OVER' ? 'Over' : 'Under'} ${best.line}`
-                    : best.side === 'HOME' ? home : best.side === 'AWAY' ? away : best.side === 'OVER' ? 'Over' : 'Under';
-    // Chercher la raison principale de l'edge
-    const starMod   = analysis.star_absence_modifier;
-    let reason = '';
-    if (starMod !== null && Math.abs(starMod - 1) > 0.03) reason = 'une absence importante non encore pricée par le book';
-    else if (keySignals.length)                             reason = `un avantage en ${keySignals[0].toLowerCase()}`;
-    phrase3 = `Valeur détectée sur ${typeLabel} (${sideLabel}, cote sous-évaluée de ${best.edge}%)${reason ? ` — ${reason}` : ''}.`;
+    lines.push(line('⚠️', 'Données insuffisantes pour déterminer un favori.'));
   }
 
-  return `${escapeHtml(phrase1)} ${escapeHtml(phrase2)} ${escapeHtml(phrase3)}`;
+  // Ligne 2 — comparaison marché vs analyse
+  if (best && best.implied_prob != null && best.edge != null) {
+    const oddsDec = best.odds_decimal ? Number(best.odds_decimal).toFixed(2) : '—';
+    lines.push(line('💰', `Cote bookmaker <strong>${oddsDec}</strong> = marché donne <strong>${best.implied_prob}%</strong> de chances. Notre analyse voit <strong>${best.edge}% de plus</strong> → valeur détectée.`));
+  }
+
+  // Ligne 3 — raisons (sans redondance)
+  if (keySignals.length) {
+    const listed = keySignals.map(s => `<strong>${escapeHtml(s.toLowerCase())}</strong>`).join(' et ');
+    lines.push(line('📊', `Ce qui fait pencher l'analyse : ${listed}.`));
+  }
+
+  // Ligne 4 — action recommandée
+  if (best) {
+    const typeLabel = best.type === 'MONEYLINE' ? 'Victoire'
+                    : best.type === 'SPREAD' ? 'Handicap'
+                    : best.type === 'PLAYER_POINTS' ? `Points ${best.player ?? ''}`
+                    : 'Total de points';
+    let sideLabel;
+    if (best.type === 'PLAYER_POINTS') sideLabel = `${best.side === 'OVER' ? '+' : '−'}${best.line}`;
+    else if (best.side === 'HOME')     sideLabel = home;
+    else if (best.side === 'AWAY')     sideLabel = away;
+    else if (best.side === 'OVER')     sideLabel = `Plus de ${best.ou_line ?? '—'}`;
+    else                               sideLabel = `Moins de ${best.ou_line ?? '—'}`;
+    lines.push(line('👉', `Pari suggéré : <strong>${escapeHtml(typeLabel)} — ${escapeHtml(sideLabel)}</strong>.`));
+  } else {
+    lines.push(line('🚫', 'Aucune cote sous-évaluée — passer ce match.'));
+  }
+
+  return lines;
 }
 
 // ── COTES MULTI-BOOKS ─────────────────────────────────────────────────────────

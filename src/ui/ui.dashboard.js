@@ -431,6 +431,7 @@ async function _loadAndDisplay(container, storeInstance, date, options = {}) {
     if (!result?.matches?.length) {
       _renderEmptyState(list, selectedSport);
       _updateSummary(container, 0, 0, 0);
+      _renderBestOpportunity(container, [], {});
       storeInstance.set({
         dashboardCacheAt: null,
         dashboardCacheDate: null,
@@ -666,9 +667,13 @@ function _createMatchCard(match) {
   const ouOverFmt  = overDec  != null ? Number(overDec).toFixed(2)  : null;
   const ouUnderFmt = underDec != null ? Number(underDec).toFixed(2) : null;
 
+  const tennisTour = isTennis ? (String(match?.tour ?? 'atp').toUpperCase()) : null;
+  const sportLabel = isTennis ? `Tennis ${tennisTour}`
+                   : isMLB ? 'MLB' : 'NBA';
+
   card.innerHTML = `
     <div class="match-card__header" style="display:flex;align-items:center;gap:6px">
-      <span class="sport-tag ${isTennis ? 'sport-tag--tennis' : isMLB ? 'sport-tag--mlb' : 'sport-tag--nba'}">${isTennis ? 'Tennis' : isMLB ? 'MLB' : 'NBA'}</span>
+      <span class="sport-tag ${isTennis ? 'sport-tag--tennis' : isMLB ? 'sport-tag--mlb' : 'sport-tag--nba'}">${sportLabel}</span>
       ${!isFinal ? countdownHtml : ''}
       <span class="mc-header-date" style="margin-left:auto">${isFinal ? 'Terminé' : time}</span>
       <span class="match-card__status-badge badge badge--inconclusive" id="badge-${match.id}" style="font-size:10px;padding:2px 7px">
@@ -956,11 +961,22 @@ function _renderBestOpportunity(container, matches, analysisIndex) {
     const edge = best.edge ?? 0;
     if (edge < 5) return;
 
-    const quality = a.data_quality_score ?? 0.5;
-    const divergence = a.market_divergence?.flag ?? 'low';
-    const divPenalty = divergence === 'critical' ? 0.5 : divergence === 'high' ? 0.3 : 0;
-    const mlPenalty = best.type === 'MONEYLINE' && Math.abs(edge) > 10 ? 0.2 : 0;
-    const score = edge * quality * (1 - divPenalty) * (1 - mlPenalty);
+    // Exclusions dures : données critiques manquantes ou confiance faible
+    if (Array.isArray(a.missing_critical) && a.missing_critical.length > 0) return;
+    if (a.confidence_level === 'LOW' || a.confidence_level === 'INCONCLUSIVE') return;
+
+    const quality     = a.data_quality_score ?? 0.5;
+    const robustness  = a.robustness_score   ?? 0.5;
+    const reliability = (quality + robustness) / 2;
+    const divergence  = a.market_divergence?.flag ?? 'low';
+    const divPenalty  = divergence === 'critical' ? 0.5 : divergence === 'high' ? 0.3 : 0;
+    // Moneyline : book très efficace · edge > 15 = red flag (on a loupé une info)
+    const mlPenalty   = best.type === 'MONEYLINE' && Math.abs(edge) > 15 ? 0.5
+                      : best.type === 'MONEYLINE' && Math.abs(edge) > 10 ? 0.2
+                      : 0;
+    // Edge capé à 15 dans le scoring (au-delà = suspect, pas valorisant)
+    const cappedEdge  = Math.min(edge, 15);
+    const score       = cappedEdge * reliability * (1 - divPenalty) * (1 - mlPenalty);
 
     if (score > bestScore) {
       bestScore = score;
