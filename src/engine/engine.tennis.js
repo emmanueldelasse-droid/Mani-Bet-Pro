@@ -325,12 +325,24 @@ export class EngineTennis {
       weightedSum     += normalized * weight;
       totalWeight     += weight;
 
+      const contribution = Math.round((normalized - 0.5) * weight * 100) / 100;
+      const varConfig = config.variables.find(v => v.id === id);
+
       signals.push({
-        id,
+        id,                                         // compat legacy
+        variable:     id,                           // attendu par engine.core + UI
+        label:        varConfig?.label ?? id,
         value,
+        raw_value:    value,
+        normalized,
         weight,
-        contribution: Math.round((normalized - 0.5) * weight * 100) / 100,
-        quality:      varData.quality,
+        contribution,
+        direction:    contribution >  0.001 ? 'POSITIVE'
+                    : contribution < -0.001 ? 'NEGATIVE'
+                    : 'NEUTRAL',
+        data_source:  varData.source ?? null,
+        data_quality: varData.quality ?? null,
+        quality:      varData.quality,              // compat legacy
       });
     }
 

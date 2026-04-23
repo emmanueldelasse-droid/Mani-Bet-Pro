@@ -881,6 +881,12 @@ function _getSignalDetail(signal, vars, match, isHome, homeName, awayName) {
     }
     case 'recent_form_ema': {
       if (val === null) return null;
+      // Si données tennis dispo (p1_ema / p2_ema en %), afficher chiffres précis
+      const e1 = v?.p1_ema, e2 = v?.p2_ema;
+      if (e1 != null && e2 != null) {
+        const fav = isHome ? e1 : e2, oth = isHome ? e2 : e1;
+        return `${favTeam} gagne <strong>${fav}%</strong> de ses 10 derniers matchs, contre <strong>${oth}%</strong> pour ${othTeam}.`;
+      }
       const absVal = Math.abs(val);
       if (absVal > 0.5) return `${favTeam} est en très grande forme en ce moment — série de victoires récentes.`;
       if (absVal > 0.2) return `${favTeam} est en bonne forme sur ses derniers matchs.`;
@@ -916,6 +922,55 @@ function _getSignalDetail(signal, vars, match, isHome, homeName, awayName) {
     case 'back_to_back':   return `${othTeam} joue son deuxième match en deux jours — fatigue accumulée.`;
     case 'rest_days_diff': { if (val === null) return null; const j = Math.abs(Math.round(val)); return `${favTeam} a eu <strong>${j} jour${j > 1 ? 's' : ''} de repos</strong> de plus que ${othTeam}.`; }
     case 'defensive_diff': return val !== null ? `${favTeam} encaisse moins de points par match que ${othTeam} — meilleure défense.` : null;
+    // ── TENNIS ────────────────────────────────────────────────────────────
+    case 'ranking_elo_diff': {
+      if (val === null) return null;
+      const src = v?.source ?? '';
+      const prob = v?.expected_p1_win ?? null;
+      const p1Elo = v?.p1_elo ?? null;
+      const p2Elo = v?.p2_elo ?? null;
+      if (src.startsWith('elo_') && src !== 'elo_overall' && p1Elo && p2Elo && prob !== null) {
+        const favProb = isHome ? prob : (100 - prob);
+        const diff = Math.abs(p1Elo - p2Elo);
+        return `${favTeam} est noté <strong>${diff} points d'Elo</strong> au-dessus de ${othTeam} sur cette surface (chance de victoire estimée <strong>${favProb}%</strong>).`;
+      }
+      if (src === 'elo_overall' && p1Elo && p2Elo && prob !== null) {
+        const favProb = isHome ? prob : (100 - prob);
+        return `${favTeam} a un Elo global supérieur à ${othTeam} — chance de victoire estimée <strong>${favProb}%</strong>.`;
+      }
+      const r1 = v?.p1_rank, r2 = v?.p2_rank;
+      if (r1 && r2) return `${favTeam} est mieux classé·e (${isHome ? r1 : r2}e) que ${othTeam} (${isHome ? r2 : r1}e).`;
+      return null;
+    }
+    case 'surface_winrate_diff': {
+      if (val === null) return null;
+      const wr1 = v?.p1_wr, wr2 = v?.p2_wr, n1 = v?.p1_n, n2 = v?.p2_n, surf = v?.surface ?? 'cette surface';
+      const surfFr = { Clay: 'terre battue', Hard: 'dur', Grass: 'gazon' }[surf] ?? surf;
+      if (wr1 != null && wr2 != null) {
+        const fav = isHome ? wr1 : wr2, oth = isHome ? wr2 : wr1;
+        const nFav = isHome ? n1 : n2, nOth = isHome ? n2 : n1;
+        return `${favTeam} gagne <strong>${fav}%</strong> de ses matchs sur ${surfFr} (${nFav} matchs) contre <strong>${oth}%</strong> pour ${othTeam} (${nOth} matchs).`;
+      }
+      return null;
+    }
+    case 'h2h_surface': {
+      const p1w = v?.p1_wins, p2w = v?.p2_wins, tot = v?.total;
+      if (!tot) return null;
+      const favW = isHome ? p1w : p2w, othW = isHome ? p2w : p1w;
+      return `Dans leurs confrontations sur cette surface, ${favTeam} mène <strong>${favW}-${othW}</strong>.`;
+    }
+    case 'service_dominance': {
+      const s1 = v?.p1_score, s2 = v?.p2_score;
+      if (s1 == null || s2 == null) return null;
+      const fav = isHome ? s1 : s2, oth = isHome ? s2 : s1;
+      return `${favTeam} domine davantage sur son service (<strong>${fav}/100</strong>) que ${othTeam} (${oth}/100).`;
+    }
+    case 'fatigue_index': {
+      const d1 = v?.p1_days, d2 = v?.p2_days;
+      if (d1 == null || d2 == null) return null;
+      const favD = isHome ? d1 : d2, othD = isHome ? d2 : d1;
+      return `${favTeam} est plus reposé·e (<strong>${favD} jours</strong> depuis le dernier match) que ${othTeam} (${othD} jours).`;
+    }
     default: return null;
   }
 }
