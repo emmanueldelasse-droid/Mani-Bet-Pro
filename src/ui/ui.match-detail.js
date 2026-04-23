@@ -467,10 +467,21 @@ function renderShell(match, analysis, storeInstance) {
           <span class="text-muted" style="font-size:12px">${formatMatchTime(match)}</span>
         </div>
         ${seriesHeaderBadge}
+        ${(() => {
+          const homeMlDec = match?.odds?.home_ml_decimal ?? _americanToDecimal(match?.odds?.home_ml) ?? null;
+          const awayMlDec = match?.odds?.away_ml_decimal ?? _americanToDecimal(match?.odds?.away_ml) ?? null;
+          const fmt = (d) => d ? Number(d).toFixed(2) : null;
+          const homeStr = fmt(homeMlDec);
+          const awayStr = fmt(awayMlDec);
+          const favHome = homeMlDec && awayMlDec && homeMlDec < awayMlDec;
+          const favAway = homeMlDec && awayMlDec && awayMlDec < homeMlDec;
+          const pill = (label, isFav) => `<div style="display:inline-flex;align-self:${label === 'home' ? 'flex-start' : 'flex-end'};align-items:center;gap:4px;font-size:10px;font-weight:700;color:${isFav ? 'var(--color-signal)' : 'var(--color-text-secondary)'};background:var(--color-bg);border:1px solid ${isFav ? 'var(--color-signal)' : 'var(--color-border)'};border-radius:4px;padding:2px 7px;margin-top:3px"><span style="font-size:9px;font-weight:600;color:var(--color-text-secondary);letter-spacing:0.04em">Cote</span><span>${label === 'home' ? homeStr : awayStr}</span></div>`;
+          return `
         <div class="match-detail__teams">
           <div class="match-detail__team">
             <div class="match-detail__team-abbr">${match.home_team?.abbreviation ?? '—'}</div>
             <div class="match-detail__team-name">${match.home_team?.name ?? '—'}</div>
+            ${homeStr ? pill('home', favHome) : ''}
             <div style="display:inline-flex;align-self:flex-start;align-items:center;font-size:10px;font-weight:600;color:var(--color-text-secondary);background:var(--color-bg);border:1px solid var(--color-border);border-radius:4px;padding:1px 6px;margin-top:2px">🏠 Domicile</div>
             <div class="text-muted mono" style="font-size:11px;margin-top:2px">${match.home_team?.record ?? ''}</div>
           </div>
@@ -480,10 +491,12 @@ function renderShell(match, analysis, storeInstance) {
           <div class="match-detail__team match-detail__team--away">
             <div class="match-detail__team-abbr">${match.away_team?.abbreviation ?? '—'}</div>
             <div class="match-detail__team-name">${match.away_team?.name ?? '—'}</div>
+            ${awayStr ? pill('away', favAway) : ''}
             <div style="display:inline-flex;align-self:flex-end;align-items:center;font-size:10px;font-weight:600;color:var(--color-text-secondary);background:var(--color-bg);border:1px solid var(--color-border);border-radius:4px;padding:1px 6px;margin-top:2px">✈️ Extérieur</div>
             <div class="text-muted mono" style="font-size:11px;margin-top:2px">${match.away_team?.record ?? ''}</div>
           </div>
-        </div>
+        </div>`;
+        })()}
         ${match.odds ? renderOddsBar(match.odds) : ''}
       </div>
 
