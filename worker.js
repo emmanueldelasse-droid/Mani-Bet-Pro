@@ -5697,6 +5697,7 @@ async function handleTennisTournaments(url, env, origin) {
     .filter(t => !tourFilter || t.tour === tourFilter);
 
   let tournaments = candidates;
+  let availableTennisKeys = null;  // toutes clés tennis existantes sur TheOddsAPI
 
   // Validation live : cross-ref sport_key avec TheOddsAPI sports-list
   if (validate) {
@@ -5710,18 +5711,26 @@ async function handleTennisTournaments(url, env, origin) {
           { headers: { Accept: 'application/json' } }, 10000
         );
         if (resp.ok) {
-          const sports    = await resp.json();
-          const liveKeys  = new Set((Array.isArray(sports) ? sports : []).filter(s => s.active).map(s => s.key));
+          const sports = await resp.json();
+          const arr    = Array.isArray(sports) ? sports : [];
+          // Check existence (pas s.active : active=false = pas en saison, key reste valide)
+          const existingKeys = new Set(arr.map(s => s.key));
+          const activeKeys   = new Set(arr.filter(s => s.active).map(s => s.key));
           tournaments = candidates.map(t => ({
             ...t,
-            validated: liveKeys.has(t.sport_key),
+            key_exists:       existingKeys.has(t.sport_key),
+            currently_active: activeKeys.has(t.sport_key),
+            validated:        existingKeys.has(t.sport_key),
           }));
+          availableTennisKeys = arr
+            .filter(s => s.key && s.key.includes('tennis'))
+            .map(s => ({ key: s.key, title: s.title, active: s.active }));
         }
       } catch (err) {
         tournaments = candidates.map(t => ({ ...t, validated: null, note: err.message }));
       }
     }
-    // En mode validate, on filtre hors tournois invalides pour l'usage orchestrateur
+    // Filtre hors tournois invalides pour usage orchestrator
     if (!all) tournaments = tournaments.filter(t => t.validated !== false);
   }
 
@@ -5731,6 +5740,7 @@ async function handleTennisTournaments(url, env, origin) {
     active_count:  tournaments.length,
     tournaments,
     all_count:     TENNIS_TOURNAMENTS.length,
+    ...(availableTennisKeys ? { available_tennis_keys: availableTennisKeys } : {}),
   }, 200, origin);
 }
 
