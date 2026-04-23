@@ -903,7 +903,8 @@ DataOrchestrator._loadAndAnalyzeTennis = async function(date, store) {
 
   try {
     // 1. Liste tournois actifs (ATP + WTA) depuis worker - source unique de verite
-    const tournResp = await fetch(`${WORKER}/tennis/tournaments?date=${d}`, {
+    // validate=1 : cross-ref sport_keys avec TheOddsAPI live, evite appels ratés
+    const tournResp = await fetch(`${WORKER}/tennis/tournaments?date=${d}&validate=1`, {
       headers: { Accept: 'application/json' },
     });
     if (!tournResp.ok) {

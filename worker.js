@@ -5691,13 +5691,45 @@ function _activeTennisTournaments(dateStr) {
 async function handleTennisTournaments(url, env, origin) {
   const date       = url.searchParams.get('date') ?? new Date().toISOString().slice(0, 10);
   const tourFilter = url.searchParams.get('tour');  // optionnel : 'atp' ou 'wta'
-  const active     = _activeTennisTournaments(date)
+  const validate   = url.searchParams.get('validate') === '1';
+  const all        = !!url.searchParams.get('all');  // ?all=1 retourne tous, pas juste actifs
+  const candidates = (all ? TENNIS_TOURNAMENTS : _activeTennisTournaments(date))
     .filter(t => !tourFilter || t.tour === tourFilter);
+
+  let tournaments = candidates;
+
+  // Validation live : cross-ref sport_key avec TheOddsAPI sports-list
+  if (validate) {
+    const oddsKey = env.ODDS_API_KEY_1 ?? env.ODDS_API_KEY_2;
+    if (!oddsKey) {
+      tournaments = candidates.map(t => ({ ...t, validated: null, note: 'no_api_key' }));
+    } else {
+      try {
+        const resp = await fetchTimeout(
+          `https://api.the-odds-api.com/v4/sports/?apiKey=${oddsKey}&all=true`,
+          { headers: { Accept: 'application/json' } }, 10000
+        );
+        if (resp.ok) {
+          const sports    = await resp.json();
+          const liveKeys  = new Set((Array.isArray(sports) ? sports : []).filter(s => s.active).map(s => s.key));
+          tournaments = candidates.map(t => ({
+            ...t,
+            validated: liveKeys.has(t.sport_key),
+          }));
+        }
+      } catch (err) {
+        tournaments = candidates.map(t => ({ ...t, validated: null, note: err.message }));
+      }
+    }
+    // En mode validate, on filtre hors tournois invalides pour l'usage orchestrateur
+    if (!all) tournaments = tournaments.filter(t => t.validated !== false);
+  }
+
   return jsonResponse({
     available: true,
     date,
-    active_count:  active.length,
-    tournaments:   active,
+    active_count:  tournaments.length,
+    tournaments,
     all_count:     TENNIS_TOURNAMENTS.length,
   }, 200, origin);
 }
