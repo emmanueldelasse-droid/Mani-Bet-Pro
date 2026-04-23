@@ -431,6 +431,7 @@ async function _loadAndDisplay(container, storeInstance, date, options = {}) {
     if (!result?.matches?.length) {
       _renderEmptyState(list, selectedSport);
       _updateSummary(container, 0, 0, 0);
+      _renderBestOpportunity(container, [], {});
       storeInstance.set({
         dashboardCacheAt: null,
         dashboardCacheDate: null,
