@@ -1,5 +1,5 @@
 /**
- * MANI BET PRO — Cloudflare Worker v6.77
+ * MANI BET PRO — Cloudflare Worker v6.78
  *
  * CORRECTIONS v6.39 :
  *   1. Fix critique bot — emaLambda non défini dans _botEngineCompute.
@@ -399,7 +399,7 @@ export default {
         return jsonResponse({
           status:    'ok',
           worker:    'mani-bet-pro',
-          version:   '6.77.0',
+          version:   '6.78.0',
           timestamp: new Date().toISOString(),
           routes: [
             'GET /nba/matches', 'GET /nba/team/:id/stats', 'GET /nba/team/:id/recent',
@@ -2608,14 +2608,17 @@ async function handleNBATeamsStats(env, origin) {
       const oppgRaw = parseFloat(team.oppg);
       const ppg  = Number.isFinite(ppgRaw)  ? ppgRaw  : null;
       const oppg = Number.isFinite(oppgRaw) ? oppgRaw : null;
+      const netRating = (ppg !== null && oppg !== null) ? Math.round((ppg - oppg) * 10) / 10 : null;
       teams[team.teamAbv] = {
         teamID:            team.teamID,
         teamAbv:           team.teamAbv,
         ppg,
         oppg,
-        net_rating_approx: ppg !== null && oppg !== null
-          ? Math.round((ppg - oppg) * 10) / 10
-          : null,
+        // Aliases attendus par le bot cron (_botAnalyzeMatch L3328+)
+        net_rating:        netRating,
+        defensive_rating:  oppg,  // proxy : points encaissés/match (pas de pace dispo Tank01)
+        pace:              null,  // placeholder · Tank01 n'expose pas pace
+        net_rating_approx: netRating,
       };
     }
 
@@ -3348,8 +3351,8 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
     away_recent:         awayRecent,
     home_back_to_back:   false,
     away_back_to_back:   false,
-    home_rest_days:      null,
-    away_rest_days:      null,
+    home_rest_days:      _botComputeRestDays(homeRecent, match.date ?? match.datetime),
+    away_rest_days:      _botComputeRestDays(awayRecent, match.date ?? match.datetime),
     home_last5_avg_pts:  null,
     away_last5_avg_pts:  null,
     home_top10scorers:   rostersData ? _extractTop10ForTeam(rostersData, homeAbv, {}) : [],
@@ -4336,6 +4339,20 @@ const _BOT_NBA_TEAMS = {
 
 function _botGetTeamAbv(espnName) { return _BOT_NBA_TEAMS[espnName] ?? null; }
 
+// Calcule jours de repos entre le dernier match BDL et matchDate
+// Port de src/orchestration/data.orchestrator.js _computeRestDays
+function _botComputeRestDays(recentForm, matchDate) {
+  if (!recentForm?.matches?.length || !matchDate) return null;
+  const lastDate = recentForm.matches[0]?.date;
+  if (!lastDate) return null;
+  const md = new Date(matchDate);
+  const ld = new Date(lastDate);
+  if (isNaN(md.getTime()) || isNaN(ld.getTime())) return null;
+  const diffDays = Math.floor((md.getTime() - ld.getTime()) / 86400000);
+  if (diffDays < 0) return null; // données incohérentes → quality MISSING
+  return Math.max(0, diffDays - 1);
+}
+
 // BDL IDs — identiques à NBA_TEAMS dans sports.config.js
 const _BOT_BDL_IDS = {
   'Atlanta Hawks': '1', 'Boston Celtics': '2', 'Brooklyn Nets': '3',
@@ -4666,6 +4683,25 @@ function _botEngineCompute(matchData) {
 
   // Market divergence
   const marketDivergence = _botComputeMarketDivergence(score, matchData);
+
+  // Shrinkage vers le marché quand divergence élevée + data quality faible.
+  // Protège contre les hallucinations du moteur (ex: motor=8% vs marché=80%).
+  // Règle : si divergence >= 28pts (critical) ou >= 20pts (high) avec data_quality < 0.7,
+  // tirer motor_prob à 50% vers prob marché implicite.
+  if (score !== null && marketDivergence?.divergence_pts != null) {
+    const totalVars = Object.keys(variables ?? {}).length;
+    const missingCnt = (missing ?? []).length;
+    const dq = totalVars > 0 ? (1 - missingCnt / totalVars) : 1;
+    const highDiv = marketDivergence.divergence_pts >= 28;
+    const medDivLowQ = marketDivergence.divergence_pts >= 20 && dq < 0.7;
+    if (highDiv || medDivLowQ) {
+      const marketScore = marketDivergence.market_implied_home;
+      if (marketScore != null) {
+        const shrunkScore = 0.5 * score + 0.5 * marketScore;
+        score = Math.round(shrunkScore * 1000) / 1000;
+      }
+    }
+  }
 
   // Betting recommendations ML (Moneyline)
   let bettingRecs = null;
