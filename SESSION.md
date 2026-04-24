@@ -1,16 +1,15 @@
 # Mani Bet Pro
 
 ## Règles update SESSION (IA OBLIGATOIRE)
-Début tâche → "En cours" étape 1/N · Fin étape → +1 · Merge → vider "En cours" + bump version + cocher TODO · User mentionne future → ajouter TODO + demander P · Commit SESSION si step >5min ou >3 tool calls.
+Début → "En cours" · Fin → +1 · Merge → vider+cocher TODO · Future → ajouter TODO+P · Commit si step >5min ou >3 tool calls.
 
 ## En cours
 néant
 
-## TODO (bot calibration — diag Alon pré-v6.78)
-- [ ] P1 reduire `recent_form_ema` 0.24→0.15 en playin/playoff (worker.js:4406) · bruité
-- [ ] P1 bump `net_rating_diff` 0.06→0.16 (worker.js:4406) · stat stable
+## TODO (calibration bot — post-v6.78)
+- [ ] P1 bump `net_rating_diff` 0.06→0.16 (worker.js:4418) · stat stable
 - [ ] P2 gate `confidence=INCONCLUSIVE` si `data_quality<0.55` (worker.js:5185)
-- [ ] P3 relancer Alon après 50+ logs post-v6.78 · mesurer effet shrinkage+data fix
+- [ ] P3 relancer Alon après 50+ logs · mesurer effet recent_form_ema fix
 
 ## État
 Worker `manibetpro` v6.78 · `manibetpro.emmanueldelasse.workers.dev` · Front GH Pages
@@ -27,7 +26,7 @@ Stack: CF Worker + KV + Tank01 + ESPN + Claude API + Telegram
 
 ## Fichiers
 - `worker.js` ~7263L monolithe · `wrangler.jsonc`
-- `src/ui/` → match-detail.teamdetail · dashboard · bot · history · match-detail.helpers
+- `src/ui/` → match-detail.teamdetail · match-detail.tennis (6s: Elo/Surface/H2H/Forme/Service/Ctx) · dashboard · bot · history · match-detail.helpers
 - `src/utils/utils.odds.js` → source canonique conversions cotes
 
 ## Pièges Tank01
@@ -37,7 +36,7 @@ Stack: CF Worker + KV + Tank01 + ESPN + Claude API + Telegram
 - `parseFloat(ppg)` → `Number.isFinite` (sinon NaN cascade)
 
 ## Pièges TheOddsAPI
-- `player_points` sans `bookmakers=` → books dispo · filtre spécifique → 422 si absent (worker.js:2450)
+- `player_points` sans `bookmakers=` → 422 si filtre absent (worker.js:2450)
 
 ## Pièges MLB
 - `_mlbSeason()` dynamique · jamais hardcoder (nov-fév = saison précédente)
@@ -46,24 +45,15 @@ Stack: CF Worker + KV + Tank01 + ESPN + Claude API + Telegram
 - MLB Stats API `date=YYYY-MM-DD` · ESPN `YYYYMMDD` · logs MLB stockent YYYYMMDD (aligné NBA)
 
 ## Pièges Timezone
-- `getTodayET` + `_botFormatDate` via `Intl.DateTimeFormat` · DST auto
-- Nightly-settle fenêtre 10-11h UTC · idempotent KV
+- `getTodayET`+`_botFormatDate` via `Intl.DateTimeFormat` · DST auto · Nightly-settle 10-11h UTC idempotent
 
 ## Sécu
 - Debug routes → `_denyIfNoDebugAuth()` · refuse si DEBUG_SECRET unset/wrong
 - Params user → regex avant KV key (`matchId [a-zA-Z0-9_-]+` · `date \d{8}`)
 - UI innerHTML → `escapeHtml` (helpers.js) pour data tierce
 
-## Bugs actifs
-néant
-
 ## Deploy
 `git push origin main` → CF auto-deploy · pas de `wrangler deploy`.
 
-## Hors SESSION (charger à la demande)
-- Secrets/nouveau compte → `.claude/onboarding.md`
-- Historique → `git log --oneline`
-- Agent `alon` (analyse calibration bot) → `.claude/agents/alon.md`
-
-## Règle format
-CLAUDE.md · télégraphique · `·` sep · `→` cause · refs `file:line` · < 3000 octets
+## Extra
+- Secrets → `.claude/onboarding.md` · Historique → `git log` · Alon → `.claude/agents/alon.md`
