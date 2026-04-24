@@ -72,7 +72,7 @@ export async function loadAndRenderTennisDetail(container, match, storeInstance)
 }
 
 // Fetch direct /tennis/stats — fallback quand l'orchestrator n'a pas pré-chargé.
-// Sur un deep-link vers la fiche match, on n'a pas tournée _loadAndAnalyzeTennis.
+// Sur un deep-link vers la fiche match, on n'a pas tourné _loadAndAnalyzeTennis.
 // Si première réponse vide (cache obsolète possible), retente avec bust=1.
 async function _fetchTennisStatsForMatch(match) {
   const p1 = match?.home_team?.name;
@@ -89,15 +89,14 @@ async function _fetchTennisStatsForMatch(match) {
     const json = await resp.json();
     if (!json?.available || !json.stats) return null;
     const s1 = json.stats[p1], s2 = json.stats[p2];
-    const has = (s) => s && Object.keys(s).length > 1; // plus que juste {name}
+    const has = (s) => s && Object.keys(s).length > 1;
     return { json, hasAnyStats: has(s1) || has(s2) };
   };
 
   try {
     let result = await fetchOnce(false);
     if (result && !result.hasAnyStats) {
-      // Cache possiblement obsolète (écrit avant fix normalisation noms) → retente bust
-      result = await fetchOnce(true) ?? result;
+      result = (await fetchOnce(true)) ?? result;
     }
     if (!result?.json) return null;
     const { json } = result;
