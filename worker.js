@@ -125,6 +125,8 @@ const TANK01_INJURIES_KEY = 'tank01_injuries_impact';
 const TANK01_ROSTER_KEY   = 'tank01_roster_injuries_v1';
 const TENNIS_CSV_KEY      = 'tennis_csv_stats';
 const TENNIS_ODDS_KEY     = 'tennis_odds_cache';
+const TENNIS_API_BASE     = 'https://api.api-tennis.com/tennis';
+const TENNIS_API_KEYMAP   = 'tennis_api_keymap_v1';   // KV cache name → player_key
 
 const PAPER_BETS_INDEX_KEY = 'paper_bets_index';
 const BOT_LOG_PREFIX       = 'bot_log_';
@@ -5911,6 +5913,138 @@ async function handleTennisOdds(url, env, origin) {
   } catch (err) { return jsonResponse({ available: false, note: err.message }, 200, origin); }
 }
 
+// ── INTÉGRATION api-tennis.com ──────────────────────────────────────────────
+// Comble le retard 2-3j de Sackmann CSV avec données live ATP/WTA.
+// Désactivé si env.TENNIS_API_KEY absent → Sackmann seul (comportement legacy).
+
+// Récupère le mapping nom → player_key depuis get_standings ATP+WTA, cache 7j.
+// Sans ce mapping on ne peut pas appeler get_fixtures par joueur.
+async function _apiTennisGetKeymap(env) {
+  if (!env.TENNIS_API_KEY) return null;
+  if (env.PAPER_TRADING) {
+    try {
+      const cached = await env.PAPER_TRADING.get(TENNIS_API_KEYMAP);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Date.now() - parsed.fetched_at < 7 * 24 * 3600 * 1000) return parsed.map;
+      }
+    } catch (_) {}
+  }
+  const map = {};
+  for (const eventType of ['ATP', 'WTA']) {
+    try {
+      const url = `${TENNIS_API_BASE}/?method=get_standings&event_type=${eventType}&APIkey=${env.TENNIS_API_KEY}`;
+      const resp = await fetchTimeout(url, {}, 12000);
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      const list = Array.isArray(data?.result) ? data.result : [];
+      for (const p of list) {
+        if (p.player_key && p.player) {
+          const norm = _normalizeTennisName(p.player);
+          if (norm) map[norm] = { key: String(p.player_key), tour: eventType.toLowerCase(), name: p.player };
+        }
+      }
+    } catch (err) { console.warn(`api-tennis standings ${eventType}:`, err.message); }
+  }
+  if (env.PAPER_TRADING && Object.keys(map).length) {
+    try {
+      await env.PAPER_TRADING.put(TENNIS_API_KEYMAP, JSON.stringify({ fetched_at: Date.now(), map }),
+        { expirationTtl: 7 * 24 * 3600 });
+    } catch (_) {}
+  }
+  return map;
+}
+
+// Résolution nom → player_key. Match exact normalisé puis nom de famille + initiale.
+function _apiTennisResolveKey(keymap, playerName) {
+  if (!keymap) return null;
+  const needle = _normalizeTennisName(playerName);
+  if (!needle) return null;
+  if (keymap[needle]) return keymap[needle];
+  const parts = needle.split(' ');
+  if (parts.length >= 2) {
+    const firstInit = parts[0][0];
+    const lastName  = parts[parts.length - 1];
+    const candidates = [];
+    for (const [norm, info] of Object.entries(keymap)) {
+      const np = norm.split(' ');
+      if (np.length >= 2 && np[0][0] === firstInit && np[np.length - 1] === lastName) candidates.push(info);
+    }
+    if (candidates.length === 1) return candidates[0];
+  }
+  return null;
+}
+
+// Récupère les matchs récents d'un joueur via get_fixtures · convertit en lignes
+// au format Sackmann pour fusion transparente avec _computeTennisPlayerStats.
+// Limite : pas de stats service détaillées (pas dispo sur free tier api-tennis).
+async function _apiTennisFetchRecentMatches(playerInfo, env, daysBack = 60) {
+  if (!playerInfo || !env.TENNIS_API_KEY) return [];
+  const today = new Date();
+  const start = new Date(today); start.setDate(start.getDate() - daysBack);
+  const ds = start.toISOString().slice(0, 10);
+  const de = today.toISOString().slice(0, 10);
+  const url = `${TENNIS_API_BASE}/?method=get_fixtures&player_key=${playerInfo.key}&date_start=${ds}&date_stop=${de}&APIkey=${env.TENNIS_API_KEY}`;
+  try {
+    const resp = await fetchTimeout(url, {}, 12000);
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    const fixtures = Array.isArray(data?.result) ? data.result : [];
+    const rows = [];
+    for (const fx of fixtures) {
+      // Match terminé seulement (event_status = "Finished" ou final_result rempli)
+      const finished = fx.event_status === 'Finished' || (fx.event_winner && fx.event_winner !== '');
+      if (!finished) continue;
+      const winnerSide = fx.event_winner === 'First Player' ? 'first' : fx.event_winner === 'Second Player' ? 'second' : null;
+      if (!winnerSide) continue;
+      const winnerName = winnerSide === 'first' ? fx.event_first_player : fx.event_second_player;
+      const loserName  = winnerSide === 'first' ? fx.event_second_player : fx.event_first_player;
+      if (!winnerName || !loserName) continue;
+      const dateStr = String(fx.event_date ?? '').replace(/-/g, '');
+      if (dateStr.length !== 8) continue;
+      // Surface dérivée du tournoi · api-tennis n'expose pas toujours · fallback Hard
+      const surface = (() => {
+        const t = String(fx.tournament_name ?? '').toLowerCase();
+        if (t.includes('roland') || t.includes('madrid') || t.includes('rome') || t.includes('monte') || t.includes('clay') || t.includes('barcelon') || t.includes('estoril') || t.includes('hamburg')) return 'Clay';
+        if (t.includes('wimbledon') || t.includes('queen') || t.includes('halle') || t.includes('eastbourne') || t.includes('grass')) return 'Grass';
+        return 'Hard';
+      })();
+      rows.push({
+        tourney_date: dateStr,
+        tourney_name: fx.tournament_name ?? '',
+        surface,
+        winner_name: winnerName,
+        loser_name:  loserName,
+        winner_rank: '',
+        loser_rank:  '',
+        score:       fx.event_final_result ?? '',
+        // Stats service indispo sur free tier · laissées vides
+        w_ace: '', w_df: '', w_svpt: '', w_1stWon: '',
+        l_ace: '', l_df: '', l_svpt: '', l_1stWon: '',
+        _source: 'api_tennis',
+      });
+    }
+    return rows;
+  } catch (err) {
+    console.warn(`api-tennis fixtures ${playerInfo.name}:`, err.message);
+    return [];
+  }
+}
+
+// Dédup matchs entre Sackmann CSV et api-tennis : même (date, winner, loser) → on garde Sackmann
+// (stats service plus complètes). Supprime les doublons côté api-tennis.
+function _mergeTennisRows(sackmannRows, apiRows) {
+  const seen = new Set();
+  for (const r of sackmannRows) {
+    seen.add(`${r.tourney_date}|${_normalizeTennisName(r.winner_name)}|${_normalizeTennisName(r.loser_name)}`);
+  }
+  const fresh = apiRows.filter(r => {
+    const k = `${r.tourney_date}|${_normalizeTennisName(r.winner_name)}|${_normalizeTennisName(r.loser_name)}`;
+    return !seen.has(k);
+  });
+  return sackmannRows.concat(fresh);
+}
+
 async function handleTennisStats(url, env, origin) {
   const playersParam = url.searchParams.get('players') ?? '';
   const surface      = url.searchParams.get('surface') ?? 'Clay';
@@ -5950,6 +6084,25 @@ async function handleTennisStats(url, env, origin) {
     if (r2025.status === 'fulfilled' && r2025.value.ok) {
       const rows2025 = _parseTennisCSV(await r2025.value.text()).filter(r => parseInt(r.tourney_date || '0') >= 20250601);
       allRows = allRows.concat(rows2025);
+    }
+
+    // Augmentation api-tennis · matchs des 60 derniers jours (comble retard Sackmann 2-3j)
+    let apiTennisAdded = 0;
+    if (env.TENNIS_API_KEY) {
+      const keymap = await _apiTennisGetKeymap(env);
+      if (keymap) {
+        const recentBatches = await Promise.allSettled(players.map(async (pName) => {
+          const info = _apiTennisResolveKey(keymap, pName);
+          if (!info) return [];
+          return _apiTennisFetchRecentMatches(info, env, 60);
+        }));
+        const apiRows = recentBatches.flatMap(b => b.status === 'fulfilled' ? b.value : []);
+        if (apiRows.length) {
+          const before = allRows.length;
+          allRows = _mergeTennisRows(allRows, apiRows);
+          apiTennisAdded = allRows.length - before;
+        }
+      }
     }
     if (!allRows.length) return jsonResponse({ available: false, note: `CSV Sackmann ${tour.toUpperCase()} indisponible` }, 200, origin);
 
@@ -6034,7 +6187,7 @@ async function handleTennisStats(url, env, origin) {
     }
     return jsonResponse({ available: true, source: `sackmann_${tour}_csv_github`, tour, surface, players, stats,
       resolved: resolvedMap, sources,
-      fetched_at: new Date().toISOString(), rows_analyzed: allRows.length }, 200, origin);
+      fetched_at: new Date().toISOString(), rows_analyzed: allRows.length, api_tennis_added: apiTennisAdded }, 200, origin);
   } catch (err) { return jsonResponse({ available: false, note: err.message }, 200, origin); }
 }
 
