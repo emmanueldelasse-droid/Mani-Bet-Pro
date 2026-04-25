@@ -44,6 +44,7 @@ function _renderShell() {
         <div class="bot-sport-toggle">
           <button class="bot-sport-btn active" data-sport="nba">🏀 NBA</button>
           <button class="bot-sport-btn" data-sport="mlb">⚾ MLB</button>
+          <button class="bot-sport-btn" data-sport="tennis">🎾 Tennis</button>
         </div>
       </div>
 
@@ -198,7 +199,9 @@ async function _loadAndRender(container, filter = 'all') {
 
   // Sport courant stocké sur le container (default: nba)
   const sport   = container.dataset.sport || 'nba';
-  const logsUrl = sport === 'mlb' ? `${WORKER}/mlb/bot/logs` : `${WORKER}/bot/logs`;
+  const logsUrl = sport === 'mlb'    ? `${WORKER}/mlb/bot/logs`
+                : sport === 'tennis' ? `${WORKER}/tennis/bot/logs`
+                : `${WORKER}/bot/logs`;
 
   if (subEl) subEl.textContent = `Analyses automatiques · ${sport.toUpperCase()}`;
 
@@ -293,9 +296,9 @@ function _renderStats(stats, logs, sport = 'nba') {
 function _renderDeepAnalysis(logs, phaseFilter = 'all', sport = 'nba') {
   if (!logs?.length) return '';
 
-  // MLB n'a pas la même notion de phase que NBA (pas de "playin" dans logs actuels)
-  // Pour MLB, on garde le toggle mais phases = "all" seulement pertinent
-  const isNBA = sport !== 'mlb';
+  // MLB et Tennis n'ont pas la même notion de phase que NBA (playin/playoff).
+  // Tennis a ses propres phases (grand_slam/masters_1000/...) mais via log.phase, pas log.nba_phase.
+  const isNBA = sport === 'nba';
 
   // Filtrer par phase choisie (NBA only)
   const matchPhase = (log) => {
@@ -642,8 +645,8 @@ function _renderLogCard(log) {
     <div class="${cardClass}" data-match-id="${log.match_id}">
       <div class="bot-log-header">
         <div>
-          <div class="bot-log-matchup">${log.away ?? '?'} @ ${log.home ?? '?'}</div>
-          <div class="bot-log-date">${dateFmt}${timeFmt ? ' · ' + timeFmt : ''}</div>
+          <div class="bot-log-matchup">${log.away ?? log.p2 ?? '?'} ${log.tournament ? 'vs' : '@'} ${log.home ?? log.p1 ?? '?'}</div>
+          <div class="bot-log-date">${dateFmt}${timeFmt ? ' · ' + timeFmt : ''}${log.tournament ? ' · ' + log.tournament + ' (' + (log.surface ?? '') + ')' : ''}</div>
         </div>
         <div class="bot-log-badges">
           ${phase ? `<span class="bot-badge bot-badge--phase">${phase}</span>` : ''}
@@ -679,8 +682,8 @@ function _renderConfBadge(conf) {
 
 function _renderProbaBar(log) {
   const prob     = log.motor_prob ?? 50;
-  const homeName = (log.home ?? '').split(' ').pop();
-  const awayName = (log.away ?? '').split(' ').pop();
+  const homeName = (log.home ?? log.p1 ?? '').split(' ').pop();
+  const awayName = (log.away ?? log.p2 ?? '').split(' ').pop();
   return `
     <div class="bot-probas">
       <span class="bot-proba-label" style="text-align:left;min-width:50px;font-size:11px">${awayName}</span>
@@ -879,8 +882,18 @@ function _fmtVal(variable, value) {
 
 function _bindEvents(container, storeInstance) {
   const getSport  = () => container.dataset.sport || 'nba';
-  const settleUrl = () => getSport() === 'mlb' ? `${WORKER}/mlb/bot/settle-logs` : `${WORKER}/bot/settle-logs`;
-  const runUrl    = () => getSport() === 'mlb' ? `${WORKER}/mlb/bot/run` : `${WORKER}/bot/run`;
+  const settleUrl = () => {
+    const s = getSport();
+    return s === 'mlb' ? `${WORKER}/mlb/bot/settle-logs`
+         : s === 'tennis' ? `${WORKER}/tennis/bot/settle-logs`
+         : `${WORKER}/bot/settle-logs`;
+  };
+  const runUrl    = () => {
+    const s = getSport();
+    return s === 'mlb' ? `${WORKER}/mlb/bot/run`
+         : s === 'tennis' ? `${WORKER}/tennis/bot/run`
+         : `${WORKER}/bot/run`;
+  };
 
   // Sport toggle
   container.addEventListener('click', async (e) => {
