@@ -5911,9 +5911,12 @@ async function handleTennisOdds(url, env, origin) {
           const raw = await env.PAPER_TRADING.get(snapKey);
           let history = raw ? JSON.parse(raw) : [];
           if (!Array.isArray(history)) history = [];
-          // Premier snapshot >= 4h pour considérer comme "open"
-          const fourHoursAgo = Date.now() - 4 * 3600 * 1000;
-          const opener = history.find(s => s.t <= fourHoursAgo);
+          // Opener = snapshot le plus ancien dans la fenêtre [4h, 48h]
+          // < 4h = bruit (cotes pas encore stabilisées) · > 48h = trop ancien (steam périmé)
+          const now = Date.now();
+          const minAge = now - 48 * 3600 * 1000;
+          const maxAge = now - 4  * 3600 * 1000;
+          const opener = history.find(s => s.t >= minAge && s.t <= maxAge);
           if (opener) m.odds.h2h_open = { p1: opener.p1, p2: opener.p2, t: opener.t };
           // Append snapshot actuel · trim 24 entries
           history.push({ t: Date.now(), p1: m.odds.h2h.p1, p2: m.odds.h2h.p2 });
@@ -7926,7 +7929,7 @@ function _tennisEloSignal(e1, e2) {
   return { value: Math.round(((expP1 - 0.5) * 2) * 100) / 100, expected_p1_win: Math.round(expP1 * 100) };
 }
 
-function _botTennisExtractVariables(p1, p2, surface) {
+function _botTennisExtractVariables(p1, p2, surface, oddsCtx = null) {
   const out = {};
 
   // 1) ranking_elo_diff : priorité Elo surface (>= 10 matchs) > Elo overall (>= 20) > rank
@@ -8018,9 +8021,10 @@ function _botTennisExtractVariables(p1, p2, surface) {
     out.physical_load_diff = { value: null, source: 'sackmann', quality: 'MISSING' };
   }
 
-  // 9) market_steam_diff — mouvement cote depuis ouverture (≥4h) · injecté par caller
-  // via match.odds.h2h_open. Calculé ici si disponible, sinon MISSING.
-  const odds_now = p1?._odds_now ?? null, odds_open = p1?._odds_open ?? null;
+  // 9) market_steam_diff — mouvement cote depuis ouverture (≥4h, ≤48h)
+  // oddsCtx fourni par le caller : { now: { p1, p2 }, open: { p1, p2, t } }
+  const odds_now  = oddsCtx?.now  ?? null;
+  const odds_open = oddsCtx?.open ?? null;
   if (odds_now?.p1 && odds_now?.p2 && odds_open?.p1 && odds_open?.p2) {
     const p1Drop = (odds_open.p1 - odds_now.p1) / odds_open.p1;
     const p2Drop = (odds_open.p2 - odds_now.p2) / odds_open.p2;
@@ -8182,12 +8186,9 @@ async function _runTennisBotCron(env, forceRun = false) {
       const p1Stats = csvStats[p1] ? { name: p1, ...csvStats[p1] } : { name: p1 };
       const p2Stats = csvStats[p2] ? { name: p2, ...csvStats[p2] } : { name: p2 };
 
-      // Injection cotes pour variable market_steam_diff
-      p1Stats._odds_now  = m.odds?.h2h ?? null;
-      p1Stats._odds_open = m.odds?.h2h_open ?? null;
-
       const phase = _tennisTournamentPhase(tournament.label);
-      const variables = _botTennisExtractVariables(p1Stats, p2Stats, tournament.surface);
+      const oddsCtx = { now: m.odds?.h2h ?? null, open: m.odds?.h2h_open ?? null };
+      const variables = _botTennisExtractVariables(p1Stats, p2Stats, tournament.surface, oddsCtx);
       const weights   = _botTennisWeights(phase);
       const { score, signals, missingVars } = _botTennisComputeScore(variables, weights);
       const bettingRecs = _botTennisBettingRecs(score, m.odds?.h2h, {

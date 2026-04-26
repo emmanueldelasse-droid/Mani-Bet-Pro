@@ -498,10 +498,8 @@ export class EngineTennis {
     const MIN_TOTAL_MATCHES = 15;    // sous ce seuil, échantillon trop petit pour parier
     const recs              = [];
 
-    // Garde-fou échantillon : si l'un des joueurs a < 15 matchs recensés,
-    // les stats Elo / surface / forme sont trop bruitées pour recommander.
-    const p1Matches = variables?.ranking_elo_diff?.p1_n ?? variables?.ranking_elo_diff?.p1_rank != null ? null : null;
-    // Lecture brute via match · stats injectées dans variables_used → on récupère via raw helpers
+    // Garde-fou échantillon : total_matches injecté via match._p1/p2_total_matches
+    // (cf. analyze ligne 56). Sous 15 matchs, stats Elo/surface/forme trop bruitées.
     const totalP1   = match?._p1_total_matches ?? null;
     const totalP2   = match?._p2_total_matches ?? null;
     const lowSample = (totalP1 != null && totalP1 < MIN_TOTAL_MATCHES)
