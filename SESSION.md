@@ -18,11 +18,11 @@ Worker `manibetpro.emmanueldelasse.workers.dev` · Front GH Pages · KV `PAPER_T
 Stack: CF Worker + KV + Tank01 + ESPN + Claude + Telegram · Sackmann CSV + api-tennis.com (env `TENNIS_API_KEY`)
 
 ## Routes
-- `/nba/{matches,odds,injuries,standings,results,team-detail,teams/stats,roster-injuries,ai-injuries[-batch],ai-player-props,player-points}` · debug `/nba/{roster,boxscore,schedule}-debug` · `/debug/basketusa?secret=`
-- `/mlb/{matches,odds,pitchers,standings,team-stats,bullpen-stats,weather,bot/run,bot/logs,bot/settle-logs}`
-- `/tennis/{sports-list,tournaments,odds,stats,bot/run POST,bot/logs,bot/settle-logs POST}` · ATP+WTA
+- `/nba/{matches,odds,injuries,standings,results,team-detail,teams/stats,roster-injuries,ai-injuries[-batch],ai-player-props,player-points}` · debug `/nba/{roster,boxscore}-debug`
+- `/mlb/{matches,odds,pitchers,standings,team-stats,bullpen-stats,weather,bot/{run,logs,settle-logs}}`
+- `/tennis/{sports-list,tournaments,odds,stats,bot/{run POST,logs,settle-logs POST}}` · ATP+WTA
 - `/bot/{run,logs,settle-logs,logs/export.csv?sport=,odds-history,calibration/analyze?sport=nba|mlb|tennis}`
-- Cron `0 * * * *` · bots NBA+MLB+tennis · 10-11h UTC nightly-settle J-1/J-2 · 22h UTC AI props · snapshot ESPN→KV `odds_snap_{id}`
+- Cron `0 * * * *` · bots NBA+MLB+tennis · 10-11h UTC nightly-settle · 22h UTC AI props
 
 ## Fichiers
 - `worker.js` ~8000L monolithe · `wrangler.jsonc`
@@ -31,8 +31,7 @@ Stack: CF Worker + KV + Tank01 + ESPN + Claude + Telegram · Sackmann CSV + api-
 - `src/utils/utils.odds.js` source conversions cotes
 
 ## Pièges Tank01
-- `team.Roster` R maj (fallback `.roster`) · `statsToGet=averages` · `teamAbv.trim().toUpperCase()`
-- cache KV rosters 6h · team-detail 6/8h · box 7j · `?bust=1` refetch · `parseFloat(ppg)`→`Number.isFinite`
+`team.Roster` R maj · `statsToGet=averages` · `teamAbv.trim().toUpperCase()` · cache rosters 6h · `?bust=1`
 
 ## Pièges TheOddsAPI
 `player_points` sans `bookmakers=` → books dispo · filtre → 422 si absent (worker.js:2450)
@@ -42,7 +41,9 @@ Stack: CF Worker + KV + Tank01 + ESPN + Claude + Telegram · Sackmann CSV + api-
 
 ## Pièges Tennis
 Sackmann CSV lag 2-3j · api-tennis comble 60j · fallback CSV qual_chall/qual_itf hors tour principal
-Elo K=32 init 1500 · `tennis_bot_log_{matchId}` TTL 90j · settle via CSV retro
+9 vars: ranking_elo · surface_wr · recent_form · pressure_dom (BP) · h2h · service · physical_load_14d · market_steam · fatigue
+Elo K=32 init 1500 · `tennis_bot_log_{matchId}` TTL 90j · `tennis_odds_snap_{matchId}` TTL 7j (steam)
+Steam : opener fenêtre [4h, 48h] · bruit <3% → value=0 · settle via CSV retro
 Garde-fous reco ML (worker.js:7964 + engine.tennis.js:365): edge>25% drop · cote≥5+edge>15% drop · total_matches<15 drop
 
 ## Pièges Timezone
@@ -56,6 +57,3 @@ Debug `_denyIfNoDebugAuth()` · params user regex avant KV key · innerHTML → 
 
 ## Hors SESSION
 `.claude/onboarding.md` · `git log` · `.claude/agents/alon.md`
-
-## Règle format
-télégraphique · `·` sep · `→` cause · refs `file:line` · < 3000 octets
