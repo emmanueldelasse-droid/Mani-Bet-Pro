@@ -462,8 +462,11 @@ export class EngineTennis {
       });
     }
 
+    // Régression vers 0.5 sur variables manquantes (poids somment à 1.0).
+    // Voir worker.js _botTennisComputeScore pour le rationnel : éviter
+    // l'amplification mécanique des variables présentes vers les extrêmes.
     const rawScore = totalWeight > 0
-      ? Math.max(0.1, Math.min(0.9, weightedSum / totalWeight))
+      ? Math.max(0.1, Math.min(0.9, weightedSum + 0.5 * (1 - totalWeight)))
       : null;
 
     return { score: rawScore, signals, missingVars, missingCritical };

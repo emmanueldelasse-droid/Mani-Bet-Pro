@@ -8061,7 +8061,12 @@ function _botTennisComputeScore(variables, weights) {
     });
   }
 
-  const raw = totalWeight > 0 ? weightedSum / totalWeight : null;
+  // Régression vers 0.5 sur variables manquantes (poids tennis somment à 1.0).
+  // weightedSum = somme des val_normalisés * poids des variables définies.
+  // Manque (1 - totalWeight) de couverture → on l'attribue à 0.5 (signal neutre)
+  // au lieu de diviser par totalWeight (qui amplifie les variables présentes
+  // vers les extrêmes et gonfle artificiellement l'edge).
+  const raw = totalWeight > 0 ? weightedSum + 0.5 * (1 - totalWeight) : null;
   // clamp [0.1, 0.9] (comme engine.tennis.js)
   const score = raw != null ? Math.max(0.1, Math.min(0.9, Math.round(raw * 1000) / 1000)) : null;
   signals.sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution));
@@ -8122,7 +8127,9 @@ function _botTennisDataQuality(variables) {
   if (!defined.length) return 0;
   const qualityScore = { VERIFIED: 1.0, PARTIAL: 0.65, LOW_SAMPLE: 0.40, MISSING: 0 };
   const sum = defined.reduce((s, v) => s + (qualityScore[v.quality] ?? 0.5), 0);
-  return Math.round((sum / vals.length) * 100) / 100;
+  // Moyenne sur variables définies. missingCount déjà comptabilisé séparément
+  // dans _botTennisConfidence (>=3 missing → LOW), pas la peine de double-pénaliser.
+  return Math.round((sum / defined.length) * 100) / 100;
 }
 
 function _botTennisConfidence(score, dataQuality, missingCount) {
@@ -8318,14 +8325,19 @@ async function _tennisBotSettleDate(env, dateStr, options = {}) {
     if (!recent.length) continue;
 
     for (const { key, log } of items) {
-      // Chercher match : p1 vs p2 (ou p2 vs p1) dans rows
-      const matched = recent.find(r =>
-        (r.winner_name === log.p1 && r.loser_name === log.p2) ||
-        (r.winner_name === log.p2 && r.loser_name === log.p1)
-      );
+      // Chercher match : p1 vs p2 (ou p2 vs p1) dans rows.
+      // Normalisation noms (accents, casse, ponctuation) : CSV Sackmann en ASCII,
+      // logs peuvent venir d'api-tennis.com avec accents/diacritiques.
+      const np1 = _normalizeName(log.p1);
+      const np2 = _normalizeName(log.p2);
+      const matched = recent.find(r => {
+        const nw = _normalizeName(r.winner_name);
+        const nl = _normalizeName(r.loser_name);
+        return (nw === np1 && nl === np2) || (nw === np2 && nl === np1);
+      });
       if (!matched) continue;
 
-      const winner = matched.winner_name === log.p1 ? 'HOME' : 'AWAY';
+      const winner = _normalizeName(matched.winner_name) === np1 ? 'HOME' : 'AWAY';
       const motorPredictedHome = (log.motor_prob ?? 50) > 50;
       const motorWasRight = (motorPredictedHome && winner === 'HOME') ||
                             (!motorPredictedHome && winner === 'AWAY');
