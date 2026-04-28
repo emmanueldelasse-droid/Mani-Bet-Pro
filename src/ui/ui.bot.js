@@ -263,6 +263,18 @@ function _renderStats(stats, logs, sport = 'nba') {
     : logs.filter(l => l.confidence_level === 'HIGH').length;
   const highLabel = sport === 'mlb' ? 'Data quality HIGH' : 'Conf. HIGH';
 
+  // Card "Joueurs" : recos PLAYER_POINTS NBA uniquement (player props)
+  const pp           = stats.player_points;
+  const showPpCard   = sport === 'nba' && pp && pp.total_recs > 0;
+  const ppHitColor   = pp?.hit_rate != null && pp.hit_rate >= 55 ? 'var(--color-success)'
+                     : pp?.hit_rate != null && pp.hit_rate >= 45 ? 'var(--color-warning)'
+                     : 'var(--color-danger)';
+  const ppCard = showPpCard ? `
+    <div class="stat-card">
+      <div class="stat-card__value" style="color:${ppHitColor}">${pp.hit_rate != null ? pp.hit_rate + '%' : '—'}</div>
+      <div class="stat-card__label">Joueurs (${pp.correct}/${pp.settled} · ${pp.total_recs} recos)</div>
+    </div>` : '';
+
   return `<div class="bot-stats">
     <div class="stat-card">
       <div class="stat-card__value">${stats.total_analyzed ?? 0}</div>
@@ -287,7 +299,7 @@ function _renderStats(stats, logs, sport = 'nba') {
     <div class="stat-card">
       <div class="stat-card__value" style="color:var(--color-volatility)">${highConf}</div>
       <div class="stat-card__label">${highLabel}</div>
-    </div>
+    </div>${ppCard}
   </div>`;
 }
 
