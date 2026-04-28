@@ -3430,6 +3430,15 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
     }
   }
 
+  // Détection paris combinés value sur le même match
+  // (ML + total, OU + player_points, etc.) avec shrinkage corrélation.
+  if (analysis.betting_recommendations?.recommendations?.length >= 2) {
+    const parlays = _botBuildParlayRecs(analysis.betting_recommendations.recommendations);
+    if (parlays.length > 0) {
+      analysis.betting_recommendations.parlay_recommendations = parlays;
+    }
+  }
+
   // Snapshot absences
   const absVar = analysis.variables_used?.absences_impact ?? null;
   const absencesSnapshot = absVar ? {
@@ -3526,6 +3535,76 @@ async function _botSaveLog(env, log) {
   } catch (err) { console.warn('[BOT] saveLog error:', err.message); }
 }
 
+// ── PARIS COMBINÉS (parlay) — détection value sur paires de recos ─────────────
+// Combine 2 paris du même match si edge_combiné ≥ 7% après shrinkage corrélation.
+// Indépendance imparfaite : on multiplie p1*p2*0.92 (shrinkage) pour compenser.
+
+function _botParlayLegLabel(rec) {
+  if (rec.type === 'MONEYLINE')     return `${rec.side === 'HOME' ? 'Dom.' : 'Ext.'} vainqueur`;
+  if (rec.type === 'SPREAD')        return `${rec.side} ${rec.spread_line ?? ''}`.trim();
+  if (rec.type === 'OVER_UNDER')    return `${rec.side} ${rec.line ?? ''}`.trim();
+  if (rec.type === 'PLAYER_POINTS') return `${rec.player ?? '—'} ${rec.side} ${rec.line ?? ''}`.trim();
+  return rec.type ?? '?';
+}
+
+function _botBuildParlayRecs(recommendations) {
+  if (!Array.isArray(recommendations) || recommendations.length < 2) return [];
+  const SHRINKAGE        = 0.92; // facteur prudence pour corrélation imparfaite
+  const MIN_LEG_EDGE     = 5;
+  const MIN_PARLAY_EDGE  = 7;
+  const MAX_PARLAYS      = 3;
+
+  const eligible = recommendations.filter(r =>
+    Number.isFinite(r?.edge) && r.edge >= MIN_LEG_EDGE &&
+    Number.isFinite(r?.odds_decimal) && r.odds_decimal > 1 &&
+    Number.isFinite(r?.motor_prob) && r.motor_prob > 0
+  );
+  if (eligible.length < 2) return [];
+
+  const parlays = [];
+  for (let i = 0; i < eligible.length; i++) {
+    for (let j = i + 1; j < eligible.length; j++) {
+      const r1 = eligible[i];
+      const r2 = eligible[j];
+      // Skip si même joueur (over+under d'un même joueur impossible)
+      if (r1.type === 'PLAYER_POINTS' && r2.type === 'PLAYER_POINTS' && r1.player === r2.player) continue;
+
+      const p1 = r1.motor_prob / 100;
+      const p2 = r2.motor_prob / 100;
+      const combinedProb    = p1 * p2 * SHRINKAGE;
+      const combinedDecimal = Math.round(r1.odds_decimal * r2.odds_decimal * 100) / 100;
+      const combinedImplied = 1 / combinedDecimal;
+      const edgeAbs         = combinedProb - combinedImplied;
+      const edgePct         = Math.round(edgeAbs * 100);
+      if (edgePct < MIN_PARLAY_EDGE) continue;
+
+      // Kelly réduit (1/8 au lieu de 1/4) capped 2% — combiné = + variance
+      const b           = combinedDecimal - 1;
+      const fullKelly   = (b * combinedProb - (1 - combinedProb)) / b;
+      const kelly_stake = fullKelly <= 0 ? 0
+        : Math.min(Math.round(fullKelly * 0.125 * 1000) / 1000, 0.02);
+
+      parlays.push({
+        type:           'PARLAY',
+        legs: [
+          { type: r1.type, side: r1.side, label: _botParlayLegLabel(r1), odds_decimal: r1.odds_decimal, edge: r1.edge, motor_prob: r1.motor_prob },
+          { type: r2.type, side: r2.side, label: _botParlayLegLabel(r2), odds_decimal: r2.odds_decimal, edge: r2.edge, motor_prob: r2.motor_prob },
+        ],
+        odds_decimal:   combinedDecimal,
+        motor_prob:     Math.round(combinedProb * 100),
+        implied_prob:   Math.round(combinedImplied * 100),
+        edge:           edgePct,
+        kelly_stake,
+        shrinkage:      SHRINKAGE,
+        has_value:      true,
+      });
+    }
+  }
+
+  parlays.sort((a, b) => b.edge - a.edge);
+  return parlays.slice(0, MAX_PARLAYS);
+}
+
 async function _botSendTelegram(env, logs, edgesFound, dateStr) {
   const token  = env.TELEGRAM_BOT_TOKEN;
   const chatId = env.TELEGRAM_CHAT_ID;
@@ -3583,6 +3662,26 @@ async function _botSendTelegram(env, logs, edgesFound, dateStr) {
       const src   = r.odds_source ? ` _(${r.odds_source})_` : '';
       msg += `• ${arrow} *${r.player}* ${r.side} ${r.line} pts @ ${r.odds_decimal}${src}\n`;
       msg += `  Edge *${r.edge}%* · proj ${r.projected_pts}pts · ${r.away}@${r.home}${stake}\n`;
+    }
+  }
+
+  // Top combinés value (parlay edge ≥ 7% après shrinkage corrélation)
+  const parlays = [];
+  for (const log of logs) {
+    const ps = log.betting_recommendations?.parlay_recommendations ?? [];
+    for (const p of ps) parlays.push({ ...p, away: log.away, home: log.home });
+  }
+  parlays.sort((a, b) => b.edge - a.edge);
+  const parlayTop = parlays.slice(0, 3);
+
+  if (parlayTop.length > 0) {
+    msg += `\n🔗 *Combinés value (≥7%) :*\n`;
+    for (const p of parlayTop) {
+      const stake = p.kelly_stake != null ? ` · mise ${(p.kelly_stake * 100).toFixed(1)}%` : '';
+      msg += `• ${p.away}@${p.home} · cote *${p.odds_decimal}* · edge *${p.edge}%*${stake}\n`;
+      for (const leg of p.legs) {
+        msg += `  └ ${leg.label} @ ${leg.odds_decimal}\n`;
+      }
     }
   }
 
