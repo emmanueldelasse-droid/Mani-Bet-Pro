@@ -6681,6 +6681,21 @@ function _computeTennisPlayerStats(rows, playerName, surface, today) {
     ema = 0.3 * (last10[i].winner_name === resolvedName ? 1 : 0) + 0.7 * ema;
   }
 
+  // EMA spécifique à la surface — Nadal sur clay ≠ Nadal sur dur.
+  // Min 5 matchs sinon échantillon trop court → fallback EMA globale.
+  const surfaceLast10 = matches.filter(m => m.surface === surface).slice(0, 10);
+  let surfaceEma = null;
+  if (surfaceLast10.length >= 5) {
+    let se = 0.5;
+    for (let i = surfaceLast10.length - 1; i >= 0; i--) {
+      se = 0.3 * (surfaceLast10[i].winner_name === resolvedName ? 1 : 0) + 0.7 * se;
+    }
+    surfaceEma = se;
+  }
+  // EMA finale : 60% surface + 40% globale si surface-spécifique dispo.
+  // Sinon EMA globale uniquement (rétrocompatible).
+  const finalEma = surfaceEma != null ? (0.6 * surfaceEma + 0.4 * ema) : ema;
+
   const svcRows  = matches.filter(r => r.winner_name === resolvedName).slice(0, 20);
   const svcStats = svcRows.length > 0 ? {
     aces:            svcRows.reduce((s, r) => s + (parseInt(r.w_ace) || 0), 0) / svcRows.length,
@@ -6743,7 +6758,10 @@ function _computeTennisPlayerStats(rows, playerName, surface, today) {
     resolved_name:      resolvedName !== playerName ? resolvedName : undefined,
     current_rank: rank,
     surface_stats: { [surface]: { win_rate: surfM.length > 0 ? surfWins / surfM.length : null, matches: surfM.length } },
-    recent_form_ema:    Math.round(ema * 100) / 100,
+    recent_form_ema:    Math.round(finalEma * 100) / 100,
+    recent_form_ema_global:  Math.round(ema * 100) / 100,
+    recent_form_ema_surface: surfaceEma != null ? Math.round(surfaceEma * 100) / 100 : null,
+    surface_form_sample:     surfaceLast10.length,
     service_stats:      svcStats,
     break_point_stats:  bpStats,
     load_14d:           load14d,
