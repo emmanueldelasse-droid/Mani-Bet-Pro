@@ -3611,6 +3611,20 @@ async function handleBotLogs(url, env, origin) {
       brierScore = Math.round(sum / brierValid.length * 10000) / 10000;
     }
 
+    // Stats player_points : recos joueurs settlées (was_right boolean après ESPN box score)
+    const ppRecs = logs.flatMap(l =>
+      (l.betting_recommendations?.recommendations ?? [])
+        .filter(r => r.type === 'PLAYER_POINTS')
+    );
+    const ppSettled = ppRecs.filter(r => r.was_right === true || r.was_right === false);
+    const ppCorrect = ppSettled.filter(r => r.was_right === true);
+    const ppHitRate = ppSettled.length > 0
+      ? Math.round(ppCorrect.length / ppSettled.length * 1000) / 10
+      : null;
+    const ppAvgEdge = ppRecs.length > 0
+      ? Math.round(ppRecs.reduce((s, r) => s + (r.edge ?? 0), 0) / ppRecs.length * 10) / 10
+      : null;
+
     return jsonResponse({
       available: true,
       logs,
@@ -3620,6 +3634,13 @@ async function handleBotLogs(url, env, origin) {
         hit_rate:        hitRate,
         avg_edge:        avgEdge,
         brier_score:     brierScore,
+        player_points: {
+          total_recs: ppRecs.length,
+          settled:    ppSettled.length,
+          correct:    ppCorrect.length,
+          hit_rate:   ppHitRate,
+          avg_edge:   ppAvgEdge,
+        },
       },
     }, 200, origin);
   } catch (err) { return jsonResponse({ error: err.message }, 500, origin); }
@@ -5182,6 +5203,11 @@ function _botMatchPlayerPropsToLines(propsPrediction, linesMap, homeTeam, awayTe
     if (adjustedEdge < 5) continue;
     if (cf < 0.50)        continue;
 
+    // Quarter Kelly capped à 5% bankroll (cohérent ML/spread/total)
+    const kellyB    = best.decimal - 1;
+    const kellyFull = (kellyB * best.prob - (1 - best.prob)) / kellyB;
+    const kelly     = kellyFull <= 0 ? 0 : Math.min(Math.round(kellyFull * 0.25 * 1000) / 1000, 0.05);
+
     recommendations.push({
       type:              'PLAYER_POINTS',
       player:            p.name,
@@ -5196,6 +5222,7 @@ function _botMatchPlayerPropsToLines(propsPrediction, linesMap, homeTeam, awayTe
       odds_source:       best.book,
       edge_raw:          best.edge,
       edge:              adjustedEdge,
+      kelly_stake:       kelly,
       confidence_factor: cf,
       confidence_label:  p.confidence?.label ?? 'medium',
       line_confidence:   lineConfLabel,
