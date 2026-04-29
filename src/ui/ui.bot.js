@@ -248,7 +248,7 @@ function _filterLogs(logs, filter) {
   switch (filter) {
     case 'pending':  return logs.filter(l => l.motor_was_right === null);
     case 'settled':  return logs.filter(l => l.motor_was_right !== null);
-    case 'edge':     return logs.filter(l => l.best_edge && l.best_edge >= 5);
+    case 'edge':     return logs.filter(l => l.best_edge && l.best_edge >= 5 && (l.confidence_level ?? 'INCONCLUSIVE') !== 'INCONCLUSIVE');
     default:         return logs;
   }
 }
@@ -256,7 +256,7 @@ function _filterLogs(logs, filter) {
 // ── STATS GLOBALES ────────────────────────────────────────────────────────────
 
 function _renderStats(stats, logs, sport = 'nba') {
-  const edgeCount = logs.filter(l => l.best_edge && l.best_edge >= 5).length;
+  const edgeCount = logs.filter(l => l.best_edge && l.best_edge >= 5 && (l.confidence_level ?? 'INCONCLUSIVE') !== 'INCONCLUSIVE').length;
   // Vocabulaire harmonisé 3 sports : Conf. HIGH/MEDIUM/LOW/INCONCLUSIVE.
   // MLB rétrocompat : ancien champ data_quality utilisé si confidence_level absent.
   const highConf  = logs.filter(l =>
@@ -641,7 +641,10 @@ function _renderLogCard(log) {
   const conf       = log.confidence_level ?? 'INCONCLUSIVE';
   const phase      = log.nba_phase ?? null;
   const isSettled  = log.motor_was_right !== null;
-  const hasEdge    = log.best_edge && log.best_edge >= 5;
+  // INCONCLUSIVE = bot n'a pas pu prédire (variables manquantes), score 50/50.
+  // Le best_edge calculé contre la cote bookmaker est un artefact mathématique,
+  // pas une vraie reco actionnable. On masque l'edge dans ce cas.
+  const hasEdge    = log.best_edge && log.best_edge >= 5 && conf !== 'INCONCLUSIVE';
 
   // Classe carte
   let cardClass = 'bot-log-card';
