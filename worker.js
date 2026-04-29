@@ -9287,8 +9287,27 @@ async function handleTennisBotSettleLogs(request, env, origin) {
   try {
     const body    = await request.json().catch(() => ({}));
     const force   = body.force === true;
-    const dateStr = body.date ?? _botFormatDate(new Date());
-    const res     = await _tennisBotSettleDate(env, dateStr, { force });
-    return jsonResponse({ success: true, force, ...res }, 200, origin);
+    // Si date spécifique → settle cette date uniquement.
+    // Sinon → rattrape J-1 à J-10 (combo ESPN tennis + Sackmann CSV avec lag).
+    if (body.date) {
+      const res = await _tennisBotSettleDate(env, body.date, { force });
+      return jsonResponse({ success: true, force, ...res }, 200, origin);
+    }
+    const now = new Date();
+    const results = [];
+    let totalSettled = 0;
+    for (let d = 1; d <= 10; d++) {
+      const dt = new Date(now);
+      dt.setUTCDate(dt.getUTCDate() - d);
+      const ds = _botFormatDate(dt);
+      try {
+        const res = await _tennisBotSettleDate(env, ds, { force });
+        results.push({ date: ds, settled: res.settled ?? 0, error: res.error });
+        totalSettled += res.settled ?? 0;
+      } catch (err) {
+        results.push({ date: ds, settled: 0, error: err.message });
+      }
+    }
+    return jsonResponse({ success: true, force, total_settled: totalSettled, by_date: results }, 200, origin);
   } catch (err) { return jsonResponse({ error: err.message }, 500, origin); }
 }
