@@ -1023,12 +1023,14 @@ function _bindEvents(container, storeInstance) {
           settleBtn.textContent = '⟳ Settler';
           settleBtn.disabled = false;
         }, 3000);
+        // ORDRE CRITIQUE : _loadAndRender réécrit le conteneur, donc on
+        // insère le cadre diagnostic APRÈS pour qu'il survive au re-render.
+        const activeFilter = container.querySelector('.bot-filter-btn.active')?.dataset?.filter ?? 'all';
+        await _loadAndRender(container, activeFilter);
         // Tennis : afficher diagnostic complet si fourni (by_date avec espn_count, sackmann_count, etc.)
         if (getSport() === 'tennis' && Array.isArray(data.by_date)) {
           _renderTennisSettleDiag(container, data);
         }
-        const activeFilter = container.querySelector('.bot-filter-btn.active')?.dataset?.filter ?? 'all';
-        await _loadAndRender(container, activeFilter);
       } catch (err) {
         settleBtn.textContent = '✗ Erreur';
         setTimeout(() => { settleBtn.textContent = '⟳ Settler'; settleBtn.disabled = false; }, 2000);

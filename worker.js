@@ -9352,7 +9352,9 @@ async function handleTennisBotSettleLogs(request, env, origin) {
     );
     const results = settled.map((r, i) => {
       if (r.status === 'fulfilled') {
-        return { date: dates[i], settled: r.value.settled ?? 0, error: r.value.error };
+        // Spread complet : préserve espn_count, sackmann_count,
+        // matched_via_espn, matched_via_sackmann, unmatched_samples, pending.
+        return { date: dates[i], ...r.value };
       }
       return { date: dates[i], settled: 0, error: r.reason?.message ?? 'unknown' };
     });
