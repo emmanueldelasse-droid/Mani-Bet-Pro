@@ -921,11 +921,15 @@ async function _tank01FetchWithFallback(url, env, timeout = 10000) {
 
 async function handleNBAInjuriesImpact(env, origin) {
   const STATUS_WEIGHTS = {
-    'Out':          1.0,
-    'Doubtful':     0.75,
-    'Questionable': 0.5,
-    'Probable':     0.1,
-    'Day-To-Day':   0.3,
+    'Out':                 1.0,
+    'Doubtful':            0.75,
+    'Questionable':        0.5,
+    'Probable':            0.1,
+    'Day-To-Day':          0.3,
+    'Game-Time Decision':  0.5,
+    'Game Time Decision':  0.5,
+    'GTD':                 0.5,
+    'Suspension':          1.0,
   };
 
   if (env.PAPER_TRADING) {
@@ -981,7 +985,11 @@ async function handleNBAInjuriesImpact(env, origin) {
     } catch (err) { console.warn('InjuriesImpact KV teamPpg read error:', err.message); }
   }
 
-  const RELEVANT_STATUSES = new Set(['Out', 'Doubtful', 'Questionable', 'Probable', 'Day-To-Day']);
+  // Statuts NBA officiels + variantes ESPN (Game-Time Decision fréquent en playoff)
+  const RELEVANT_STATUSES = new Set([
+    'Out', 'Doubtful', 'Questionable', 'Probable', 'Day-To-Day',
+    'Game-Time Decision', 'Game Time Decision', 'GTD', 'Suspension',
+  ]);
   const playersByTeam = {};
 
   for (const team of (espnData.injuries ?? [])) {
@@ -4946,7 +4954,11 @@ function _botCountAwayGamesInLast5(recentForm) {
 function _botComputeAbsencesImpact(homeInj, awayInj) {
   if (!homeInj || !awayInj) return { value: null, source: 'espn_injuries', quality: 'MISSING', raw: null };
 
-  const SW = { 'Out': 1.0, 'Doubtful': 0.75, 'Questionable': 0.5, 'Probable': 0.1, 'Available': 0.0 };
+  const SW = {
+    'Out': 1.0, 'Doubtful': 0.75, 'Questionable': 0.5, 'Probable': 0.1,
+    'Day-To-Day': 0.4, 'Game-Time Decision': 0.5, 'Game Time Decision': 0.5,
+    'GTD': 0.5, 'Suspension': 1.0, 'Available': 0.0,
+  };
 
   const isWeighted = [...(homeInj ?? []), ...(awayInj ?? [])].some(p => p.source === 'tank01' || p.source === 'tank01_roster');
 
@@ -5714,8 +5726,15 @@ function _botComputeConfidence(analysis, dataQuality) {
 
 function _botGetInjuriesForTeam(injuryData, teamName) {
   if (!injuryData?.by_team) return null;
-  const players = injuryData.by_team[teamName]?.players_weighted ?? null;
-  if (!players) return null;
+  const teamEntry = injuryData.by_team[teamName];
+  // Distinguer "data fetchée mais équipe pas listée" (= équipe au complet)
+  // de "data ESPN absente" (= vraie info manquante).
+  // Si by_team contient au moins une autre équipe, ESPN a répondu → []
+  if (!teamEntry) {
+    const hasAnyTeam = Object.keys(injuryData.by_team).length > 0;
+    return hasAnyTeam ? [] : null;
+  }
+  const players = teamEntry.players_weighted ?? [];
   return players.map(p => ({
     name:          p.name,
     status:        p.status,
