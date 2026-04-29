@@ -638,6 +638,9 @@ function renderBlocProbas(analysis, match) {
   const best  = analysis.betting_recommendations?.best;
   const edge  = best?.edge ?? 0;
   const qual  = analysis.data_quality_score ?? 0;
+  // Distingue "bot a tourné, vraiment aucun edge" vs "bot pas encore tourné".
+  // betting_recommendations absent = analyse côté worker pas faite (front-engine seul).
+  const botAnalyzed = analysis.betting_recommendations != null;
 
   let decisionLabel, decisionColor;
   if (!best || edge < 5)               { decisionLabel = 'Passer';           decisionColor = 'var(--color-muted)'; }
@@ -678,6 +681,10 @@ function renderBlocProbas(analysis, match) {
             <span style="color:var(--color-text-secondary);margin-left:8px">Cote sous-évaluée de ${edge}%</span>
           </div>
           ${phaseBadge ? `<span style="font-size:10px;font-weight:700;color:${phaseBadge.color};border:1px solid ${phaseBadge.color};border-radius:4px;padding:2px 7px">${phaseBadge.label} · poids ajustés</span>` : ''}
+        </div>
+      ` : !botAnalyzed ? `
+        <div style="font-size:12px;color:var(--color-disagreement);background:rgba(245,158,11,0.08);border-left:3px solid var(--color-disagreement);padding:8px 12px;border-radius:4px">
+          ⏳ Analyse bot en attente — l'edge officiel apparaîtra après le prochain run du bot.${phaseBadge ? ` <span style="color:${phaseBadge.color};font-weight:600">${phaseBadge.label}</span>` : ''}
         </div>
       ` : `<div style="font-size:12px;color:var(--color-text-secondary)">Aucun avantage suffisant détecté sur ce match.${phaseBadge ? ` <span style="color:${phaseBadge.color};font-weight:600">${phaseBadge.label}</span>` : ''}</div>`}
     </div>`;
@@ -1560,8 +1567,12 @@ function _buildSyntheseLines(analysis, match) {
     else if (best.side === 'OVER')     sideLabel = `Plus de ${best.ou_line ?? '—'}`;
     else                               sideLabel = `Moins de ${best.ou_line ?? '—'}`;
     lines.push(line('👉', `Pari suggéré : <strong>${escapeHtml(typeLabel)} — ${escapeHtml(sideLabel)}</strong>.`));
-  } else {
+  } else if (analysis.betting_recommendations != null) {
+    // Bot a tourné, mais pas trouvé de value
     lines.push(line('🚫', 'Aucune cote sous-évaluée — passer ce match.'));
+  } else {
+    // Analyse bot pas encore faite (front-engine seul)
+    lines.push(line('⏳', 'Analyse bot en attente — l\'edge officiel apparaîtra après le prochain run.'));
   }
 
   return lines;
