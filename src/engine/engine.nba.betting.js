@@ -158,7 +158,12 @@ export function computeBettingRecommendations(score, odds, matchData, variables,
       const homeInjAdj = absImpact > 0 ? -homeBase * absImpact * 0.12 : 0;
       const awayInjAdj = absImpact < 0 ? -awayBase * Math.abs(absImpact) * 0.12 : 0;
 
-      const projectedTotal = homeBase + homeInjAdj + awayBase + awayInjAdj + paceAdj;
+      // Aligné backend `_botPredictNBATotal` worker.js:5350 — défense+, rythme- en
+      // playoffs/play-in. Sans ce -4.5 le frontend était systématiquement biaisé OVER.
+      const isPlayoff = matchData?.__playoff === true;
+      const playoffAdj = isPlayoff ? -4.5 : 0;
+
+      const projectedTotal = homeBase + homeInjAdj + awayBase + awayInjAdj + paceAdj + playoffAdj;
       const diff = projectedTotal - ouLine;
 
       // Prob Over : > 50% si projection dépasse la ligne, < 50% sinon
@@ -173,6 +178,7 @@ export function computeBettingRecommendations(score, odds, matchData, variables,
       if (paceDiff !== null) adjParts.push(`pace ${paceAdj > 0 ? '+' : ''}${paceAdj.toFixed(1)}`);
       if (homeInjAdj !== 0) adjParts.push(`inj.dom ${homeInjAdj.toFixed(1)}`);
       if (awayInjAdj !== 0) adjParts.push(`inj.ext ${awayInjAdj.toFixed(1)}`);
+      if (playoffAdj !== 0) adjParts.push(`playoff ${playoffAdj.toFixed(1)}`);
       const adjNote = adjParts.length > 0 ? ` (${adjParts.join(', ')})` : '';
       const noteBase = `Projection ${Math.round(projectedTotal)} pts${adjNote} · ligne ${ouLine}`;
 

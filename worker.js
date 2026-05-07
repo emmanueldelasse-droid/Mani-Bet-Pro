@@ -5461,8 +5461,9 @@ function _computePlayerProjectionConfidence(p, absentCount, model) {
 
   const ppg = parseFloat(p?.ppg);
   if (Number.isFinite(ppg)) {
-    if (ppg >= 25)       { score += 0.10; factors.push('star_ppg'); }
-    else if (ppg < 12)   { score -= 0.15; factors.push('role_volatile'); }
+    // Pas de bonus pour ppg≥25 : marché props sur stars très efficient,
+    // notre projection n'a pas plus d'info que la ligne. Pénalité role_volatile conservée.
+    if (ppg < 12) { score -= 0.15; factors.push('role_volatile'); }
   }
 
   // Divergence forme récente vs saison
@@ -5727,14 +5728,14 @@ function _botMatchPlayerPropsToLines(propsPrediction, linesMap, homeTeam, awayTe
       : { side: 'UNDER', edge: ue, prob: p.market.under_prob, decimal: p.market.under_decimal, book: p.market.under_book };
     if (best.edge == null || !best.decimal) continue;
 
-    // Appliquer facteur confiance (projection + source ligne)
+    // Confiance projection utilisée comme FILTRE (cf<0.50 → drop), pas comme
+    // multiplicateur d'edge : la précision de notre projection ne crée pas
+    // d'edge supplémentaire sur un marché efficient.
     const lineConfLabel = (linesMap[_normalizeName(p.name)] || {}).confidence ?? null;
     const cf            = confFactor(p.confidence, lineConfLabel);
-    const adjustedEdge  = Math.round(best.edge * cf);
 
-    // Seuil 5% sur edge ajusté · + seuil de confiance min 0.50
-    if (adjustedEdge < 5) continue;
-    if (cf < 0.50)        continue;
+    if (best.edge < 5) continue;
+    if (cf < 0.50)     continue;
 
     // Quarter Kelly capped à 5% bankroll (cohérent ML/spread/total)
     const kellyB    = best.decimal - 1;
@@ -5754,7 +5755,7 @@ function _botMatchPlayerPropsToLines(propsPrediction, linesMap, homeTeam, awayTe
       odds_line:         _decToAm(best.decimal),
       odds_source:       best.book,
       edge_raw:          best.edge,
-      edge:              adjustedEdge,
+      edge:              best.edge,
       kelly_stake:       kelly,
       confidence_factor: cf,
       confidence_label:  p.confidence?.label ?? 'medium',

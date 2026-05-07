@@ -10,11 +10,10 @@ néant
 3 sports même vocabulaire confiance : `Conf. HIGH/MEDIUM/LOW/INCONCLUSIVE` · jamais `Data quality` (MLB) · file:`ui.bot.js:264`
 
 ## TODO
-- [x] P1 v6.79 `recent_form_ema` 0.24→0.15 + `net_rating_diff` 0.06→0.16 (PR #75 #91)
-- [x] P1 label confiance harmonisé 3 sports `Conf.` + MLB `confidence_level` alias `data_quality`
 - [ ] P2 gate `confidence=INCONCLUSIVE` si `data_quality<0.55` (worker.js:5185)
 - [ ] P2 `/bot/calibration/analyze?sport=tennis` après 30+ logs settlés
 - [ ] P3 relancer Alon après 50+ logs post-v6.78
+- [ ] P3 calibrer `-4.5` playoff (worker.js:5350) par round après 100+ logs
 
 ## État
 Worker `manibetpro.emmanueldelasse.workers.dev` · Front GH Pages · KV `PAPER_TRADING` `17eb7ddc41a949dd99bd840142832cfd`
