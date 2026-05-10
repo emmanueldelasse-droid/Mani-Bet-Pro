@@ -8786,10 +8786,10 @@ function _botTennisExtractVariables(p1, p2, surface, oddsCtx = null) {
   // 1) ranking_elo_diff : priorité Elo surface (>= 10 matchs) > Elo overall (>= 20) > rank
   const nSurf1 = p1?.elo_surface_matches ?? 0;
   const nSurf2 = p2?.elo_surface_matches ?? 0;
-  if (p1?.elo_surface != null && p2?.elo_surface != null && nSurf1 >= 10 && nSurf2 >= 10) {
+  if (p1?.elo_surface != null && p2?.elo_surface != null && nSurf1 >= 8 && nSurf2 >= 8) {
     const sig = _tennisEloSignal(p1.elo_surface, p2.elo_surface);
     out.ranking_elo_diff = { ...sig, source: `elo_${String(surface ?? '').toLowerCase()}`, quality: 'VERIFIED' };
-  } else if (p1?.elo_overall != null && p2?.elo_overall != null && (p1?.elo_matches ?? 0) >= 20 && (p2?.elo_matches ?? 0) >= 20) {
+  } else if (p1?.elo_overall != null && p2?.elo_overall != null && (p1?.elo_matches ?? 0) >= 15 && (p2?.elo_matches ?? 0) >= 15) {
     const sig = _tennisEloSignal(p1.elo_overall, p2.elo_overall);
     out.ranking_elo_diff = { ...sig, source: 'elo_overall', quality: 'PARTIAL' };
   } else if (p1?.current_rank != null && p2?.current_rank != null) {
@@ -8844,8 +8844,10 @@ function _botTennisExtractVariables(p1, p2, surface, oddsCtx = null) {
   }
 
   // 6) fatigue_index — diff jours depuis dernier match
+  // Calib v6.81 : signe inversé · effect_size 0.29 mean_diff -0.148 sur 149 logs
+  // → joueur qui a joué récemment = en rythme · longue pause = rouille
   if (p1?.days_since_last_match != null && p2?.days_since_last_match != null) {
-    const diff = p1.days_since_last_match - p2.days_since_last_match;
+    const diff = p2.days_since_last_match - p1.days_since_last_match;
     const lag = Math.max(p1?.csv_lag_days ?? 0, p2?.csv_lag_days ?? 0);
     out.fatigue_index = { value: Math.max(-1, Math.min(1, diff / 7)), source: 'sackmann', quality: lag > 3 ? 'PARTIAL' : 'VERIFIED' };
   } else {
@@ -8863,10 +8865,12 @@ function _botTennisExtractVariables(p1, p2, surface, oddsCtx = null) {
     out.pressure_dominance = { value: null, source: 'sackmann', quality: b1 || b2 ? 'LOW_SAMPLE' : 'MISSING' };
   }
 
-  // 8) physical_load_diff — sets joués sur 14 derniers jours · p1 reposé = signal positif
+  // 8) physical_load_diff — sets joués sur 14 derniers jours
+  // Calib v6.81 : signe inversé · effect_size 0.26 mean_diff -0.062 sur 142 logs
+  // → joueur enchaîne les sets = momentum tournoi · acclimaté conditions
   const l1 = p1?.load_14d, l2 = p2?.load_14d;
   if (l1 && l2) {
-    const diff = (l2.sets_played ?? 0) - (l1.sets_played ?? 0);
+    const diff = (l1.sets_played ?? 0) - (l2.sets_played ?? 0);
     out.physical_load_diff = { value: Math.max(-1, Math.min(1, diff / 15)), source: 'sackmann', quality: 'VERIFIED' };
   } else {
     out.physical_load_diff = { value: null, source: 'sackmann', quality: 'MISSING' };
@@ -8879,7 +8883,9 @@ function _botTennisExtractVariables(p1, p2, surface, oddsCtx = null) {
   if (odds_now?.p1 && odds_now?.p2 && odds_open?.p1 && odds_open?.p2) {
     const p1Drop = (odds_open.p1 - odds_now.p1) / odds_open.p1;
     const p2Drop = (odds_open.p2 - odds_now.p2) / odds_open.p2;
-    const diff = p1Drop - p2Drop;
+    // Calib v6.81 : signe inversé (contrarian) · effect_size 0.16 mean_diff -0.13
+    // sur 155 logs · marché tennis sur-réagit · fader le steam
+    const diff = p2Drop - p1Drop;
     if (Math.abs(diff) < 0.03) {
       out.market_steam_diff = { value: 0, source: 'odds_history', quality: 'VERIFIED' };
     } else {
@@ -8932,7 +8938,9 @@ function _botTennisBettingRecs(score, oddsH2H, ctx = {}) {
   const implP1 = 1 / p1Odds, implP2 = 1 / p2Odds;
   const edgeP1 = score - implP1, edgeP2 = (1 - score) - implP2;
   const EDGE_MIN           = 0.05;
-  const EDGE_MAX_ML        = 0.25;
+  // Calib v6.81 : 0.25 → 0.18 · bucket edge_10+ (60.3%) sous-performe edge_0-5 (64%)
+  // sur 215 logs · marché tennis sharp · gros edge = erreur modèle plus probable
+  const EDGE_MAX_ML        = 0.18;
   const LONGSHOT_THRESHOLD = 5.0;
   const MIN_TOTAL_MATCHES  = 15;
   const recs = [];
