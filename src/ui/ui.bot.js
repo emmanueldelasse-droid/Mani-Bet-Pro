@@ -66,6 +66,7 @@ function _renderShell() {
       </div>
 
       <div id="bot-stats-container"></div>
+      <div id="bot-charts-container"></div>
       <div id="bot-analysis-container"></div>
       <div id="bot-logs-container">
         <div class="bot-loading">Chargement des analyses…</div>
@@ -216,6 +217,10 @@ async function _loadAndRender(container, filter = 'all') {
     // Stats globales
     statsEl.innerHTML = _renderStats(stats, allLogs, sport);
 
+    // Charts SVG natifs · v6.88 (skill ui-ux-pro-max recommendation P10)
+    const chartsEl = container.querySelector('#bot-charts-container');
+    if (chartsEl) chartsEl.innerHTML = _renderCharts(allLogs);
+
     // Panneau analyse approfondie — filtre phase stocké sur le container
     const analysisEl = container.querySelector('#bot-analysis-container');
     if (analysisEl) {
@@ -302,6 +307,136 @@ function _renderStats(stats, logs, sport = 'nba') {
       <div class="stat-card__label">${highLabel}</div>
     </div>${ppCard}
   </div>`;
+}
+
+// ── CHARTS SVG NATIFS · v6.88 ────────────────────────────────────────────────
+// Skill ui-ux-pro-max recommandation : Line chart (trend) + Bar (distribution).
+// SVG inline pour éviter dépendance externe (Chart.js = +50KB) et garder cohérence
+// avec le stack vanilla. Lazy-rendering : seulement si logs disponibles.
+
+function _renderCharts(logs) {
+  const settled = logs.filter(l => l.motor_was_right !== null);
+  if (settled.length < 5) return '';  // pas assez de données pour visualiser
+
+  return `
+    <style>
+      .bot-charts { display: grid; grid-template-columns: 1fr; gap: var(--space-3); margin-bottom: var(--space-4); }
+      .bot-chart-card { background: var(--color-bg-surface); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-md); padding: var(--space-3); }
+      .bot-chart-card__title { font-size: 11px; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: var(--space-2); font-weight: 600; }
+      @media (min-width: 768px) { .bot-charts { grid-template-columns: 1fr 1fr; } }
+    </style>
+    <div class="bot-charts">
+      <div class="bot-chart-card">
+        <div class="bot-chart-card__title">Hit rate cumulatif (rolling 10)</div>
+        ${_renderHitRateTrend(settled)}
+      </div>
+      <div class="bot-chart-card">
+        <div class="bot-chart-card__title">Distribution des edges (paris settlés)</div>
+        ${_renderEdgeDistribution(settled)}
+      </div>
+    </div>
+  `;
+}
+
+// SVG line chart : hit rate cumulatif rolling sur 10 derniers logs
+function _renderHitRateTrend(settled) {
+  if (settled.length < 5) return '<div style="font-size:12px;color:var(--color-text-muted);padding:20px 0;text-align:center">Échantillon insuffisant (≥5 paris settlés requis)</div>';
+
+  // Tri chrono (created_at ou settled_at) ascendant
+  const sorted = [...settled].sort((a, b) => {
+    const ta = new Date(a.settled_at ?? a.created_at ?? 0).getTime();
+    const tb = new Date(b.settled_at ?? b.created_at ?? 0).getTime();
+    return ta - tb;
+  });
+
+  // Hit rate rolling fenêtre 10 (ou tout l'historique si <10)
+  const W = 10;
+  const points = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const start = Math.max(0, i - W + 1);
+    const window = sorted.slice(start, i + 1);
+    const hits = window.filter(l => l.motor_was_right === true).length;
+    const rate = (hits / window.length) * 100;
+    points.push(rate);
+  }
+
+  // SVG dimensions
+  const W_SVG = 600, H_SVG = 160, P = 28;  // padding
+  const X = (i) => P + (i / (points.length - 1)) * (W_SVG - 2 * P);
+  const Y = (v) => H_SVG - P - (v / 100) * (H_SVG - 2 * P);
+  const path = points.map((v, i) => `${i === 0 ? 'M' : 'L'} ${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join(' ');
+  const areaPath = `${path} L ${X(points.length - 1).toFixed(1)} ${(H_SVG - P).toFixed(1)} L ${X(0).toFixed(1)} ${(H_SVG - P).toFixed(1)} Z`;
+  const last = points[points.length - 1];
+  const lastColor = last >= 55 ? '#22c55e' : last >= 50 ? '#f59e0b' : '#ef4444';
+
+  return `
+    <svg viewBox="0 0 ${W_SVG} ${H_SVG}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block" role="img" aria-label="Hit rate trend ${sorted.length} paris">
+      <!-- Grid 50% reference line -->
+      <line x1="${P}" y1="${Y(50).toFixed(1)}" x2="${W_SVG - P}" y2="${Y(50).toFixed(1)}" stroke="var(--color-border-default)" stroke-width="1" stroke-dasharray="3,3"/>
+      <text x="${W_SVG - P + 4}" y="${Y(50).toFixed(1)}" fill="var(--color-text-muted)" font-size="10" dominant-baseline="middle">50%</text>
+      <!-- Y axis labels 0/100 -->
+      <text x="${P - 4}" y="${Y(100).toFixed(1)}" fill="var(--color-text-muted)" font-size="10" text-anchor="end" dominant-baseline="middle">100</text>
+      <text x="${P - 4}" y="${Y(0).toFixed(1)}" fill="var(--color-text-muted)" font-size="10" text-anchor="end" dominant-baseline="middle">0</text>
+      <!-- Area gradient -->
+      <defs>
+        <linearGradient id="hr-grad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${lastColor}" stop-opacity="0.25"/>
+          <stop offset="100%" stop-color="${lastColor}" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <path d="${areaPath}" fill="url(#hr-grad)" stroke="none"/>
+      <!-- Line -->
+      <path d="${path}" fill="none" stroke="${lastColor}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      <!-- Last point -->
+      <circle cx="${X(points.length - 1).toFixed(1)}" cy="${Y(last).toFixed(1)}" r="4" fill="${lastColor}"/>
+      <text x="${X(points.length - 1).toFixed(1)}" y="${(Y(last) - 8).toFixed(1)}" fill="${lastColor}" font-size="11" font-weight="700" text-anchor="end">${last.toFixed(0)}%</text>
+    </svg>
+    <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--color-text-muted);margin-top:4px">
+      <span>${sorted.length} paris · break-even ~52.6% à cote 1.90</span>
+      <span style="color:${lastColor};font-weight:600">${last >= 55 ? '✓ Profitable' : last >= 50 ? '~ Marge limite' : '✗ Sous break-even'}</span>
+    </div>
+  `;
+}
+
+// SVG bar chart : distribution edges par bucket avec hit rate par bucket
+function _renderEdgeDistribution(settled) {
+  const buckets = [
+    { label: '0-5%',  min: 0,  max: 5,   color: '#6b7280' },
+    { label: '5-7%',  min: 5,  max: 7,   color: '#3b82f6' },
+    { label: '7-10%', min: 7,  max: 10,  color: '#22c55e' },
+    { label: '10%+',  min: 10, max: 999, color: '#f59e0b' },
+  ];
+  const data = buckets.map(b => {
+    const inB = settled.filter(l => (l.best_edge ?? 0) >= b.min && (l.best_edge ?? 0) < b.max);
+    const hits = inB.filter(l => l.motor_was_right === true).length;
+    return { ...b, n: inB.length, hits, rate: inB.length ? (hits / inB.length) * 100 : null };
+  });
+
+  const W_SVG = 600, H_SVG = 180, P = 32, BAR_GAP = 12;
+  const barW = (W_SVG - 2 * P - BAR_GAP * (buckets.length - 1)) / buckets.length;
+  const Y = (v) => H_SVG - P - (v / 100) * (H_SVG - 2 * P);
+
+  const bars = data.map((d, i) => {
+    const x = P + i * (barW + BAR_GAP);
+    if (d.n === 0) return `<text x="${x + barW / 2}" y="${H_SVG - P + 14}" fill="var(--color-text-muted)" font-size="10" text-anchor="middle">${d.label}</text><text x="${x + barW / 2}" y="${H_SVG / 2}" fill="var(--color-text-muted)" font-size="10" text-anchor="middle">aucun</text>`;
+    const y = Y(d.rate);
+    const h = (H_SVG - P) - y;
+    return `
+      <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="${d.color}" rx="2" opacity="0.85"/>
+      <text x="${(x + barW / 2).toFixed(1)}" y="${(y - 4).toFixed(1)}" fill="${d.color}" font-size="11" font-weight="700" text-anchor="middle">${d.rate.toFixed(0)}%</text>
+      <text x="${(x + barW / 2).toFixed(1)}" y="${H_SVG - P + 14}" fill="var(--color-text-secondary)" font-size="10" text-anchor="middle">${d.label}</text>
+      <text x="${(x + barW / 2).toFixed(1)}" y="${H_SVG - P + 26}" fill="var(--color-text-muted)" font-size="9" text-anchor="middle">n=${d.n}</text>
+    `;
+  }).join('');
+
+  return `
+    <svg viewBox="0 0 ${W_SVG} ${H_SVG}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block" role="img" aria-label="Distribution edges">
+      <!-- 50% reference -->
+      <line x1="${P}" y1="${Y(50).toFixed(1)}" x2="${W_SVG - P}" y2="${Y(50).toFixed(1)}" stroke="var(--color-border-default)" stroke-width="1" stroke-dasharray="3,3"/>
+      <text x="${P - 4}" y="${Y(50).toFixed(1)}" fill="var(--color-text-muted)" font-size="10" text-anchor="end" dominant-baseline="middle">50%</text>
+      ${bars}
+    </svg>
+  `;
 }
 
 // ── ANALYSE APPROFONDIE ───────────────────────────────────────────────────────
