@@ -123,7 +123,7 @@ const QUOTA_KV_KEY        = 'odds_quota_state';
 const TANK01_KV_KEY       = 'tank01_teams_stats';
 const TANK01_INJURIES_KEY = 'tank01_injuries_impact';
 const TANK01_ROSTER_KEY   = 'tank01_roster_injuries_v1';
-const TENNIS_CSV_KEY      = 'tennis_csv_stats_v3';   // v3 v6.83 : couverture CSV étendue 2023-2026
+const TENNIS_CSV_KEY      = 'tennis_csv_stats_v4';   // v4 v6.84 : ajout h2h.matches[] avec scores
 const TENNIS_ODDS_KEY     = 'tennis_odds_cache';
 const TENNIS_API_BASE     = 'https://api.api-tennis.com/tennis';
 const TENNIS_API_KEYMAP   = 'tennis_api_keymap_v1';   // KV cache name → player_key
@@ -6791,14 +6791,18 @@ async function handleTennisStats(url, env, origin) {
     }
     if (players.length === 2 && stats[players[0]] && stats[players[1]]) {
       const h2h = _computeTennisH2H(allRows, players[0], players[1], surface);
-      // v6.82 : stocke surface (compat) + overall toutes surfaces confondues
+      // v6.82 surface+overall · v6.84 ajout liste détaillée matchs (avec scores)
+      // Côté players[1], inverser "winner" du detail (p1 ↔ p2)
+      const flippedMatches = h2h.overall.matches.map(m => ({ ...m, winner: m.winner === 'p1' ? 'p2' : 'p1' }));
       stats[players[0]].h2h = { [players[1]]: {
         p1_wins: h2h.surface.p1_wins, p2_wins: h2h.surface.p2_wins,
         p1_wins_overall: h2h.overall.p1_wins, p2_wins_overall: h2h.overall.p2_wins,
+        matches: h2h.overall.matches,
       } };
       stats[players[1]].h2h = { [players[0]]: {
         p1_wins: h2h.surface.p2_wins, p2_wins: h2h.surface.p1_wins,
         p1_wins_overall: h2h.overall.p2_wins, p2_wins_overall: h2h.overall.p1_wins,
+        matches: flippedMatches,
       } };
     }
 
@@ -7024,16 +7028,23 @@ function _computeTennisH2H(rows, p1, p2, surface) {
   const n1 = _resolveTennisPlayerName(rows, p1) ?? p1;
   const n2 = _resolveTennisPlayerName(rows, p2) ?? p2;
   const isMatch = (r) => (r.winner_name === n1 && r.loser_name === n2) || (r.winner_name === n2 && r.loser_name === n1);
-  // Toutes surfaces confondues
   const allMatches = rows.filter(isMatch);
-  // Surface du tournoi en cours
   const surfMatches = allMatches.filter(r => r.surface === surface);
-  // Bug fix v6.82 : compteur utilise n1/n2 (résolus) au lieu de p1/p2 (input brut)
-  // → les noms normalisés ("C. Ruud" vs "Casper Ruud") sont maintenant comptés
   const count = (arr, name) => arr.filter(r => r.winner_name === name).length;
+  // v6.84 : détail matchs (date desc) pour affichage UI scores/dates/tournoi
+  const detail = (r) => ({
+    date:       r.tourney_date ?? null,
+    tournament: r.tourney_name ?? null,
+    round:      r.round ?? null,
+    surface:    r.surface ?? null,
+    score:      r.score ?? null,
+    winner:     r.winner_name === n1 ? 'p1' : 'p2',
+  });
+  const sortByDateDesc = (a, b) => String(b.date ?? '').localeCompare(String(a.date ?? ''));
+  const matchesDetail = allMatches.map(detail).sort(sortByDateDesc);
   return {
     surface: { p1_wins: count(surfMatches, n1), p2_wins: count(surfMatches, n2) },
-    overall: { p1_wins: count(allMatches,  n1), p2_wins: count(allMatches,  n2) },
+    overall: { p1_wins: count(allMatches,  n1), p2_wins: count(allMatches,  n2), matches: matchesDetail },
   };
 }
 
