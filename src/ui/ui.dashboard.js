@@ -516,6 +516,34 @@ function _legacyDecision(analysis) {
   return 'INSUFFISANT';
 }
 
+// Évaluation 6 critères "pariable tennis" (calib v6.81) — affichage dashboard
+// Critères alignés avec recommandations vrai-argent prudentes :
+// 1) Conf. HIGH/MEDIUM · 2) edge 5-15% · 3) cote ≤3.50
+// 4) ranking_elo_diff VERIFIED/PARTIAL · 5) surface_winrate VERIFIED/PARTIAL
+// 6) ≥5 variables sur 9 avec valeur (couverture suffisante)
+function _evaluateTennisCriteria(analysis) {
+  const best = analysis?.betting_recommendations?.best ?? null;
+  const conf = analysis?.confidence_level ?? null;
+  const vars = analysis?.variables_used ?? {};
+  const edge = best?.edge ?? null;
+  const odds = best?.odds_decimal ?? null;
+
+  const items = [
+    { label: 'Conf.',     ok: conf === 'HIGH' || conf === 'MEDIUM', value: conf ?? '—' },
+    { label: 'Edge 5-15', ok: edge != null && edge >= 5 && edge <= 15, value: edge != null ? `${edge}%` : '—' },
+    { label: 'Cote ≤3.5', ok: odds != null && odds <= 3.50, value: odds != null ? Number(odds).toFixed(2) : '—' },
+    { label: 'Elo ok',    ok: ['VERIFIED','PARTIAL'].includes(vars?.ranking_elo_diff?.quality), value: vars?.ranking_elo_diff?.quality ?? 'MISSING' },
+    { label: 'Surface',   ok: ['VERIFIED','PARTIAL'].includes(vars?.surface_winrate_diff?.quality), value: vars?.surface_winrate_diff?.quality ?? 'MISSING' },
+  ];
+
+  const definedCount = Object.values(vars).filter(v => v?.value != null && v?.quality !== 'MISSING').length;
+  items.push({ label: '≥5 vars', ok: definedCount >= 5, value: `${definedCount}/9` });
+
+  const okCount = items.filter(i => i.ok).length;
+  const verdict = okCount === 6 ? 'BET' : okCount >= 4 ? 'CAUTION' : 'SKIP';
+  return { items, okCount, verdict };
+}
+
 function _renderShell(selectedDate, selectedSport) {
   const displayDate = new Date(selectedDate + 'T12:00:00').toLocaleDateString('fr-FR', {
     weekday: 'long', day: 'numeric', month: 'long',
@@ -741,6 +769,7 @@ function _createMatchCard(match) {
     <div id="best-rec-${match.id}" style="display:none"></div>
     <div id="recs-${match.id}" class="match-card__recs" style="display:none"></div>
     <div id="bet-indicator-${match.id}" style="margin-top:6px"></div>
+    ${isTennis ? `<div id="tennis-criteria-${match.id}" class="mc-tennis-crit" style="display:none"></div>` : ''}
   `;
 
   card.style.cursor = 'pointer';
@@ -938,6 +967,30 @@ function _updateMatchCard(list, matchId, analysis, match, ptState) {
       el.className = 'match-card__rejection text-muted';
       el.textContent = `↳ ${analysis.rejection_reason ? _formatRejection(analysis.rejection_reason) : analysis.insuffisant_reason}`;
       bestRecEl?.after(el);
+    }
+  }
+
+  // Strip 6 critères pariable (tennis uniquement, calib v6.81)
+  if (match?.sport === 'TENNIS') {
+    const critEl = card.querySelector(`#tennis-criteria-${matchId}`);
+    if (critEl && !critEl.dataset.rendered) {
+      const { items, okCount, verdict } = _evaluateTennisCriteria(analysis);
+      const verdictColor = verdict === 'BET' ? '#22c55e' : verdict === 'CAUTION' ? '#f59e0b' : '#ef4444';
+      const verdictBg    = verdict === 'BET' ? 'rgba(34,197,94,0.10)' : verdict === 'CAUTION' ? 'rgba(245,158,11,0.10)' : 'rgba(239,68,68,0.08)';
+      const verdictLabel = verdict === 'BET' ? '✓ Pariable' : verdict === 'CAUTION' ? '⚠ Prudence' : '✗ Skip';
+      const dotsHtml = items.map(it => {
+        const c = it.ok ? '#22c55e' : '#ef4444';
+        return `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${c}" title="${it.label}: ${it.value}"></span>`;
+      }).join('');
+      const tooltip = items.map(it => `${it.ok ? '✓' : '✗'} ${it.label} (${it.value})`).join(' · ');
+      critEl.style.cssText = `display:flex;align-items:center;gap:8px;margin-top:6px;padding:5px 8px;border-radius:6px;background:${verdictBg};color:${verdictColor};font-size:11px;font-weight:600`;
+      critEl.title = tooltip;
+      critEl.innerHTML = `
+        <span style="display:flex;gap:3px;align-items:center">${dotsHtml}</span>
+        <span style="font-weight:700">${okCount}/6</span>
+        <span>${verdictLabel}</span>
+      `;
+      critEl.dataset.rendered = '1';
     }
   }
 }

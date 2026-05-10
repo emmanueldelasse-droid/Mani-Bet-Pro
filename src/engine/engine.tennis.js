@@ -23,8 +23,8 @@ import { Logger }         from '../utils/utils.logger.js';
 
 const MIN_SURFACE_MATCHES = 8;   // minimum matchs sur la surface sur 12 mois
 const EMA_N               = 10;  // nombre de matchs pour le calcul EMA
-const MIN_ELO_MATCHES     = 20;  // minimum matchs pour fiabilité Elo overall
-const MIN_ELO_SURFACE     = 10;  // minimum matchs surface pour Elo surface fiable
+const MIN_ELO_MATCHES     = 15;  // calib v6.81 : 20→15 · couverture Elo +30 logs estimés
+const MIN_ELO_SURFACE     = 8;   // calib v6.81 : 10→8 · ranking_elo_diff manquait 73% paris
 
 // ── MOTEUR PRINCIPAL ──────────────────────────────────────────────────────
 
