@@ -1,0 +1,17 @@
+# Cloudflare Workers Assets headers · v6.85
+# Évite cache poisoning frontend/worker · index.html toujours frais ·
+# JS/CSS revalidés à chaque chargement (304 si inchangé, fast).
+
+/index.html
+  Cache-Control: no-cache, must-revalidate
+  X-Content-Type-Options: nosniff
+
+/*.js
+  Cache-Control: no-cache, must-revalidate
+
+/*.css
+  Cache-Control: no-cache, must-revalidate
+
+# Assets statiques (icons, fonts) peuvent rester cachés longtemps
+/assets/icons/*
+  Cache-Control: public, max-age=86400
