@@ -10,11 +10,9 @@ néant
 3 sports même vocabulaire confiance : `Conf. HIGH/MEDIUM/LOW/INCONCLUSIVE` · jamais `Data quality` (MLB) · file:`ui.bot.js:264`
 
 ## TODO
-- [x] P1 v6.79 `recent_form_ema` 0.24→0.15 + `net_rating_diff` 0.06→0.16 (PR #75 #91)
-- [x] P1 label confiance harmonisé 3 sports `Conf.` + MLB `confidence_level` alias `data_quality`
+- [ ] P1 surveiller hit rate MLB 100 prochains paris · rollback `team_era_adv` si régression défensive (PR #124 calib v6.81)
 - [ ] P2 gate `confidence=INCONCLUSIVE` si `data_quality<0.55` (worker.js:5185)
 - [ ] P2 `/bot/calibration/analyze?sport=tennis` après 30+ logs settlés
-- [ ] P3 relancer Alon après 50+ logs post-v6.78
 
 ## État
 Worker `manibetpro.emmanueldelasse.workers.dev` · Front GH Pages · KV `PAPER_TRADING` `17eb7ddc41a949dd99bd840142832cfd`
