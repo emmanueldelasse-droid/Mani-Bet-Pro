@@ -123,7 +123,7 @@ const QUOTA_KV_KEY        = 'odds_quota_state';
 const TANK01_KV_KEY       = 'tank01_teams_stats';
 const TANK01_INJURIES_KEY = 'tank01_injuries_impact';
 const TANK01_ROSTER_KEY   = 'tank01_roster_injuries_v1';
-const TENNIS_CSV_KEY      = 'tennis_csv_stats';
+const TENNIS_CSV_KEY      = 'tennis_csv_stats_v2';   // v2 v6.82 : ajout h2h.p1/p2_wins_overall
 const TENNIS_ODDS_KEY     = 'tennis_odds_cache';
 const TENNIS_API_BASE     = 'https://api.api-tennis.com/tennis';
 const TENNIS_API_KEYMAP   = 'tennis_api_keymap_v1';   // KV cache name → player_key
@@ -6780,8 +6780,15 @@ async function handleTennisStats(url, env, origin) {
     }
     if (players.length === 2 && stats[players[0]] && stats[players[1]]) {
       const h2h = _computeTennisH2H(allRows, players[0], players[1], surface);
-      stats[players[0]].h2h = { [players[1]]: { p1_wins: h2h.p1_wins, p2_wins: h2h.p2_wins } };
-      stats[players[1]].h2h = { [players[0]]: { p1_wins: h2h.p2_wins, p2_wins: h2h.p1_wins } };
+      // v6.82 : stocke surface (compat) + overall toutes surfaces confondues
+      stats[players[0]].h2h = { [players[1]]: {
+        p1_wins: h2h.surface.p1_wins, p2_wins: h2h.surface.p2_wins,
+        p1_wins_overall: h2h.overall.p1_wins, p2_wins_overall: h2h.overall.p2_wins,
+      } };
+      stats[players[1]].h2h = { [players[0]]: {
+        p1_wins: h2h.surface.p2_wins, p2_wins: h2h.surface.p1_wins,
+        p1_wins_overall: h2h.overall.p2_wins, p2_wins_overall: h2h.overall.p1_wins,
+      } };
     }
 
     // Ne pas cacher (ou cacher court) si toutes les résolutions ont échoué.
@@ -7005,11 +7012,18 @@ function _computeTennisPlayerStats(rows, playerName, surface, today) {
 function _computeTennisH2H(rows, p1, p2, surface) {
   const n1 = _resolveTennisPlayerName(rows, p1) ?? p1;
   const n2 = _resolveTennisPlayerName(rows, p2) ?? p2;
-  const h2h = rows.filter(r =>
-    ((r.winner_name === n1 && r.loser_name === n2) || (r.winner_name === n2 && r.loser_name === n1)) &&
-    r.surface === surface
-  );
-  return { p1_wins: h2h.filter(r => r.winner_name === p1).length, p2_wins: h2h.filter(r => r.winner_name === p2).length };
+  const isMatch = (r) => (r.winner_name === n1 && r.loser_name === n2) || (r.winner_name === n2 && r.loser_name === n1);
+  // Toutes surfaces confondues
+  const allMatches = rows.filter(isMatch);
+  // Surface du tournoi en cours
+  const surfMatches = allMatches.filter(r => r.surface === surface);
+  // Bug fix v6.82 : compteur utilise n1/n2 (résolus) au lieu de p1/p2 (input brut)
+  // → les noms normalisés ("C. Ruud" vs "Casper Ruud") sont maintenant comptés
+  const count = (arr, name) => arr.filter(r => r.winner_name === name).length;
+  return {
+    surface: { p1_wins: count(surfMatches, n1), p2_wins: count(surfMatches, n2) },
+    overall: { p1_wins: count(allMatches,  n1), p2_wins: count(allMatches,  n2) },
+  };
 }
 
 // Elo overall + par surface · K=32 · init 1500 · walk chronologique · surfaces: Hard/Clay/Grass
@@ -8805,14 +8819,18 @@ function _botTennisExtractVariables(p1, p2, surface, oddsCtx = null) {
     out.recent_form_ema = { value: null, source: 'sackmann', quality: 'MISSING' };
   }
 
-  // 4) h2h_surface
+  // 4) h2h_surface — surface du tournoi en priorité · fallback toutes surfaces (v6.82)
   const h2h = p1?.h2h?.[p2?.name];
   if (h2h && (h2h.p1_wins + h2h.p2_wins) > 0) {
     const total = h2h.p1_wins + h2h.p2_wins;
     const wr = h2h.p1_wins / total;
-    out.h2h_surface = { value: Math.round(((wr - 0.5) * 2) * 100) / 100, total, source: 'sackmann', quality: total >= 3 ? 'VERIFIED' : 'LOW_SAMPLE' };
+    out.h2h_surface = { value: Math.round(((wr - 0.5) * 2) * 100) / 100, total, source: 'sackmann', scope: 'surface', quality: total >= 3 ? 'VERIFIED' : 'LOW_SAMPLE' };
+  } else if (h2h && ((h2h.p1_wins_overall ?? 0) + (h2h.p2_wins_overall ?? 0)) > 0) {
+    const total = (h2h.p1_wins_overall ?? 0) + (h2h.p2_wins_overall ?? 0);
+    const wr = (h2h.p1_wins_overall ?? 0) / total;
+    out.h2h_surface = { value: Math.round(((wr - 0.5) * 2) * 100) / 100, total, source: 'sackmann', scope: 'overall', quality: 'PARTIAL' };
   } else {
-    out.h2h_surface = { value: 0, source: 'sackmann', quality: 'LOW_SAMPLE' };
+    out.h2h_surface = { value: 0, source: 'sackmann', scope: 'none', quality: 'LOW_SAMPLE' };
   }
 
   // 5) service_dominance — 1st won % + (aces - df) / svpt
