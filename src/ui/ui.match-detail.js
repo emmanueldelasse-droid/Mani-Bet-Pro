@@ -43,10 +43,22 @@ import {
 
 export async function render(container, storeInstance) {
   const matchId = storeInstance.get('activeMatchId');
-  if (!matchId) { renderNoMatch(container); return { destroy() {} }; }
+  if (!matchId) { renderNoMatch(container, storeInstance); return { destroy() {} }; }
 
-  const match = storeInstance.get('matches')?.[matchId];
-  if (!match) { renderNoMatch(container); return { destroy() {} }; }
+  let match = storeInstance.get('matches')?.[matchId];
+  // v6.89 : fallback robuste · fetch worker si match absent du store
+  // (ex: deep-link, cache vidé, navigation cross-sport)
+  if (!match) {
+    try {
+      match = await _fetchMatchById(matchId, storeInstance);
+      if (match) {
+        storeInstance.set({ matches: { ...(storeInstance.get('matches') ?? {}), [matchId]: match } });
+      }
+    } catch (err) {
+      console.warn('[match-detail] fetch fallback failed:', err.message);
+    }
+  }
+  if (!match) { renderNoMatch(container, storeInstance); return { destroy() {} }; }
 
   const analyses           = storeInstance.get('analyses') ?? {};
   const preferredAnalysisId = storeInstance.get('activeAnalysisId');
@@ -1868,13 +1880,44 @@ function _showBetConfirmation(sideLabel, oddsStr, stake) {
 
 // ── NO MATCH ──────────────────────────────────────────────────────────────────
 
-function renderNoMatch(container) {
+function renderNoMatch(container, storeInstance) {
   container.innerHTML = `
     <div class="view-placeholder">
       <div class="view-placeholder__icon">◪</div>
       <div class="view-placeholder__title">Aucun match sélectionné</div>
       <div class="view-placeholder__sub">Reviens à un sport et sélectionne un match.</div>
-      <button class="btn btn--ghost" id="back-from-empty">← NBA</button>
+      <button class="btn btn--ghost" id="back-nba">🏀 NBA</button>
+      <button class="btn btn--ghost" id="back-mlb">⚾ MLB</button>
+      <button class="btn btn--ghost" id="back-tennis">🎾 Tennis</button>
     </div>`;
-  container.querySelector('#back-from-empty')?.addEventListener('click', () => router.navigate('nba'));
+  // v6.89 : 3 boutons retour vers chaque sport · smart selon previousRoute
+  const prev = storeInstance?.get('previousRoute');
+  const target = ['nba','mlb','tennis'].includes(prev) ? prev : 'nba';
+  container.querySelector(`#back-${target}`)?.classList.add('btn--primary');
+  container.querySelector('#back-nba')?.addEventListener('click', () => router.navigate('nba'));
+  container.querySelector('#back-mlb')?.addEventListener('click', () => router.navigate('mlb'));
+  container.querySelector('#back-tennis')?.addEventListener('click', () => router.navigate('tennis'));
+}
+
+// v6.89 : fallback fetch match si absent du store (deep-link, cache cleared, etc)
+async function _fetchMatchById(matchId, storeInstance) {
+  // Stratégie : essayer chaque endpoint sport jusqu'à trouver le match
+  const sport = String(storeInstance?.get('selectedSport') ?? 'NBA').toLowerCase();
+  const endpoints = sport === 'tennis' ? ['tennis']
+                  : sport === 'mlb'    ? ['mlb', 'tennis']
+                                       : ['nba', 'mlb', 'tennis'];
+  for (const s of endpoints) {
+    try {
+      const route = s === 'tennis' ? `${WORKER_URL}/tennis/odds` :
+                    s === 'mlb'    ? `${WORKER_URL}/mlb/odds`    :
+                                     `${WORKER_URL}/nba/odds`;
+      const resp = await fetch(route, { headers: { Accept: 'application/json' } });
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      const matches = data?.matches ?? data?.data ?? data ?? [];
+      const found = (Array.isArray(matches) ? matches : Object.values(matches)).find(m => m?.id === matchId);
+      if (found) return { ...found, sport: s.toUpperCase() };
+    } catch (err) { /* continue */ }
+  }
+  return null;
 }
