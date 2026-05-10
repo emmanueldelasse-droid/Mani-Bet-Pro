@@ -806,6 +806,8 @@ function _updateMatchCard(list, matchId, analysis, match, ptState) {
   }
 
   card.dataset.analysisId = analysis.analysis_id ?? '';
+  // v6.87 : data-decision pour hiérarchie visuelle CSS (emphasis ANALYSER · dim INSUFFISANT)
+  card.dataset.decision = decision;
 
   const borderColors = { ANALYSER: 'var(--color-success)', EXPLORER: 'var(--color-warning)' };
   const borderColor = borderColors[decision];
