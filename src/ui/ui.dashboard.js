@@ -620,8 +620,17 @@ function _renderShell(selectedDate, selectedSport) {
 function _renderMatchCards(list, matches) {
   list.innerHTML = '';
   if (!matches.length) { _renderEmptyState(list); return; }
+  // Tri : matchs à venir/en cours par datetime asc, terminés à la fin
+  const sorted = [...matches].sort((a, b) => {
+    const aFinal = a.status === 'STATUS_FINAL' || a.status === 'STATUS_FINAL_OT';
+    const bFinal = b.status === 'STATUS_FINAL' || b.status === 'STATUS_FINAL_OT';
+    if (aFinal !== bFinal) return aFinal ? 1 : -1;
+    const at = a.datetime ? new Date(a.datetime).getTime() : Infinity;
+    const bt = b.datetime ? new Date(b.datetime).getTime() : Infinity;
+    return at - bt;
+  });
   const frag = document.createDocumentFragment();
-  matches.forEach(match => frag.appendChild(_createMatchCard(match)));
+  sorted.forEach(match => frag.appendChild(_createMatchCard(match)));
   list.appendChild(frag);
 }
 

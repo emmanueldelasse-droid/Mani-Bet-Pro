@@ -215,9 +215,8 @@ export class EngineTennis {
   // ── SIGNAL 4 : H2H sur même surface ──────────────────────────────────
 
   static _h2hSurface(p1, p2, surface) {
-    // Worker stocke h2h[opponent_name] = { p1_wins, p2_wins } sans dim surface.
-    // On cherche l'entrée pour le nom du joueur 2 (p2.name peut être absent
-    // selon la source · fallback : prendre la première clé du h2h de p1).
+    // v6.82 : worker stocke surface (p1_wins/p2_wins) + overall (p1_wins_overall/p2_wins_overall)
+    // Priorité : surface du tournoi · fallback : toutes surfaces (quality PARTIAL)
     const h2hMap = p1?.h2h ?? null;
     const target = p2?.name && h2hMap?.[p2.name]
       ? h2hMap[p2.name]
@@ -226,26 +225,34 @@ export class EngineTennis {
     if (!target) {
       return { value: null, source: 'sackmann_csv', quality: 'MISSING' };
     }
-    const h2h = target;
 
-    const total = (h2h.p1_wins ?? 0) + (h2h.p2_wins ?? 0);
+    const surfTotal = (target.p1_wins ?? 0) + (target.p2_wins ?? 0);
+    const overTotal = (target.p1_wins_overall ?? 0) + (target.p2_wins_overall ?? 0);
 
-    if (total === 0) {
-      return { value: 0, p1_wins: 0, p2_wins: 0, source: 'sackmann_csv', quality: 'LOW_SAMPLE' };
+    let used, scope, quality;
+    if (surfTotal > 0) {
+      used = { p1_wins: target.p1_wins, p2_wins: target.p2_wins, total: surfTotal };
+      scope = 'surface';
+      quality = surfTotal >= 3 ? 'VERIFIED' : 'LOW_SAMPLE';
+    } else if (overTotal > 0) {
+      used = { p1_wins: target.p1_wins_overall, p2_wins: target.p2_wins_overall, total: overTotal };
+      scope = 'overall';
+      quality = 'PARTIAL';
+    } else {
+      return { value: 0, p1_wins: 0, p2_wins: 0, total: 0, scope: 'none', source: 'sackmann_csv', quality: 'LOW_SAMPLE' };
     }
 
-    // Win rate p1 dans les H2H sur cette surface — centré sur 0.5
-    const p1WinRate = h2h.p1_wins / total;
-    const diff      = p1WinRate - 0.5;   // entre -0.5 et +0.5
-    const normalized = diff * 2;          // entre -1 et +1
+    const p1WinRate  = used.p1_wins / used.total;
+    const normalized = (p1WinRate - 0.5) * 2;
 
     return {
       value:   Math.round(normalized * 100) / 100,
-      p1_wins: h2h.p1_wins,
-      p2_wins: h2h.p2_wins,
-      total,
+      p1_wins: used.p1_wins,
+      p2_wins: used.p2_wins,
+      total:   used.total,
+      scope,
       source:  'sackmann_csv',
-      quality: total >= 3 ? 'VERIFIED' : 'LOW_SAMPLE',
+      quality,
     };
   }
 
