@@ -20,34 +20,20 @@ import { Logger } from '../utils/utils.logger.js';
 // Chaque vue est un module qui exporte une fonction render(container, store).
 
 const ROUTES = {
-  dashboard: {
-    label: 'Dashboard',
-    loader: () => import('./ui.dashboard.js'),
-  },
-  match: {
-    label: 'Analyse Match',
-    loader: () => import('./ui.match-detail.js'),
-  },
-  history: {
-    label: 'Historique',
-    loader: () => import('./ui.history.js'),
-  },
-  bot: {
-    label: 'Bot',
-    loader: () => import('./ui.bot.js'),
-  },
-  lab: {
-    label: 'Laboratoire',
-    loader: () => import('./ui.lab.js'),
-  },
-  settings: {
-    label: 'Configuration',
-    loader: () => import('./ui.settings.js'),
-  },
+  nba:    { label: 'NBA',    loader: () => import('./ui.dashboard.js'), sport: 'NBA' },
+  mlb:    { label: 'MLB',    loader: () => import('./ui.dashboard.js'), sport: 'MLB' },
+  tennis: { label: 'Tennis', loader: () => import('./ui.dashboard.js'), sport: 'TENNIS' },
+  match:    { label: 'Analyse Match', loader: () => import('./ui.match-detail.js') },
+  history:  { label: 'Historique',    loader: () => import('./ui.history.js') },
+  bot:      { label: 'Bot',           loader: () => import('./ui.bot.js') },
+  settings: { label: 'Configuration', loader: () => import('./ui.settings.js') },
+  // Routes legacy (deep-links existants)
+  dashboard: { label: 'NBA', loader: () => import('./ui.dashboard.js'), sport: 'NBA', legacy: true },
+  lab:       { label: 'Laboratoire', loader: () => import('./ui.lab.js'), legacy: true },
 };
 
 // Routes accessibles depuis la nav bar (ordre affiché)
-const NAV_ROUTES = ['dashboard', 'history', 'bot', 'lab', 'settings'];
+const NAV_ROUTES = ['nba', 'mlb', 'tennis', 'history', 'bot', 'settings'];
 
 class Router {
 
@@ -57,7 +43,7 @@ class Router {
     this._currentView   = null;
     this._store         = null;
     this._viewCache     = {};
-    this._CACHED_ROUTES = new Set(['dashboard', 'history']);
+    this._CACHED_ROUTES = new Set(['nba', 'mlb', 'tennis', 'history']);
   }
 
   /**
@@ -83,10 +69,12 @@ class Router {
       this._updateNavActive(route);
     });
 
-    // Route initiale — toujours dashboard au démarrage
-    this.navigate('dashboard', {}, { replace: true });
+    // Route initiale : hash existant si valide nav-route, sinon NBA par défaut
+    const hashRoute = this._getRouteFromHash();
+    const initial   = (hashRoute && NAV_ROUTES.includes(hashRoute)) ? hashRoute : 'nba';
+    this.navigate(initial, {}, { replace: true });
 
-    Logger.info('ROUTER_INIT', { initialRoute: 'dashboard' });
+    Logger.info('ROUTER_INIT', { initialRoute: initial });
   }
 
   /**
@@ -128,6 +116,15 @@ class Router {
     if (!routeConfig) {
       this._renderNotFound(route);
       return;
+    }
+
+    // Pré-set sport actif pour les routes sport-specific (nba/mlb/tennis)
+    // → la vue dashboard lira selectedSport au moment du rendu
+    if (routeConfig.sport) {
+      this._store.set({
+        selectedSport: routeConfig.sport,
+        'dashboardFilters.selectedSport': routeConfig.sport,
+      });
     }
 
     this._showLoader();
@@ -206,12 +203,9 @@ class Router {
 
   _renderPlaceholder(route, label) {
     const icons = {
-      dashboard: '◉',
-      match:     '▦',
-      history:   '◎',
-      bot:       '⟁',
-      lab:       '⬡',
-      settings:  '⚙',
+      nba: '🏀', mlb: '⚾', tennis: '🎾',
+      dashboard: '◉', match: '▦', history: '◎',
+      bot: '⟁', lab: '⬡', settings: '⚙',
     };
 
     this._container.innerHTML = `
@@ -276,7 +270,7 @@ class Router {
 
   _bindPopState() {
     window.addEventListener('popstate', (e) => {
-      const route = e.state?.route ?? this._getRouteFromHash() ?? 'dashboard';
+      const route = e.state?.route ?? this._getRouteFromHash() ?? 'nba';
       this._store.setRoute(route);
     });
   }
