@@ -123,7 +123,7 @@ const QUOTA_KV_KEY        = 'odds_quota_state';
 const TANK01_KV_KEY       = 'tank01_teams_stats';
 const TANK01_INJURIES_KEY = 'tank01_injuries_impact';
 const TANK01_ROSTER_KEY   = 'tank01_roster_injuries_v1';
-const TENNIS_CSV_KEY      = 'tennis_csv_stats_v2';   // v2 v6.82 : ajout h2h.p1/p2_wins_overall
+const TENNIS_CSV_KEY      = 'tennis_csv_stats_v3';   // v3 v6.83 : couverture CSV étendue 2023-2026
 const TENNIS_ODDS_KEY     = 'tennis_odds_cache';
 const TENNIS_API_BASE     = 'https://api.api-tennis.com/tennis';
 const TENNIS_API_KEYMAP   = 'tennis_api_keymap_v1';   // KV cache name → player_key
@@ -6683,18 +6683,26 @@ async function handleTennisStats(url, env, origin) {
     // Sackmann : repo tennis_atp (fichiers atp_matches_YYYY.csv) · tennis_wta (fichiers wta_matches_YYYY.csv)
     const repoSlug   = tour === 'wta' ? 'tennis_wta'  : 'tennis_atp';
     const fileSlug   = tour === 'wta' ? 'wta_matches' : 'atp_matches';
+    // v6.83 : couverture étendue 2023+2024+2025 complet+2026 pour H2H complet.
+    // Avant : seulement 2026 + S2 2025 → 60-70% des H2H invisibles.
+    // _computeTennisPlayerStats filtre déjà recent_form/surface_winrate sur 12 mois,
+    // donc charger plus de rows ne pollue pas les stats récentes — seul l'Elo et le
+    // H2H bénéficient de la profondeur historique.
     const CSV_2026 = `https://raw.githubusercontent.com/JeffSackmann/${repoSlug}/master/${fileSlug}_2026.csv`;
     const CSV_2025 = `https://raw.githubusercontent.com/JeffSackmann/${repoSlug}/master/${fileSlug}_2025.csv`;
-    const [r2026, r2025] = await Promise.allSettled([
+    const CSV_2024 = `https://raw.githubusercontent.com/JeffSackmann/${repoSlug}/master/${fileSlug}_2024.csv`;
+    const CSV_2023 = `https://raw.githubusercontent.com/JeffSackmann/${repoSlug}/master/${fileSlug}_2023.csv`;
+    const [r2026, r2025, r2024, r2023] = await Promise.allSettled([
       fetchTimeout(CSV_2026, {}, 15000),
       fetchTimeout(CSV_2025, {}, 15000),
+      fetchTimeout(CSV_2024, {}, 15000),
+      fetchTimeout(CSV_2023, {}, 15000),
     ]);
     let allRows = [];
     if (r2026.status === 'fulfilled' && r2026.value.ok) allRows = allRows.concat(_parseTennisCSV(await r2026.value.text()));
-    if (r2025.status === 'fulfilled' && r2025.value.ok) {
-      const rows2025 = _parseTennisCSV(await r2025.value.text()).filter(r => parseInt(r.tourney_date || '0') >= 20250601);
-      allRows = allRows.concat(rows2025);
-    }
+    if (r2025.status === 'fulfilled' && r2025.value.ok) allRows = allRows.concat(_parseTennisCSV(await r2025.value.text()));
+    if (r2024.status === 'fulfilled' && r2024.value.ok) allRows = allRows.concat(_parseTennisCSV(await r2024.value.text()));
+    if (r2023.status === 'fulfilled' && r2023.value.ok) allRows = allRows.concat(_parseTennisCSV(await r2023.value.text()));
 
     // Augmentation api-tennis · matchs des 60 derniers jours (comble retard Sackmann 2-3j)
     let apiTennisAdded = 0;
@@ -6743,16 +6751,19 @@ async function handleTennisStats(url, env, origin) {
       const qualSlug = tour === 'wta' ? 'wta_matches_qual_itf' : 'atp_matches_qual_chall';
       const QUAL_2026 = `https://raw.githubusercontent.com/JeffSackmann/${repoSlug}/master/${qualSlug}_2026.csv`;
       const QUAL_2025 = `https://raw.githubusercontent.com/JeffSackmann/${repoSlug}/master/${qualSlug}_2025.csv`;
-      const [q2026, q2025] = await Promise.allSettled([
+      const QUAL_2024 = `https://raw.githubusercontent.com/JeffSackmann/${repoSlug}/master/${qualSlug}_2024.csv`;
+      const QUAL_2023 = `https://raw.githubusercontent.com/JeffSackmann/${repoSlug}/master/${qualSlug}_2023.csv`;
+      const [q2026, q2025, q2024, q2023] = await Promise.allSettled([
         fetchTimeout(QUAL_2026, {}, 15000),
         fetchTimeout(QUAL_2025, {}, 15000),
+        fetchTimeout(QUAL_2024, {}, 15000),
+        fetchTimeout(QUAL_2023, {}, 15000),
       ]);
       let qualRows = [];
       if (q2026.status === 'fulfilled' && q2026.value.ok) qualRows = qualRows.concat(_parseTennisCSV(await q2026.value.text()));
-      if (q2025.status === 'fulfilled' && q2025.value.ok) {
-        const rows = _parseTennisCSV(await q2025.value.text()).filter(r => parseInt(r.tourney_date || '0') >= 20250601);
-        qualRows = qualRows.concat(rows);
-      }
+      if (q2025.status === 'fulfilled' && q2025.value.ok) qualRows = qualRows.concat(_parseTennisCSV(await q2025.value.text()));
+      if (q2024.status === 'fulfilled' && q2024.value.ok) qualRows = qualRows.concat(_parseTennisCSV(await q2024.value.text()));
+      if (q2023.status === 'fulfilled' && q2023.value.ok) qualRows = qualRows.concat(_parseTennisCSV(await q2023.value.text()));
       if (qualRows.length) {
         const combinedRows = allRows.concat(qualRows);
         const eloQual = _computeTennisEloTable(combinedRows);
