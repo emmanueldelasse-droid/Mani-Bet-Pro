@@ -551,15 +551,23 @@ function _renderShell(selectedDate, selectedSport) {
   const today    = _getTodayDate();
   const tomorrow = _offsetDate(today, 1);
 
+  // v6.91 : Hero header par sport · emoji + "DASHBOARD <SPORT>" · couleurs via --sport-accent CSS
+  const sportMeta = {
+    NBA:    { emoji: '🏀', label: 'NBA' },
+    MLB:    { emoji: '⚾', label: 'MLB' },
+    TENNIS: { emoji: '🎾', label: 'Tennis' },
+  }[selectedSport] ?? { emoji: '◪', label: selectedSport };
+
   return `
     <div class="dashboard" data-sport="${selectedSport}">
-      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
-        <div>
-          <div class="page-header__eyebrow">Mani Bet Pro</div>
-          <div class="page-header__title">Dashboard</div>
-          <div class="page-header__sub">${displayDate}</div>
+      <div class="dashboard-hero">
+        <div class="dashboard-hero__icon">${sportMeta.emoji}</div>
+        <div class="dashboard-hero__text">
+          <div class="dashboard-hero__eyebrow">Dashboard</div>
+          <div class="dashboard-hero__title">${sportMeta.label.toUpperCase()}</div>
+          <div class="dashboard-hero__date">${displayDate}</div>
         </div>
-        <button id="refresh-btn" style="font-size:12px;padding:8px 14px;border-radius:6px;border:1px solid var(--color-border);background:var(--color-bg);color:var(--color-muted);cursor:pointer;margin-top:4px;flex-shrink:0;min-height:36px;-webkit-tap-highlight-color:transparent">⟳ Actualiser</button>
+        <button id="refresh-btn" class="dashboard-hero__refresh" aria-label="Actualiser">⟳</button>
       </div>
 
       <div class="date-selector filter-chips" id="date-selector">
