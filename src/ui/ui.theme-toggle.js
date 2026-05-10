@@ -13,7 +13,9 @@ function applyTheme(theme) {
 }
 
 export function initThemeToggle() {
-  const saved = localStorage.getItem('mbp_theme') ?? 'dark';
+  // v6.86 : si pas de préférence sauvée, respecter prefers-color-scheme système
+  const saved = localStorage.getItem('mbp_theme')
+    ?? (window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   applyTheme(saved);
 
   let btn = document.getElementById('theme-toggle');
