@@ -586,13 +586,11 @@ function _renderShell(selectedDate, selectedSport) {
       </div>
 
       <div class="dashboard__filters">
-        <div class="filter-row">
-          <span class="filter-label">Sport</span>
-          <div class="filter-chips" id="filter-sports">
-            <button class="chip ${selectedSport === 'NBA' ? 'chip--active' : ''}" data-sport="NBA">🏀 NBA</button>
-            <button class="chip ${selectedSport === 'MLB' ? 'chip--active' : ''}" data-sport="MLB">⚾ MLB</button>
-            <button class="chip ${selectedSport === 'TENNIS' ? 'chip--active' : ''}" data-sport="TENNIS">🎾 Tennis</button>
-          </div>
+        <!-- Sport chips supprimées v6.85 · sélection via nav top NBA/MLB/Tennis -->
+        <div class="filter-chips" id="filter-sports" style="display:none">
+          <button class="chip" data-sport="NBA">NBA</button>
+          <button class="chip" data-sport="MLB">MLB</button>
+          <button class="chip" data-sport="TENNIS">TENNIS</button>
         </div>
         <div class="filter-row">
           <span class="filter-label">Décision</span>
