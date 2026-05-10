@@ -1,0 +1,21 @@
+{
+  "name": "Mani Bet Pro",
+  "short_name": "ManiBetPro",
+  "description": "Analyse paris sportifs NBA · MLB · Tennis avec calibration bot Claude",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0a0a0f",
+  "theme_color": "#0a0a0f",
+  "categories": ["sports", "finance"],
+  "lang": "fr",
+  "icons": [
+    {
+      "src": "assets/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

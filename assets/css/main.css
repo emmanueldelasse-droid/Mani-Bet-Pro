@@ -211,6 +211,13 @@ body.theme-light,
 .nav__icon  { font-size: 18px; line-height: 1; }
 .nav__label { font-size: 10px; font-weight: 500; letter-spacing: 0.02em; }
 
+/* iPhone SE / 12 mini · 6 onglets serrés sur 320-380px */
+@media (max-width: 380px) {
+  .nav__item    { padding: var(--space-2) 4px; }
+  .nav__icon    { font-size: 16px; }
+  .nav__label   { font-size: 9px; letter-spacing: 0; }
+}
+
 /* ── CONTENU PRINCIPAL ── */
 #main-view {
   flex: 1;
@@ -884,6 +891,19 @@ body.theme-light .chip--active,
   max-width: 112px;
 }
 
+/* Tennis : noms longs (Auger-Aliassime, Tsitsipas-Sakellaridis) sur 2 lignes */
+.match-card[data-sport="TENNIS"] .mc-team__name,
+.dashboard[data-sport="TENNIS"] .mc-team__name {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  max-width: none;
+  font-size: 11px;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
 .mc-team__record {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -1362,19 +1382,21 @@ body.theme-light .paper-modal__input::placeholder,
   position: fixed;
   bottom: 80px;
   right: 16px;
-  width: 36px;
-  height: 36px;
+  /* iPhone HIG min touch target 44pt */
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   border: 1px solid var(--color-border-default);
   background: var(--color-bg-elevated);
   cursor: pointer;
-  font-size: 16px;
+  font-size: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 100;
   box-shadow: var(--shadow-md);
   transition: transform 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
 }
 
 #theme-toggle:hover { transform: scale(1.1); }

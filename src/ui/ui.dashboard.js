@@ -559,14 +559,14 @@ function _renderShell(selectedDate, selectedSport) {
           <div class="page-header__title">Dashboard</div>
           <div class="page-header__sub">${displayDate}</div>
         </div>
-        <button id="refresh-btn" style="font-size:11px;padding:5px 10px;border-radius:6px;border:1px solid var(--color-border);background:var(--color-bg);color:var(--color-muted);cursor:pointer;margin-top:4px;flex-shrink:0">⟳ Actualiser</button>
+        <button id="refresh-btn" style="font-size:12px;padding:8px 14px;border-radius:6px;border:1px solid var(--color-border);background:var(--color-bg);color:var(--color-muted);cursor:pointer;margin-top:4px;flex-shrink:0;min-height:36px;-webkit-tap-highlight-color:transparent">⟳ Actualiser</button>
       </div>
 
       <div class="date-selector filter-chips" id="date-selector">
         <button class="chip ${selectedDate === today ? 'chip--active' : ''}" data-date="${today}">Aujourd'hui</button>
         <button class="chip ${selectedDate === tomorrow ? 'chip--active' : ''}" data-date="${tomorrow}">Demain</button>
         <input type="date" id="date-picker" value="${selectedDate}"
-          style="background:var(--color-card);border:1px solid var(--color-border);color:var(--color-text);border-radius:20px;padding:4px 12px;font-size:12px;cursor:pointer;"
+          style="background:var(--color-card);border:1px solid var(--color-border);color:var(--color-text);border-radius:20px;padding:6px 12px;font-size:16px;cursor:pointer;min-height:36px;"
         />
       </div>
 
@@ -636,6 +636,7 @@ function _createMatchCard(match) {
   const card           = document.createElement('div');
   card.className       = 'match-card';
   card.dataset.matchId = match.id;
+  if (match.sport) card.dataset.sport = match.sport;
 
   const time          = match.datetime
     ? new Date(match.datetime).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
@@ -990,16 +991,36 @@ function _updateMatchCard(list, matchId, analysis, match, ptState) {
         return `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${c}" title="${it.label}: ${it.value}"></span>`;
       }).join('');
       const tooltip = items.map(it => `${it.ok ? '✓' : '✗'} ${it.label} (${it.value})`).join(' · ');
-      critEl.style.cssText = `display:flex;align-items:center;gap:8px;margin-top:6px;padding:5px 8px;border-radius:6px;background:${verdictBg};color:${verdictColor};font-size:11px;font-weight:600`;
+      critEl.style.cssText = `display:flex;align-items:center;gap:8px;margin-top:6px;padding:8px 10px;border-radius:6px;background:${verdictBg};color:${verdictColor};font-size:11px;font-weight:600;min-height:36px;cursor:pointer;-webkit-tap-highlight-color:transparent`;
       critEl.title = tooltip;
       critEl.innerHTML = `
         <span style="display:flex;gap:3px;align-items:center">${dotsHtml}</span>
         <span style="font-weight:700">${okCount}/6</span>
         <span>${verdictLabel}</span>
+        <span style="margin-left:auto;font-size:10px;opacity:0.6">ⓘ</span>
       `;
+      // Tap mobile : tooltip HTML invisible au touch → afficher détail dans toast
+      critEl.addEventListener('click', (e) => {
+        e.stopPropagation(); // ne pas ouvrir la fiche match
+        _showCriteriaToast(items, okCount, verdict);
+      });
       critEl.dataset.rendered = '1';
     }
   }
+}
+
+// Toast détail des 6 critères pariable (mobile-friendly · tap au lieu de hover)
+function _showCriteriaToast(items, okCount, verdict) {
+  const verdictLabel = verdict === 'BET' ? '✓ Pariable' : verdict === 'CAUTION' ? '⚠ Prudence' : '✗ Skip';
+  const verdictColor = verdict === 'BET' ? '#22c55e' : verdict === 'CAUTION' ? '#f59e0b' : '#ef4444';
+  const list = items.map(it => `<div style="padding:4px 0;display:flex;gap:8px;font-size:13px"><span style="color:${it.ok ? '#22c55e' : '#ef4444'};font-weight:700;min-width:14px">${it.ok ? '✓' : '✗'}</span><span style="flex:1">${it.label}</span><span style="color:var(--color-text-secondary);font-family:monospace">${it.value}</span></div>`).join('');
+  const toast = document.createElement('div');
+  toast.style.cssText = `position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:var(--color-card);border:1px solid ${verdictColor};border-radius:10px;padding:14px 16px;z-index:9999;min-width:260px;max-width:90vw;box-shadow:0 8px 24px rgba(0,0,0,0.3);color:var(--color-text)`;
+  toast.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-weight:700;color:${verdictColor}"><span>${okCount}/6 · ${verdictLabel}</span><span style="cursor:pointer;font-size:18px;line-height:1;color:var(--color-text-secondary)">×</span></div>${list}`;
+  document.body.appendChild(toast);
+  const close = () => toast.remove();
+  toast.querySelector('span:last-child')?.addEventListener('click', close);
+  setTimeout(close, 6000);
 }
 
 function _updateSummary(container, total, conclusive, rejected) {
