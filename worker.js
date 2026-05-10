@@ -8005,97 +8005,84 @@ function _mlbGetMarketOdds(oddsData, homeName, awayName) {
 function _mlbEngineCompute(matchData) {
   const { home_pitcher, away_pitcher, home_season, away_season, venue, market_odds, weather } = matchData;
 
-  // 1. Starting pitcher FIP edge (cœur du moteur MLB · poids 0.20)
+  // 1. Starting pitcher FIP edge · poids 0.20 → 0.10 (calib v6.81 : effect_size 0.04 ne justifie pas le poids #1)
   const hFIP = home_pitcher?.fip ?? home_pitcher?.era ?? 4.20;
   const aFIP = away_pitcher?.fip ?? away_pitcher?.era ?? 4.20;
   const fipDiff    = aFIP - hFIP;
-  const pitcherAdv = Math.tanh(fipDiff / 2) * 0.20;
+  const pitcherAdv = Math.tanh(fipDiff / 2) * 0.10;
 
-  // 2. Rest days starter
+  // 2. Rest days starter — calib v6.81 : neutralisé (effect_size 0 sur 225 logs)
   const hRest  = home_pitcher?.rest_days ?? 4;
   const aRest  = away_pitcher?.rest_days ?? 4;
-  const rScore = (r) => r < 3 ? -0.03 : r < 4 ? -0.01 : r <= 6 ? 0 : -0.01;
-  const restAdv = rScore(hRest) - rScore(aRest);
+  const restAdv = 0;
 
-  // 3. Run differential saison (poids 0.07)
+  // 3. Run differential saison · poids 0.07 → 0.05 (calib v6.81 : effect_size 0.08)
   const hRunDiff   = home_season?.run_diff ?? 0;
   const aRunDiff   = away_season?.run_diff ?? 0;
-  const runDiffAdv = Math.tanh((hRunDiff - aRunDiff) / 50) * 0.07;
+  const runDiffAdv = Math.tanh((hRunDiff - aRunDiff) / 50) * 0.05;
 
-  // 4. Team OPS différentiel (offensive, poids 0.08)
+  // 4. Team OPS différentiel · poids 0.08 → 0.14 (calib v6.81 : effect_size 0.19, 2e meilleur signal)
   let opsAdv = 0;
   if (home_season?.ops != null && away_season?.ops != null) {
-    opsAdv = Math.tanh((home_season.ops - away_season.ops) / 0.050) * 0.08;
+    opsAdv = Math.tanh((home_season.ops - away_season.ops) / 0.050) * 0.14;
   }
 
-  // 5. Team ERA différentiel (défensif global, inclut bullpen · poids 0.07)
+  // 5. Team ERA différentiel — calib v6.81 : supprimé (effect inversé mean_diff -0.161, redondant FIP+bullpen)
   let teamEraAdv = 0;
-  if (home_season?.team_era != null && away_season?.team_era != null) {
-    teamEraAdv = Math.tanh((away_season.team_era - home_season.team_era) / 1.0) * 0.07;
-  }
 
-  // 6. Home/away split (spécifique performance chez soi / en déplacement · poids 0.05)
+  // 6. Home/away split · poids 0.05 → 0.03 (calib v6.81 : effect_size 0.13)
   let splitAdv = 0;
   const hHomeGames = (home_season?.home_wins ?? 0) + (home_season?.home_losses ?? 0);
   const aAwayGames = (away_season?.away_wins ?? 0) + (away_season?.away_losses ?? 0);
   if (hHomeGames >= 20 && aAwayGames >= 20) {
     const hHomePct = home_season.home_wins / hHomeGames;
     const aAwayPct = away_season.away_wins / aAwayGames;
-    splitAdv = Math.tanh((hHomePct - aAwayPct) / 0.200) * 0.05;
+    splitAdv = Math.tanh((hHomePct - aAwayPct) / 0.200) * 0.03;
   }
 
-  // 7. Forme récente — last10 record (poids 0.04)
+  // 7. Forme récente last10 · poids 0.04 → 0.10 (calib v6.81 : effect_size 0.26, MEILLEUR signal MLB)
   let formAdv = 0;
   const hLast10Games = (home_season?.last10_wins ?? 0) + (home_season?.last10_losses ?? 0);
   const aLast10Games = (away_season?.last10_wins ?? 0) + (away_season?.last10_losses ?? 0);
   if (hLast10Games >= 5 && aLast10Games >= 5) {
     const hLast10Pct = home_season.last10_wins / hLast10Games;
     const aLast10Pct = away_season.last10_wins / aLast10Games;
-    formAdv = Math.tanh((hLast10Pct - aLast10Pct) / 0.300) * 0.04;
+    formAdv = Math.tanh((hLast10Pct - aLast10Pct) / 0.300) * 0.10;
   }
 
-  // 8. Bullpen ERA isolé (poids 0.05) · impact fort sur les manches 6-9
+  // 8. Bullpen ERA · calib v6.81 : signe inversé (mean_diff -0.273) + 0.05 → 0.04
+  // Hypothèse : équipes au bullpen ERA récente haute = jouent matchs serrés (sélection)
   let bullpenAdv = 0;
   if (home_season?.bullpen_era != null && away_season?.bullpen_era != null) {
-    bullpenAdv = Math.tanh((away_season.bullpen_era - home_season.bullpen_era) / 1.0) * 0.05;
+    bullpenAdv = Math.tanh((home_season.bullpen_era - away_season.bullpen_era) / 1.0) * 0.04;
   }
 
-  // 9. Park factor × qualité offensive (poids 0.03)
-  // Parc hitters-friendly favorise l'équipe avec meilleure offensive
+  // 9. Park factor — calib v6.81 : neutralisé sur ML (effet inversé mean_diff -0.048)
+  // parkFact toujours utilisé pour O/U via L8152
   let parkAdv = 0;
   const pf = MLB_PARK_FACTORS_W[venue] ?? 100;
-  if (home_season?.ops != null && away_season?.ops != null) {
-    const opsDiffSign = Math.sign(home_season.ops - away_season.ops);
-    parkAdv = Math.tanh((pf - 100) / 10) * 0.03 * opsDiffSign;
-  }
 
-  // 10. BABIP regression (poids 0.02) · indicateur chance/malchance récente
-  // BABIP élevé vs moyenne ligue (~0.295) = probablement chanceux → régression à venir
-  // L'équipe chanceuse récemment est légèrement défavorisée (correction statistique)
+  // 10. BABIP regression · calib v6.81 : signe inversé (mean_diff -0.179)
+  // Hypothèse "régression" fausse à court terme · BABIP haut = équipe en feu, momentum
   let babipAdv = 0;
   if (home_season?.babip != null && away_season?.babip != null) {
     const LEAGUE_BABIP = 0.295;
-    const hDiff = home_season.babip - LEAGUE_BABIP;  // positif = chanceux
+    const hDiff = home_season.babip - LEAGUE_BABIP;
     const aDiff = away_season.babip - LEAGUE_BABIP;
-    // L'équipe avec BABIP plus haut est "chanceuse" → pénalisée (régression)
-    babipAdv = Math.tanh((aDiff - hDiff) / 0.030) * 0.02;
+    babipAdv = Math.tanh((hDiff - aDiff) / 0.030) * 0.02;
   }
 
-  // 11. Météo (poids 0.04) · vent vers l'extérieur + chaleur → +HR
-  // Favorise l'équipe avec meilleure offensive (plus de HR = plus de runs pour elle)
+  // 11. Météo · poids 0.04 → 0.02 (calib v6.81 : effect_size 0.12)
   let weatherAdv = 0;
   if (weather && !weather.indoor && !weather.error && weather.wind_speed_mps != null) {
-    // Vent > 5 m/s affecte le jeu · modèle simplifié : vent fort → plus de variance
-    // Chaleur (>25°C) augmente le scoring (balle vole mieux)
     let score = 0;
     if (weather.wind_speed_mps > 5)  score += 0.5;
     if (weather.wind_speed_mps > 8)  score += 0.3;
     if (weather.temp_celsius   > 25) score += 0.4;
     if (weather.temp_celsius   < 10) score -= 0.3;
-    // Favorise meilleure offensive si conditions favorables au scoring
     if (home_season?.ops != null && away_season?.ops != null && score !== 0) {
       const opsDiffSign = Math.sign(home_season.ops - away_season.ops);
-      weatherAdv = Math.tanh(score) * 0.04 * opsDiffSign;
+      weatherAdv = Math.tanh(score) * 0.02 * opsDiffSign;
     }
   }
 
