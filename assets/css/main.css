@@ -1159,19 +1159,33 @@ body.theme-light .chip--active,
   margin-top: var(--space-3);
 }
 
-.match-detail__team     { flex: 1; display: flex; flex-direction: column; gap: var(--space-1); text-align: left; }
+.match-detail__team     { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); text-align: left; }
 .match-detail__team--away { text-align: right; align-items: flex-end; }
 
 .match-detail__team-abbr {
   font-family: var(--font-display);
-  font-size: 42px;
-  font-weight: 400;
+  /* v6.90 : font-size responsive iPhone · clamp scale viewport · évite débordement */
+  /* iPhone SE 320px → 19px · 12 mini 375px → 22.5px · Plus 414px → 24.8px · tablet+ 42px capped */
+  font-size: clamp(18px, 6vw, 42px);
+  font-weight: 600;
   color: var(--color-text-primary);
-  letter-spacing: 0.02em;
-  line-height: 1;
+  letter-spacing: 0.01em;
+  line-height: 1.05;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.match-detail__team-name { font-size: 14px; color: var(--color-text-secondary); font-weight: 500; }
+.match-detail__team-name {
+  font-size: clamp(11px, 3vw, 14px);
+  color: var(--color-text-secondary);
+  font-weight: 500;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .match-detail__team-role { font-size: 11px; letter-spacing: 0.04em; }
 
 .match-detail__separator { display: flex; align-items: center; justify-content: center; width: 40px; }
