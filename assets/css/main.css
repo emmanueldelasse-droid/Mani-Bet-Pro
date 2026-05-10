@@ -768,6 +768,100 @@ body.theme-light .toast,
 
 .dashboard { display: flex; flex-direction: column; gap: var(--space-5); }
 
+/* v6.91 : Thème par sport · variable --sport-accent propagée dans tout le dashboard */
+.dashboard[data-sport="NBA"]    { --sport-accent: #f97316; --sport-accent-soft: rgba(249,115,22,0.12); }
+.dashboard[data-sport="MLB"]    { --sport-accent: #dc2626; --sport-accent-soft: rgba(220,38,38,0.10); }
+.dashboard[data-sport="TENNIS"] { --sport-accent: #84cc16; --sport-accent-soft: rgba(132,204,22,0.12); }
+
+/* Date chip active = couleur sport */
+.dashboard .date-selector .chip--active {
+  background: var(--sport-accent, var(--color-signal)) !important;
+  color: #0a0a0f !important;
+  border-color: var(--sport-accent, var(--color-signal)) !important;
+  font-weight: 700;
+}
+
+/* Summary card "Matchs" (total) : top accent line couleur sport */
+.dashboard .summary-card {
+  position: relative;
+  overflow: hidden;
+}
+.dashboard .summary-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--sport-accent, var(--color-signal));
+  opacity: 0.45;
+}
+.dashboard .summary-card--muted::before { opacity: 0.15; }
+
+/* Hero header dashboard · v6.91 */
+.dashboard-hero {
+  background: linear-gradient(135deg, var(--sport-accent-soft, rgba(59,130,246,0.10)) 0%, transparent 60%);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  position: relative;
+  overflow: hidden;
+}
+.dashboard-hero::after {
+  /* Bande accent en bas pour signaler le sport */
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 3px;
+  background: var(--sport-accent, var(--color-signal));
+  opacity: 0.6;
+}
+.dashboard-hero__icon {
+  font-size: clamp(52px, 16vw, 80px);
+  line-height: 1;
+  flex-shrink: 0;
+  filter: drop-shadow(0 4px 12px var(--sport-accent-soft, rgba(0,0,0,0.2)));
+}
+.dashboard-hero__text { flex: 1; min-width: 0; }
+.dashboard-hero__eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: 2px;
+}
+.dashboard-hero__title {
+  font-family: var(--font-display);
+  font-size: clamp(28px, 9vw, 48px);
+  font-weight: 800;
+  color: var(--sport-accent, var(--color-signal));
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+.dashboard-hero__date {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-top: 6px;
+}
+.dashboard-hero__refresh {
+  font-size: 18px;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  align-self: flex-start;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform var(--transition-fast), color var(--transition-fast);
+}
+.dashboard-hero__refresh:hover { color: var(--sport-accent, var(--color-signal)); transform: rotate(180deg); }
+
+
 .dashboard__summary {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
