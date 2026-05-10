@@ -11,6 +11,7 @@ néant
 
 ## TODO
 - [ ] P1 surveiller hit rate MLB+tennis 50 paris post-v6.81 (PR #123 #124) · revert isolé si baisse
+- [ ] P2 NBA recheck calib à 80+ logs (actuel 53 hit 67.9% v6.79 valide) · `travel_load` inversé n=22 ignoré
 - [ ] P2 gate `confidence=INCONCLUSIVE` si `data_quality<0.55` (worker.js:5185)
 
 ## État
