@@ -335,8 +335,9 @@ export class EngineTennis {
     }
     const sets1 = l1.sets_played ?? 0;
     const sets2 = l2.sets_played ?? 0;
-    // Diff inversé : p1 a joué MOINS de sets → signal positif (frais)
-    const diff = sets2 - sets1;
+    // Calib v6.81 : signe inversé · plus de sets joués = momentum tournoi
+    // (effect_size 0.26 mean_diff -0.062 sur 142 logs settlés)
+    const diff = sets1 - sets2;
     // Normalisation : ±15 sets sur 14j = saturation
     const normalized = Math.max(-1, Math.min(1, diff / 15));
 
@@ -370,7 +371,9 @@ export class EngineTennis {
     // Steam vers p1 : p1Now < p1Op (cote baisse) ET p2Now > p2Op (cote monte)
     const p1Drop = (p1Op - p1Now) / p1Op;   // > 0 si baisse vers p1
     const p2Drop = (p2Op - p2Now) / p2Op;   // > 0 si baisse vers p2
-    const diff   = p1Drop - p2Drop;          // > 0 → steam vers p1
+    // Calib v6.81 : signe inversé (contrarian) · marché tennis sur-réagit · fader
+    // (effect_size 0.16 mean_diff -0.13 sur 155 logs)
+    const diff   = p2Drop - p1Drop;          // > 0 → contrarian vers p1
     // Mouvement < 3% = bruit · sinon normalisation sur ±15%
     if (Math.abs(diff) < 0.03) {
       return { value: 0, source: 'odds_history', quality: 'VERIFIED' };
@@ -396,9 +399,10 @@ export class EngineTennis {
       return { value: null, source: 'sackmann_csv', quality: 'MISSING' };
     }
 
-    // Différentiel de repos : p1 plus reposé = signal positif
+    // Calib v6.81 : signe inversé · joueur en rythme > joueur sortant de pause
+    // (effect_size 0.29 mean_diff -0.148 sur 149 logs · le PLUS fort signal tennis)
     // Plage typique : 0-14 jours entre matchs en tournoi → ±1 normalisé sur 7j
-    const diff      = days1 - days2;
+    const diff      = days2 - days1;
     const normalized = Math.max(-1, Math.min(1, diff / 7));
 
     const quality   = (p1?.csv_lag_days ?? 0) > 3 || (p2?.csv_lag_days ?? 0) > 3
@@ -496,7 +500,8 @@ export class EngineTennis {
     const edgeP2  = pP2 - implP2;
 
     const EDGE_MIN          = 0.05;  // 5% minimum
-    const EDGE_MAX_ML       = 0.25;  // au-delà, modèle probablement faux (marché sharp en tennis)
+    // Calib v6.81 : 0.25 → 0.18 · bucket edge_10+ sous-performe edge_0-5 sur 215 logs
+    const EDGE_MAX_ML       = 0.18;  // au-delà, modèle probablement faux (marché sharp en tennis)
     const LONGSHOT_THRESHOLD = 5.0;  // cote ≥ 5.0 = outsider lourd
     const MIN_TOTAL_MATCHES = 15;    // sous ce seuil, échantillon trop petit pour parier
     const recs              = [];
