@@ -1653,7 +1653,9 @@ function _checkBetterOddsAlert(bloc7, matchOdds, match, analysis) {
 // ── ÉVÉNEMENTS ────────────────────────────────────────────────────────────────
 
 function bindEvents(container, storeInstance, match, analysis) {
-  container.querySelector('#back-btn')?.addEventListener('click', () => router.navigate('dashboard'));
+  // v6.85 : retour vers l'onglet sport correspondant (au lieu de #dashboard supprimé)
+  const sportRoute = match?.sport === 'TENNIS' ? 'tennis' : match?.sport === 'MLB' ? 'mlb' : 'nba';
+  container.querySelector('#back-btn')?.addEventListener('click', () => router.navigate(sportRoute));
 
   container.querySelector('#share-btn')?.addEventListener('click', () => {
     if (!analysis?.betting_recommendations?.best) return;
@@ -1871,8 +1873,8 @@ function renderNoMatch(container) {
     <div class="view-placeholder">
       <div class="view-placeholder__icon">◪</div>
       <div class="view-placeholder__title">Aucun match sélectionné</div>
-      <div class="view-placeholder__sub">Reviens au dashboard et sélectionne un match.</div>
-      <button class="btn btn--ghost" id="back-from-empty">← Dashboard</button>
+      <div class="view-placeholder__sub">Reviens à un sport et sélectionne un match.</div>
+      <button class="btn btn--ghost" id="back-from-empty">← NBA</button>
     </div>`;
-  container.querySelector('#back-from-empty')?.addEventListener('click', () => router.navigate('dashboard'));
+  container.querySelector('#back-from-empty')?.addEventListener('click', () => router.navigate('nba'));
 }
