@@ -6838,29 +6838,44 @@ async function handleApiTennisDebug(url, env, origin) {
   return jsonResponse(result, 200, origin);
 }
 
-// Test ESPN tennis API (free, sans clé). 3 endpoints typiques :
-// - scoreboard ATP/WTA (matchs récents)
-// - teams (joueurs · ESPN les considère comme teams)
-// - athletes (profil joueur · peut inclure recent results)
+// Test ESPN tennis API (free, sans clé).
+// search_athlete a confirmé que Cirstea = id=1774 dans ESPN. Ce test cherche le bon
+// endpoint pour récupérer l'historique des matchs avec dates précises.
 async function handleEspnTennisTest(url, env, origin) {
-  const player = url.searchParams.get('player') ?? 'sorana cirstea';
+  const athleteId = url.searchParams.get('id') ?? '1774';   // Cirstea par défaut
+  const league = url.searchParams.get('league') ?? 'wta';
   const endpoints = [
-    { label: 'scoreboard_atp', url: 'https://site.api.espn.com/apis/site/v2/sports/tennis/atp/scoreboard' },
-    { label: 'scoreboard_wta', url: 'https://site.api.espn.com/apis/site/v2/sports/tennis/wta/scoreboard' },
-    { label: 'rankings_wta',   url: 'https://site.api.espn.com/apis/site/v2/sports/tennis/wta/rankings' },
-    { label: 'search_athlete', url: `https://site.api.espn.com/apis/common/v3/search?query=${encodeURIComponent(player)}&type=player&sport=tennis&limit=5` },
+    { label: 'profile',            url: `https://site.api.espn.com/apis/site/v3/sports/tennis/${league}/athletes/${athleteId}` },
+    { label: 'eventlog_site',      url: `https://site.api.espn.com/apis/site/v3/sports/tennis/${league}/athletes/${athleteId}/eventlog` },
+    { label: 'eventlog_core_2026', url: `https://sports.core.api.espn.com/v2/sports/tennis/leagues/${league}/seasons/2026/athletes/${athleteId}/eventlog` },
+    { label: 'eventlog_core_basic',url: `https://sports.core.api.espn.com/v2/sports/tennis/leagues/${league}/athletes/${athleteId}/eventlog` },
+    { label: 'statistics',         url: `https://site.api.espn.com/apis/site/v3/sports/tennis/${league}/athletes/${athleteId}/statistics` },
+    { label: 'gamelog',            url: `https://site.web.api.espn.com/apis/common/v3/sports/tennis/${league}/athletes/${athleteId}/gamelog` },
+    { label: 'overview',           url: `https://site.web.api.espn.com/apis/common/v3/sports/tennis/${league}/athletes/${athleteId}/overview` },
+    { label: 'scoreboard_today',   url: `https://site.api.espn.com/apis/site/v2/sports/tennis/${league}/scoreboard?dates=20260511` },
   ];
-  const out = { player_query: player, results: {} };
+  const out = { athlete_id: athleteId, league, results: {} };
   for (const ep of endpoints) {
     try {
       const resp = await fetchTimeout(ep.url, {}, 10000);
       const text = await resp.text();
       let parsed;
       try { parsed = JSON.parse(text); } catch (_) { parsed = null; }
+      const topKeys = parsed && typeof parsed === 'object' ? Object.keys(parsed).slice(0, 12) : null;
+      // Cherche tableaux qui ressemblent à des events/matchs
+      const matchArrSize = (() => {
+        if (!parsed) return null;
+        if (Array.isArray(parsed.events)) return parsed.events.length;
+        if (Array.isArray(parsed.items)) return parsed.items.length;
+        if (parsed.events?.items && Array.isArray(parsed.events.items)) return parsed.events.items.length;
+        if (parsed.eventLog?.events?.items && Array.isArray(parsed.eventLog.events.items)) return parsed.eventLog.events.items.length;
+        return null;
+      })();
       out.results[ep.label] = {
-        http_status:  resp.status,
-        top_keys:     parsed && typeof parsed === 'object' ? Object.keys(parsed).slice(0, 10) : null,
-        raw_excerpt:  text.slice(0, 500),
+        http_status:    resp.status,
+        top_keys:       topKeys,
+        match_count:    matchArrSize,
+        raw_excerpt:    text.slice(0, 600),
       };
     } catch (err) {
       out.results[ep.label] = { error: err.message };
