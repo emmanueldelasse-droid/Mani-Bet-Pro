@@ -369,6 +369,8 @@ export default {
       if (path === '/tennis/stats' && request.method === 'GET')
         return await handleTennisStats(url, env, origin);
 
+      if (path === '/tennis/api-tennis-debug' && request.method === 'GET')
+        return await handleApiTennisDebug(url, env, origin);
       if (path === '/tennis/bot/run' && request.method === 'POST')
         return await handleTennisBotRun(request, env, origin);
       if (path === '/tennis/bot/logs' && request.method === 'GET')
@@ -6735,6 +6737,73 @@ function _mergeTennisRows(sackmannRows, apiRows) {
   }
   const fresh = apiRows.filter(a => !seenApi.has(a));
   return sackmannRows.concat(fresh);
+}
+
+// Debug endpoint : diagnostique chaque étape d'intégration api-tennis
+async function handleApiTennisDebug(url, env, origin) {
+  const playersParam = url.searchParams.get('players') ?? '';
+  const players = playersParam.split(',').map(p => p.trim()).filter(Boolean);
+  const result = {
+    has_api_key: !!env.TENNIS_API_KEY,
+    api_key_length: env.TENNIS_API_KEY ? env.TENNIS_API_KEY.length : 0,
+    players_input: players,
+    keymap_status: null,
+    keymap_size: 0,
+    players_resolved: {},
+    fetches: {},
+  };
+  if (!env.TENNIS_API_KEY) return jsonResponse(result, 200, origin);
+
+  try {
+    const keymap = await _apiTennisGetKeymap(env);
+    result.keymap_status = keymap ? 'ok' : 'null';
+    result.keymap_size = keymap ? Object.keys(keymap).length : 0;
+    if (keymap) {
+      for (const pName of players) {
+        const info = _apiTennisResolveKey(keymap, pName);
+        result.players_resolved[pName] = info ? { key: info.key, tour: info.tour, name: info.name } : null;
+        if (info) {
+          const today = new Date();
+          const start = new Date(today); start.setDate(start.getDate() - 365);
+          const ds = start.toISOString().slice(0, 10);
+          const de = today.toISOString().slice(0, 10);
+          const rawUrl = `${TENNIS_API_BASE}/?method=get_fixtures&player_key=${info.key}&date_start=${ds}&date_stop=${de}&APIkey=${env.TENNIS_API_KEY}`;
+          try {
+            const resp = await fetchTimeout(rawUrl, {}, 12000);
+            const text = await resp.text();
+            let parsed;
+            try { parsed = JSON.parse(text); } catch (_) { parsed = null; }
+            const fixtures = Array.isArray(parsed?.result) ? parsed.result : [];
+            const sample = fixtures.slice(0, 3).map(fx => ({
+              event_date:         fx.event_date,
+              event_status:       fx.event_status,
+              event_winner:       fx.event_winner,
+              event_first_player: fx.event_first_player,
+              event_second_player:fx.event_second_player,
+              event_final_result: fx.event_final_result,
+              tournament_name:    fx.tournament_name,
+            }));
+            const finishedCount = fixtures.filter(fx => fx.event_status === 'Finished' || (fx.event_winner && fx.event_winner !== '')).length;
+            const winnerSideOK = fixtures.filter(fx => fx.event_winner === 'First Player' || fx.event_winner === 'Second Player').length;
+            result.fetches[pName] = {
+              http_status:        resp.status,
+              raw_response_keys:  parsed ? Object.keys(parsed) : null,
+              api_success_flag:   parsed?.success,
+              total_fixtures:     fixtures.length,
+              finished_fixtures:  finishedCount,
+              winner_labeled_ok:  winnerSideOK,
+              first_3_raw:        sample,
+            };
+          } catch (err) {
+            result.fetches[pName] = { error: err.message };
+          }
+        }
+      }
+    }
+  } catch (err) {
+    result.error = err.message;
+  }
+  return jsonResponse(result, 200, origin);
 }
 
 async function handleTennisStats(url, env, origin) {
