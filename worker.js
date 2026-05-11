@@ -123,7 +123,7 @@ const QUOTA_KV_KEY        = 'odds_quota_state';
 const TANK01_KV_KEY       = 'tank01_teams_stats';
 const TANK01_INJURIES_KEY = 'tank01_injuries_impact';
 const TANK01_ROSTER_KEY   = 'tank01_roster_injuries_v1';
-const TENNIS_CSV_KEY      = 'tennis_csv_stats_v7';   // v7 : matching tolérant noms Sackmann↔api-tennis (lastname+initiale)
+const TENNIS_CSV_KEY      = 'tennis_csv_stats_v8';   // v8 : api-tennis chunked par 30j (free tier limite la plage)
 const TENNIS_ODDS_KEY     = 'tennis_odds_cache_v2';   // v2 : whitelist books fiables (exclut Matchbook/Smarkets)
 const TENNIS_API_BASE     = 'https://api.api-tennis.com/tennis';
 const TENNIS_API_KEYMAP   = 'tennis_api_keymap_v1';   // KV cache name → player_key
@@ -6638,18 +6638,37 @@ function _apiTennisResolveKey(keymap, playerName) {
 // Limite : pas de stats service détaillées (pas dispo sur free tier api-tennis).
 async function _apiTennisFetchRecentMatches(playerInfo, env, daysBack = 60) {
   if (!playerInfo || !env.TENNIS_API_KEY) return [];
+  // api-tennis free tier limite get_fixtures à ~30j par requête.
+  // Pour daysBack > 30, on boucle par tranches de 30 jours.
+  const CHUNK_DAYS = 30;
   const today = new Date();
-  const start = new Date(today); start.setDate(start.getDate() - daysBack);
-  const ds = start.toISOString().slice(0, 10);
-  const de = today.toISOString().slice(0, 10);
-  const url = `${TENNIS_API_BASE}/?method=get_fixtures&player_key=${playerInfo.key}&date_start=${ds}&date_stop=${de}&APIkey=${env.TENNIS_API_KEY}`;
+  const fmt = (d) => d.toISOString().slice(0, 10);
+  const allFixtures = [];
+  let offset = 0;
+  while (offset < daysBack) {
+    const chunkSize = Math.min(CHUNK_DAYS, daysBack - offset);
+    const chunkEnd   = new Date(today); chunkEnd.setDate(chunkEnd.getDate() - offset);
+    const chunkStart = new Date(today); chunkStart.setDate(chunkStart.getDate() - (offset + chunkSize));
+    const ds = fmt(chunkStart);
+    const de = fmt(chunkEnd);
+    const url = `${TENNIS_API_BASE}/?method=get_fixtures&player_key=${playerInfo.key}&date_start=${ds}&date_stop=${de}&APIkey=${env.TENNIS_API_KEY}`;
+    try {
+      const resp = await fetchTimeout(url, {}, 12000);
+      if (!resp.ok) { offset += chunkSize; continue; }
+      const data = await resp.json();
+      const fixtures = Array.isArray(data?.result) ? data.result : [];
+      // Skip tranches qui retournent un objet vide ou error explicite
+      if (fixtures.length && fixtures[0] && (fixtures[0].event_date || fixtures[0].event_key)) {
+        allFixtures.push(...fixtures);
+      }
+    } catch (err) {
+      console.warn(`api-tennis fixtures ${playerInfo.name} [${ds}..${de}]:`, err.message);
+    }
+    offset += chunkSize;
+  }
   try {
-    const resp = await fetchTimeout(url, {}, 12000);
-    if (!resp.ok) return [];
-    const data = await resp.json();
-    const fixtures = Array.isArray(data?.result) ? data.result : [];
     const rows = [];
-    for (const fx of fixtures) {
+    for (const fx of allFixtures) {
       // Match terminé seulement (event_status = "Finished" ou final_result rempli)
       const finished = fx.event_status === 'Finished' || (fx.event_winner && fx.event_winner !== '');
       if (!finished) continue;
@@ -6763,39 +6782,33 @@ async function handleApiTennisDebug(url, env, origin) {
         const info = _apiTennisResolveKey(keymap, pName);
         result.players_resolved[pName] = info ? { key: info.key, tour: info.tour, name: info.name } : null;
         if (info) {
-          const today = new Date();
-          const start = new Date(today); start.setDate(start.getDate() - 365);
-          const ds = start.toISOString().slice(0, 10);
-          const de = today.toISOString().slice(0, 10);
-          const rawUrl = `${TENNIS_API_BASE}/?method=get_fixtures&player_key=${info.key}&date_start=${ds}&date_stop=${de}&APIkey=${env.TENNIS_API_KEY}`;
-          try {
-            const resp = await fetchTimeout(rawUrl, {}, 12000);
-            const text = await resp.text();
-            let parsed;
-            try { parsed = JSON.parse(text); } catch (_) { parsed = null; }
-            const fixtures = Array.isArray(parsed?.result) ? parsed.result : [];
-            const sample = fixtures.slice(0, 3).map(fx => ({
-              event_date:         fx.event_date,
-              event_status:       fx.event_status,
-              event_winner:       fx.event_winner,
-              event_first_player: fx.event_first_player,
-              event_second_player:fx.event_second_player,
-              event_final_result: fx.event_final_result,
-              tournament_name:    fx.tournament_name,
-            }));
-            const finishedCount = fixtures.filter(fx => fx.event_status === 'Finished' || (fx.event_winner && fx.event_winner !== '')).length;
-            const winnerSideOK = fixtures.filter(fx => fx.event_winner === 'First Player' || fx.event_winner === 'Second Player').length;
-            result.fetches[pName] = {
-              http_status:        resp.status,
-              raw_response_keys:  parsed ? Object.keys(parsed) : null,
-              api_success_flag:   parsed?.success,
-              total_fixtures:     fixtures.length,
-              finished_fixtures:  finishedCount,
-              winner_labeled_ok:  winnerSideOK,
-              first_3_raw:        sample,
-            };
-          } catch (err) {
-            result.fetches[pName] = { error: err.message };
+          // Test 3 plages : 30j, 90j, 365j pour identifier la limite du free tier
+          const ranges = [{ label: '30d', d: 30 }, { label: '90d', d: 90 }, { label: '365d', d: 365 }];
+          result.fetches[pName] = {};
+          for (const { label, d } of ranges) {
+            const today = new Date();
+            const start = new Date(today); start.setDate(start.getDate() - d);
+            const ds = start.toISOString().slice(0, 10);
+            const de = today.toISOString().slice(0, 10);
+            const rawUrl = `${TENNIS_API_BASE}/?method=get_fixtures&player_key=${info.key}&date_start=${ds}&date_stop=${de}&APIkey=${env.TENNIS_API_KEY}`;
+            try {
+              const resp = await fetchTimeout(rawUrl, {}, 12000);
+              const text = await resp.text();
+              let parsed;
+              try { parsed = JSON.parse(text); } catch (_) { parsed = null; }
+              const fixtures = Array.isArray(parsed?.result) ? parsed.result : [];
+              const finishedCount = fixtures.filter(fx => fx.event_status === 'Finished' || (fx.event_winner && fx.event_winner !== '')).length;
+              result.fetches[pName][label] = {
+                http_status:       resp.status,
+                api_error_field:   parsed?.error ?? null,
+                api_success_field: parsed?.success ?? null,
+                total_fixtures:    fixtures.length,
+                finished_fixtures: finishedCount,
+                first_fixture_has_event_date: fixtures.length > 0 ? !!fixtures[0]?.event_date : null,
+              };
+            } catch (err) {
+              result.fetches[pName][label] = { error: err.message };
+            }
           }
         }
       }
