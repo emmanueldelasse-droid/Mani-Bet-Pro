@@ -60,6 +60,7 @@ export async function loadAndRenderTennisDetail(container, match, storeInstance)
     }
 
     detailEl.innerHTML = renderBlocTennisDetail(match, data);
+    _attachOpponentModalHandlers(detailEl);
   } catch (err) {
     Logger.warn('TENNIS_DETAIL_RENDER_FAILED', { message: err.message });
     detailEl.innerHTML = `
@@ -305,16 +306,23 @@ function _renderRecentForm(match, data) {
     return `${d}/${m}`;
   };
 
+  const surfaceAttr = _escapeHtml(data?.surface ?? 'Hard');
+  const tourAttr    = _escapeHtml(data?.tour ?? 'atp');
   const renderMatchRow = (m) => {
     if (!m) return `<div style="font-size:11px;color:var(--color-muted);padding:3px 0">—</div>`;
     const resultColor = m.result === 'W' ? 'var(--color-success)' : 'var(--color-danger)';
     const resultLabel = m.result === 'W' ? 'V' : 'D';
     const opp = m.opponent ?? '—';
     const score = m.score ?? '';
+    const oppSafe = _escapeHtml(opp);
+    // v6.88 : opponent name cliquable → modal stats joueur
+    const oppHtml = opp === '—'
+      ? `<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--color-text)">${oppSafe}</span>`
+      : `<button type="button" class="tennis-opp-link" data-name="${oppSafe}" data-surface="${surfaceAttr}" data-tour="${tourAttr}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--color-text);background:none;border:none;padding:0;text-align:left;cursor:pointer;font:inherit;text-decoration:underline;text-decoration-color:var(--color-text-secondary);text-decoration-style:dotted;text-underline-offset:2px">${oppSafe}</button>`;
     return `<div style="display:flex;align-items:center;gap:6px;font-size:11px;padding:2px 0;color:var(--color-text-secondary)">
       <span style="font-weight:700;color:${resultColor};width:14px;flex-shrink:0">${resultLabel}</span>
       <span style="width:34px;flex-shrink:0;font-variant-numeric:tabular-nums">${fmtDate(m.date)}</span>
-      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--color-text)">${_escapeHtml(opp)}</span>
+      ${oppHtml}
       <span style="font-variant-numeric:tabular-nums;color:var(--color-text-secondary)">${_escapeHtml(score)}</span>
     </div>`;
   };
@@ -509,5 +517,98 @@ function _renderContext(match, data) {
       <div style="margin-top:10px;padding:8px 10px;background:var(--color-bg);border-radius:8px;font-size:10px;color:var(--color-text-secondary);line-height:1.5">
         Source : Jeff Sackmann CSV (GitHub, lag ~2-3j). Matchs du tournoi en cours pas encore recensés.
       </div>
+    </div>`;
+}
+
+// v6.88 : modal stats adversaire au clic sur nom dans "5 derniers matchs"
+function _attachOpponentModalHandlers(detailEl) {
+  if (!detailEl) return;
+  detailEl.querySelectorAll('.tennis-opp-link').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const name    = btn.dataset.name;
+      const surface = btn.dataset.surface ?? 'Hard';
+      const tour    = btn.dataset.tour    ?? 'atp';
+      if (!name) return;
+      _openOpponentModal(name, surface, tour);
+    });
+  });
+}
+
+function _openOpponentModal(name, surface, tour) {
+  // Modal squelette · contenu rempli après fetch
+  const overlay = document.createElement('div');
+  overlay.className = 'tennis-opp-modal-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.innerHTML = `
+    <div style="background:var(--color-bg);border-radius:12px;max-width:420px;width:100%;max-height:90vh;overflow-y:auto;padding:20px;box-shadow:0 8px 32px rgba(0,0,0,0.4)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <span style="font-size:15px;font-weight:700">${_escapeHtml(name)}</span>
+        <button type="button" class="tennis-opp-modal-close" style="background:none;border:none;color:var(--color-text-secondary);font-size:20px;line-height:1;cursor:pointer;padding:0">✕</button>
+      </div>
+      <div class="tennis-opp-modal-body" style="font-size:12px;color:var(--color-text-secondary);text-align:center;padding:24px 0">
+        ⏳ Chargement des statistiques…
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('.tennis-opp-modal-close')?.addEventListener('click', close);
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+  // Fetch stats opponent solo
+  const url = `${WORKER_URL}/tennis/stats?players=${encodeURIComponent(name)}&surface=${encodeURIComponent(surface)}&tour=${encodeURIComponent(tour)}`;
+  fetch(url, { headers: { Accept: 'application/json' } })
+    .then(r => r.ok ? r.json() : null)
+    .then(json => {
+      const body = overlay.querySelector('.tennis-opp-modal-body');
+      if (!body) return;
+      const s = json?.stats?.[name];
+      if (!s || Object.keys(s).length <= 1) {
+        body.innerHTML = `<div style="color:var(--color-text-secondary);padding:12px 0">Aucune statistique disponible (joueur peut-être hors top 200 / qualifié).</div>`;
+        return;
+      }
+      body.innerHTML = _renderOpponentStatsHtml(s, surface);
+    })
+    .catch(() => {
+      const body = overlay.querySelector('.tennis-opp-modal-body');
+      if (body) body.innerHTML = `<div style="color:var(--color-danger);padding:12px 0">Erreur de chargement.</div>`;
+    });
+}
+
+function _renderOpponentStatsHtml(s, surface) {
+  const surfaceFr = surface === 'Clay' ? 'Terre battue' : surface === 'Grass' ? 'Gazon' : surface === 'Hard' ? 'Dur' : surface;
+  const rank = s.current_rank ?? '—';
+  const eloOverall = s.elo_overall ?? '—';
+  const eloSurface = s.elo_surface ?? '—';
+  const wr = s.surface_stats?.[surface]?.win_rate;
+  const wrMatches = s.surface_stats?.[surface]?.matches ?? 0;
+  const wrPct = wr != null ? `${Math.round(wr * 100)}% (${wrMatches} matchs)` : '—';
+  const form = s.recent_form_ema;
+  const formStr = form != null ? form.toFixed(2) : '—';
+  const totalMatches = s.total_matches ?? 0;
+  const daysSince = s.days_since_last_match;
+  const fatigueLabel = daysSince == null
+    ? '—'
+    : daysSince <= 3 ? `${daysSince}j (frais)`
+    : daysSince <= 7 ? `${daysSince}j (rythme)`
+    : daysSince <= 14 ? `${daysSince}j (pause)`
+    : `${daysSince}j (rouille)`;
+
+  const row = (label, val) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--color-border)">
+    <span style="font-size:12px;color:var(--color-text-secondary)">${label}</span>
+    <span style="font-size:13px;font-weight:600;color:var(--color-text)">${val}</span>
+  </div>`;
+  return `
+    <div style="text-align:left;padding:4px 0">
+      ${row('Rang ATP/WTA', `#${rank}`)}
+      ${row(`Elo ${surfaceFr}`, eloSurface)}
+      ${row('Elo global', eloOverall)}
+      ${row(`Win rate ${surfaceFr} (12 mois)`, wrPct)}
+      ${row('Forme récente (EMA 10 matchs)', formStr)}
+      ${row('Matchs recensés (2 ans)', totalMatches)}
+      ${row('Jours depuis dernier match', fatigueLabel)}
+    </div>
+    <div style="margin-top:14px;padding:8px 10px;background:var(--color-bg-secondary);border-radius:6px;font-size:10px;color:var(--color-text-secondary);line-height:1.5">
+      Source : Jeff Sackmann CSV. Stats sur 12-24 derniers mois.
     </div>`;
 }

@@ -368,12 +368,6 @@ export default {
         return await handleTennisOdds(url, env, origin);
       if (path === '/tennis/stats' && request.method === 'GET')
         return await handleTennisStats(url, env, origin);
-
-      if (path === '/tennis/api-tennis-debug' && request.method === 'GET')
-        return await handleApiTennisDebug(url, env, origin);
-
-      if (path === '/tennis/espn-test' && request.method === 'GET')
-        return await handleEspnTennisTest(url, env, origin);
       if (path === '/tennis/bot/run' && request.method === 'POST')
         return await handleTennisBotRun(request, env, origin);
       if (path === '/tennis/bot/logs' && request.method === 'GET')
@@ -6766,124 +6760,6 @@ function _mergeTennisRows(sackmannRows, apiRows) {
   const fresh = apiRows.filter(a => !seenApi.has(a));
   return sackmannRows.concat(fresh);
 }
-
-// Debug endpoint : diagnostique chaque étape d'intégration api-tennis
-async function handleApiTennisDebug(url, env, origin) {
-  const playersParam = url.searchParams.get('players') ?? '';
-  const players = playersParam.split(',').map(p => p.trim()).filter(Boolean);
-  const result = {
-    has_api_key: !!env.TENNIS_API_KEY,
-    api_key_length: env.TENNIS_API_KEY ? env.TENNIS_API_KEY.length : 0,
-    players_input: players,
-    keymap_status: null,
-    keymap_size: 0,
-    players_resolved: {},
-    fetches: {},
-  };
-  if (!env.TENNIS_API_KEY) return jsonResponse(result, 200, origin);
-
-  try {
-    const keymap = await _apiTennisGetKeymap(env);
-    result.keymap_status = keymap ? 'ok' : 'null';
-    result.keymap_size = keymap ? Object.keys(keymap).length : 0;
-    if (keymap) {
-      for (const pName of players) {
-        const info = _apiTennisResolveKey(keymap, pName);
-        result.players_resolved[pName] = info ? { key: info.key, tour: info.tour, name: info.name } : null;
-        if (info) {
-          // Test 4 méthodes alternatives pour identifier la bonne API d'historique joueur :
-          // A) get_fixtures + player_key + date_range (méthode actuelle, ne marche pas)
-          // B) get_fixtures sans player_key (filtre client-side)
-          // C) get_players (profil joueur, peut inclure last matches)
-          // D) get_H2H (méthode dédiée H2H)
-          const today = new Date();
-          const start = new Date(today); start.setDate(start.getDate() - 30);
-          const ds = start.toISOString().slice(0, 10);
-          const de = today.toISOString().slice(0, 10);
-          const variants = [
-            { label: 'A_fixtures_pk',   url: `${TENNIS_API_BASE}/?method=get_fixtures&player_key=${info.key}&date_start=${ds}&date_stop=${de}&APIkey=${env.TENNIS_API_KEY}` },
-            { label: 'B_fixtures_nopk', url: `${TENNIS_API_BASE}/?method=get_fixtures&date_start=${ds}&date_stop=${de}&APIkey=${env.TENNIS_API_KEY}` },
-            { label: 'C_players',       url: `${TENNIS_API_BASE}/?method=get_players&player_key=${info.key}&APIkey=${env.TENNIS_API_KEY}` },
-            { label: 'D_event_h2h',     url: `${TENNIS_API_BASE}/?method=get_H2H&first_player_key=${info.key}&second_player_key=${info.key}&APIkey=${env.TENNIS_API_KEY}` },
-          ];
-          result.fetches[pName] = {};
-          for (const v of variants) {
-            try {
-              const resp = await fetchTimeout(v.url, {}, 12000);
-              const text = await resp.text();
-              let parsed;
-              try { parsed = JSON.parse(text); } catch (_) { parsed = null; }
-              const resultData = parsed?.result;
-              const isArr = Array.isArray(resultData);
-              const isObj = resultData && typeof resultData === 'object' && !isArr;
-              result.fetches[pName][v.label] = {
-                http_status:       resp.status,
-                api_error_field:   parsed?.error ?? null,
-                api_success_field: parsed?.success ?? null,
-                result_type:       isArr ? 'array' : isObj ? 'object' : (resultData === null ? 'null' : typeof resultData),
-                result_size:       isArr ? resultData.length : isObj ? Object.keys(resultData).length : 0,
-                result_top_keys:   isObj ? Object.keys(resultData).slice(0, 10) : (isArr && resultData[0] && typeof resultData[0] === 'object' ? Object.keys(resultData[0]).slice(0, 10) : null),
-                raw_excerpt:       text.slice(0, 300),
-              };
-            } catch (err) {
-              result.fetches[pName][v.label] = { error: err.message };
-            }
-          }
-        }
-      }
-    }
-  } catch (err) {
-    result.error = err.message;
-  }
-  return jsonResponse(result, 200, origin);
-}
-
-// Test ESPN tennis API (free, sans clé).
-// search_athlete a confirmé que Cirstea = id=1774 dans ESPN. Ce test cherche le bon
-// endpoint pour récupérer l'historique des matchs avec dates précises.
-async function handleEspnTennisTest(url, env, origin) {
-  const athleteId = url.searchParams.get('id') ?? '1774';   // Cirstea par défaut
-  const league = url.searchParams.get('league') ?? 'wta';
-  const endpoints = [
-    { label: 'profile',            url: `https://site.api.espn.com/apis/site/v3/sports/tennis/${league}/athletes/${athleteId}` },
-    { label: 'eventlog_site',      url: `https://site.api.espn.com/apis/site/v3/sports/tennis/${league}/athletes/${athleteId}/eventlog` },
-    { label: 'eventlog_core_2026', url: `https://sports.core.api.espn.com/v2/sports/tennis/leagues/${league}/seasons/2026/athletes/${athleteId}/eventlog` },
-    { label: 'eventlog_core_basic',url: `https://sports.core.api.espn.com/v2/sports/tennis/leagues/${league}/athletes/${athleteId}/eventlog` },
-    { label: 'statistics',         url: `https://site.api.espn.com/apis/site/v3/sports/tennis/${league}/athletes/${athleteId}/statistics` },
-    { label: 'gamelog',            url: `https://site.web.api.espn.com/apis/common/v3/sports/tennis/${league}/athletes/${athleteId}/gamelog` },
-    { label: 'overview',           url: `https://site.web.api.espn.com/apis/common/v3/sports/tennis/${league}/athletes/${athleteId}/overview` },
-    { label: 'scoreboard_today',   url: `https://site.api.espn.com/apis/site/v2/sports/tennis/${league}/scoreboard?dates=20260511` },
-  ];
-  const out = { athlete_id: athleteId, league, results: {} };
-  for (const ep of endpoints) {
-    try {
-      const resp = await fetchTimeout(ep.url, {}, 10000);
-      const text = await resp.text();
-      let parsed;
-      try { parsed = JSON.parse(text); } catch (_) { parsed = null; }
-      const topKeys = parsed && typeof parsed === 'object' ? Object.keys(parsed).slice(0, 12) : null;
-      // Cherche tableaux qui ressemblent à des events/matchs
-      const matchArrSize = (() => {
-        if (!parsed) return null;
-        if (Array.isArray(parsed.events)) return parsed.events.length;
-        if (Array.isArray(parsed.items)) return parsed.items.length;
-        if (parsed.events?.items && Array.isArray(parsed.events.items)) return parsed.events.items.length;
-        if (parsed.eventLog?.events?.items && Array.isArray(parsed.eventLog.events.items)) return parsed.eventLog.events.items.length;
-        return null;
-      })();
-      out.results[ep.label] = {
-        http_status:    resp.status,
-        top_keys:       topKeys,
-        match_count:    matchArrSize,
-        raw_excerpt:    text.slice(0, 600),
-      };
-    } catch (err) {
-      out.results[ep.label] = { error: err.message };
-    }
-  }
-  return jsonResponse(out, 200, origin);
-}
-
 async function handleTennisStats(url, env, origin) {
   const playersParam = url.searchParams.get('players') ?? '';
   const surface      = url.searchParams.get('surface') ?? 'Clay';
