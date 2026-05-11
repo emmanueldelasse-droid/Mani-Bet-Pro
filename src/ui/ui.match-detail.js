@@ -309,7 +309,7 @@ function _renderMLBMarches(log, match) {
     <div style="display:grid;grid-template-columns:1fr auto auto auto auto;gap:4px;padding:0 10px 4px">
       <div></div>
       <div style="font-size:10px;color:var(--color-text-secondary);text-align:center">Cote</div>
-      <div style="font-size:10px;color:var(--color-text-secondary);text-align:center">Edge</div>
+      <div style="font-size:10px;color:var(--color-text-secondary);text-align:center">Avantage</div>
       <div style="font-size:10px;color:var(--color-text-secondary);text-align:center">Fiabilité</div>
       <div></div>
     </div>
@@ -620,7 +620,7 @@ function renderBlocSyntheseSummary(analysis, match) {
         </div>
         <div style="text-align:center">
           <div style="font-size:18px;font-weight:700;color:${edgeColor}">+${best.edge}%</div>
-          <div style="font-size:9px;color:var(--color-text-secondary)">Edge</div>
+          <div style="font-size:9px;color:var(--color-text-secondary)">Avantage</div>
         </div>
         ${fiabHtml}
       </div>
@@ -848,7 +848,7 @@ function renderBlocPourquoi(analysis, match, storeInstance) {
 
     return `
       <div style="margin-top:10px;font-size:12px;padding:8px 12px;background:rgba(34,197,94,0.06);border-left:3px solid ${color};border-radius:6px;color:var(--color-text-secondary)">
-        ${icon} <strong style="color:${color}">Trend O/U ${ouLine}</strong> sur les 10 derniers matchs — ${parts.join(' · ')}
+        ${icon} <strong style="color:${color}">Tendance O/U ${ouLine}</strong> sur les 10 derniers matchs — ${parts.join(' · ')}
       </div>`;
   })();
 
@@ -1292,7 +1292,7 @@ function renderBlocTousLesParis(analysis, match) {
       <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:4px;padding:0 10px 4px">
         <div></div>
         <div style="font-size:10px;color:var(--color-text-secondary);text-align:center">Cote</div>
-        <div style="font-size:10px;color:var(--color-text-secondary);text-align:center">Cote s/évaluée</div>
+        <div style="font-size:10px;color:var(--color-text-secondary);text-align:center">Cote sous-évaluée</div>
         <div></div>
       </div>
       ${section('Vainqueur', mlRows)}
