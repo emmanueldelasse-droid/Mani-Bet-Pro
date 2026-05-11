@@ -6794,8 +6794,8 @@ async function handleApiTennisDebug(url, env, origin) {
           // Test 4 méthodes alternatives pour identifier la bonne API d'historique joueur :
           // A) get_fixtures + player_key + date_range (méthode actuelle, ne marche pas)
           // B) get_fixtures sans player_key (filtre client-side)
-          // C) get_H2H entre les 2 joueurs (méthode dédiée)
-          // D) get_player_last_matches via get_players?player_key
+          // C) get_players (profil joueur, peut inclure last matches)
+          // D) get_H2H (méthode dédiée H2H)
           const today = new Date();
           const start = new Date(today); start.setDate(start.getDate() - 30);
           const ds = start.toISOString().slice(0, 10);
