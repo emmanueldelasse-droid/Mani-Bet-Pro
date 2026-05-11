@@ -29,8 +29,11 @@ export const SIGNAL_LABELS = {
   // Tennis
   'ranking_elo_diff':      'Niveau joueur (Elo)',
   'surface_winrate_diff':  'Réussite sur la surface',
-  'h2h_surface':           'Confrontations directes',
+  'h2h_surface':           'Confrontations sur la surface',
   'service_dominance':     'Dominance au service',
+  'pressure_dominance':    'Jeu sous pression (break points)',
+  'physical_load_diff':    'Charge physique récente',
+  'market_steam_diff':     'Mouvement de cote',
   'fatigue_index':         'Fatigue / repos',
 };
 
