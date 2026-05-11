@@ -6862,7 +6862,6 @@ async function handleEspnTennisTest(url, env, origin) {
       let parsed;
       try { parsed = JSON.parse(text); } catch (_) { parsed = null; }
       const topKeys = parsed && typeof parsed === 'object' ? Object.keys(parsed).slice(0, 12) : null;
-      // Cherche tableaux qui ressemblent à des events/matchs
       const matchArrSize = (() => {
         if (!parsed) return null;
         if (Array.isArray(parsed.events)) return parsed.events.length;
