@@ -416,8 +416,8 @@ function _renderMLBMatchDetail(data) {
         <span class="bloc-header__title">⚾ Starters du match</span>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
-        ${pitcherBlock(homePit, strikeoutsPrediction?.home_pitcher, '🏠 ' + (homeName ?? 'Home'))}
-        ${pitcherBlock(awayPit, strikeoutsPrediction?.away_pitcher, '✈️ ' + (awayName ?? 'Away'))}
+        ${pitcherBlock(homePit, strikeoutsPrediction?.home_pitcher, '🏠 ' + (homeName ?? 'Domicile'))}
+        ${pitcherBlock(awayPit, strikeoutsPrediction?.away_pitcher, '✈️ ' + (awayName ?? 'Extérieur'))}
       </div>
 
       <div class="bloc-header" style="margin-bottom:var(--space-2)">
@@ -425,13 +425,13 @@ function _renderMLBMatchDetail(data) {
       </div>
       <div style="background:var(--color-bg);border-radius:8px;padding:10px 14px;margin-bottom:14px">
         <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:12px;padding-bottom:6px;border-bottom:2px solid var(--color-border);font-size:11px;color:var(--color-muted);text-transform:uppercase;letter-spacing:0.06em">
-          <div style="text-align:right">${homeName ?? 'Home'}</div>
+          <div style="text-align:right">${homeName ?? 'Domicile'}</div>
           <div style="text-align:center"></div>
-          <div style="text-align:left">${awayName ?? 'Away'}</div>
+          <div style="text-align:left">${awayName ?? 'Extérieur'}</div>
         </div>
-        ${compareRow('Win %',         homeStand?.pct,          awayStand?.pct,         (v) => (parseFloat(v) * 100).toFixed(1) + '%')}
-        ${compareRow('Record',        homeStand ? `${homeStand.wins}-${homeStand.losses}` : null, awayStand ? `${awayStand.wins}-${awayStand.losses}` : null, (v) => v)}
-        ${compareRow('Run diff',      homeStand?.run_diff,     awayStand?.run_diff,    (v) => (v > 0 ? '+' : '') + v)}
+        ${compareRow('Taux victoires', homeStand?.pct,         awayStand?.pct,         (v) => (parseFloat(v) * 100).toFixed(1) + '%')}
+        ${compareRow('Bilan',         homeStand ? `${homeStand.wins}-${homeStand.losses}` : null, awayStand ? `${awayStand.wins}-${awayStand.losses}` : null, (v) => v)}
+        ${compareRow('Différentiel runs', homeStand?.run_diff, awayStand?.run_diff,    (v) => (v > 0 ? '+' : '') + v)}
         ${compareRow('OPS',           homeStats?.ops,          awayStats?.ops,         (v) => v.toFixed(3))}
         ${compareRow('Team ERA',      homeStats?.team_era,     awayStats?.team_era,    (v) => v.toFixed(2), true)}
         ${compareRow('Team WHIP',     homeStats?.team_whip,    awayStats?.team_whip,   (v) => v.toFixed(2), true)}
@@ -1569,7 +1569,13 @@ function renderBlocFiabilite(analysis, match) {
   else                  { fiabLabel = 'Faible';  fiabColor = 'var(--color-danger)'; }
 
   const missingSimple = (analysis?.missing_variables ?? []).map(v => SIGNAL_LABELS[v] ?? v).slice(0, 2);
-  const sourcesList = ['ESPN', 'BallDontLie', 'Tank01', 'Pinnacle'];
+  // Sources affichées dépendent du sport · évite "ESPN/BDL/Tank01" sur tennis ou MLB
+  const sport         = String(match?.sport ?? 'NBA').toUpperCase();
+  const sourcesList   = sport === 'TENNIS'
+    ? ['Jeff Sackmann CSV', 'The Odds API', 'api-tennis']
+    : sport === 'MLB'
+      ? ['ESPN', 'MLB Stats API', 'The Odds API']
+      : ['ESPN', 'BallDontLie', 'Tank01', 'Pinnacle'];
 
   return `
     <div class="card match-detail__bloc">
