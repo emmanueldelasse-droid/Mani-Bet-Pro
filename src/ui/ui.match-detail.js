@@ -218,11 +218,16 @@ function _renderMLBMarches(log, match) {
     if (cote == null) return '';
     const reliability = edge != null && edge > 0 ? Math.round(edge * dqMult * 10) / 10 : null;
     const stars = reliability != null && reliability >= 5 ? starsFor(edge) : '';
+    // Badge "contre-favori" : reco sur le côté que notre modèle juge perdant
+    // (edge positif mais sur outsider). Aligne avec mode prudent (exclu du "best").
+    const contrarianBadge = rec?.is_contrarian === true && edge > 0
+      ? `<span style="font-size:9px;font-weight:700;color:var(--color-warning);border:1px solid var(--color-warning);border-radius:3px;padding:1px 5px;margin-left:6px;letter-spacing:0.04em">CONTRE-FAVORI</span>`
+      : '';
 
     return `
       <div style="display:grid;grid-template-columns:1fr auto auto auto auto;gap:8px;align-items:center;padding:9px 10px;background:${edge >= 7 ? 'rgba(34,197,94,0.06)' : 'var(--color-bg)'};border-radius:8px;border:1px solid ${edge >= 7 ? 'rgba(34,197,94,0.3)' : 'transparent'};margin-bottom:6px">
         <div style="min-width:0">
-          <div style="font-size:13px;font-weight:600">${label}</div>
+          <div style="font-size:13px;font-weight:600">${label}${contrarianBadge}</div>
           <div style="font-size:10px;color:var(--color-text-secondary)">${prob != null ? prob + '% analyse' : '—'}</div>
         </div>
         <div style="text-align:center;min-width:48px">
