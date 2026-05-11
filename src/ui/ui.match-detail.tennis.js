@@ -487,7 +487,7 @@ function _renderContext(match, data) {
 
   const tournamentLine = data.tournament_label
     ? `<div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:8px">
-         🏆 ${_escapeHtml(data.tournament_label)} · ${_escapeHtml(data.surface ?? '')} · ${String(data.tour ?? '').toUpperCase()}
+         🏆 ${_escapeHtml(data.tournament_label)} · ${_escapeHtml(_surfaceFr(data.surface))} · ${String(data.tour ?? '').toUpperCase()}
        </div>`
     : '';
 

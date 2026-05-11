@@ -97,3 +97,9 @@ export function escapeHtml(str) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
+
+// Libellé surface tennis pour affichage user. NE PAS utiliser pour clés API
+// (`/tennis/stats?surface=Clay`) qui doivent rester en anglais.
+export function surfaceFr(s) {
+  return { Clay: 'Terre battue', Hard: 'Dur', Grass: 'Gazon', Carpet: 'Moquette' }[s] ?? s ?? '';
+}

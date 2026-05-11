@@ -14,6 +14,7 @@ import { DataOrchestrator } from '../orchestration/data.orchestrator.js';
 import { LoadingUI }        from './ui.loading.js';
 import { Logger }           from '../utils/utils.logger.js';
 import { americanToDecimal } from '../utils/utils.odds.js';
+import { surfaceFr }         from './ui.match-detail.helpers.js';
 import { formatRejection as _formatRejection } from './ui.match-detail.helpers.js';
 
 function _injectStyles() {
@@ -652,7 +653,7 @@ function _createMatchCard(match) {
   const countdownHtml = match.datetime ? _renderCountdown(match.datetime) : '';
   const isTennis      = match.sport === 'TENNIS';
   const isMLB         = match.sport === 'MLB';
-  const homeRecord    = isTennis ? (match.surface ?? '') : (match.home_team?.record ?? '—');
+  const homeRecord    = isTennis ? surfaceFr(match.surface) : (match.home_team?.record ?? '—');
   const awayRecord    = isTennis ? (match.tournament ?? '') : (match.away_team?.record ?? '—');
   const isFinal       = match.status === 'STATUS_FINAL' || match.status === 'STATUS_FINAL_OT';
   const homeScore     = match.home_team?.score;

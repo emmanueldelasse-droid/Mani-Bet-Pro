@@ -14,6 +14,7 @@
  */
 
 import { API_CONFIG } from '../config/api.config.js';
+import { surfaceFr } from './ui.match-detail.helpers.js';
 
 const WORKER = API_CONFIG.WORKER_BASE_URL;
 
@@ -797,7 +798,7 @@ function _renderLogCard(log) {
       <div class="bot-log-header">
         <div>
           <div class="bot-log-matchup">${log.away ?? log.p2 ?? '?'} ${log.tournament ? 'vs' : '@'} ${log.home ?? log.p1 ?? '?'}</div>
-          <div class="bot-log-date">${dateFmt}${timeFmt ? ' · ' + timeFmt : ''}${log.tournament ? ' · ' + log.tournament + ' (' + (log.surface ?? '') + ')' : ''}</div>
+          <div class="bot-log-date">${dateFmt}${timeFmt ? ' · ' + timeFmt : ''}${log.tournament ? ' · ' + log.tournament + (log.surface ? ' (' + surfaceFr(log.surface) + ')' : '') : ''}</div>
         </div>
         <div class="bot-log-badges">
           ${phase ? `<span class="bot-badge bot-badge--phase">${phase}</span>` : ''}
