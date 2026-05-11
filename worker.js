@@ -5716,8 +5716,25 @@ function _botMatchPlayerPropsToLines(propsPrediction, linesMap, homeTeam, awayTe
     });
   };
 
-  const homeEnriched = enrichSide(propsPrediction.home_players ?? [], homeTeam);
-  const awayEnriched = enrichSide(propsPrediction.away_players ?? [], awayTeam);
+  // Garde-fou : s'assurer que les joueurs home_players appartiennent vraiment à
+  // homeTeam (et inversement). En cas d'inversion (rare mais possible si Tank01
+  // renvoie une payload corrompue), drop les joueurs mal mappés au lieu de
+  // créer des recos OVER/UNDER pour le mauvais côté.
+  const _filterCorrectSide = (players, expectedTeam, label) => {
+    if (!Array.isArray(players)) return [];
+    return players.filter(p => {
+      if (!p?.team || !expectedTeam) return true; // pas de team → on garde (best effort)
+      // Match exact ou substring (Tank01 abv vs ESPN full name)
+      const match = p.team === expectedTeam
+        || expectedTeam.includes(p.team)
+        || p.team.includes(expectedTeam);
+      if (!match) console.warn(`[props] joueur ${p.name} (team=${p.team}) mal mappé côté ${label} (attendu=${expectedTeam})`);
+      return match;
+    });
+  };
+
+  const homeEnriched = enrichSide(_filterCorrectSide(propsPrediction.home_players, homeTeam, 'home') ?? [], homeTeam);
+  const awayEnriched = enrichSide(_filterCorrectSide(propsPrediction.away_players, awayTeam, 'away') ?? [], awayTeam);
 
   // Facteur confiance combiné : projection interne × ligne AI (si présente)
   const confFactor = (projConf, lineConf) => {
