@@ -5280,20 +5280,24 @@ function _botComputeBettingRecs(score, matchData, signals, marketDivergence) {
         const k = (b * motorProb - (1 - motorProb)) / b;
         return k <= 0 ? 0 : Math.min(k * 0.25, 0.05);
       })();
+      const isContrarian = (side === 'HOME' && score <= 0.5) || (side === 'AWAY' && score > 0.5);
       recs.push({
         type: 'MONEYLINE', side,
         odds_line: bestBook.odds, odds_source: bestBook.bookmaker,
         motor_prob: Math.round(motorProb * 100), implied_prob: Math.round(implied * 100),
         edge: Math.round(absEdge * 100),
         has_value: true, kelly_stake: kelly,
+        is_contrarian: isContrarian,
       });
     }
   }
 
   const isCritDiv = marketDivergence?.flag === 'critical';
+  // Mode A (prudent) : exclure les paris contrarian du "best".
+  const nonContrarian = recs.filter(r => !r.is_contrarian);
   return {
     recommendations: recs,
-    best: isCritDiv ? null : (recs[0] ?? null),
+    best: isCritDiv ? null : (nonContrarian[0] ?? null),
     market_divergence_flag: marketDivergence?.flag ?? 'low',
   };
 }
@@ -5461,8 +5465,9 @@ function _computePlayerProjectionConfidence(p, absentCount, model) {
 
   const ppg = parseFloat(p?.ppg);
   if (Number.isFinite(ppg)) {
-    if (ppg >= 25)       { score += 0.10; factors.push('star_ppg'); }
-    else if (ppg < 12)   { score -= 0.15; factors.push('role_volatile'); }
+    // Pas de bonus pour ppg≥25 : marché props sur stars très efficient,
+    // notre projection n'a pas plus d'info que la ligne. Pénalité role_volatile conservée.
+    if (ppg < 12) { score -= 0.15; factors.push('role_volatile'); }
   }
 
   // Divergence forme récente vs saison
@@ -5727,14 +5732,14 @@ function _botMatchPlayerPropsToLines(propsPrediction, linesMap, homeTeam, awayTe
       : { side: 'UNDER', edge: ue, prob: p.market.under_prob, decimal: p.market.under_decimal, book: p.market.under_book };
     if (best.edge == null || !best.decimal) continue;
 
-    // Appliquer facteur confiance (projection + source ligne)
+    // Confiance projection utilisée comme FILTRE (cf<0.50 → drop), pas comme
+    // multiplicateur d'edge : la précision de notre projection ne crée pas
+    // d'edge supplémentaire sur un marché efficient.
     const lineConfLabel = (linesMap[_normalizeName(p.name)] || {}).confidence ?? null;
     const cf            = confFactor(p.confidence, lineConfLabel);
-    const adjustedEdge  = Math.round(best.edge * cf);
 
-    // Seuil 5% sur edge ajusté · + seuil de confiance min 0.50
-    if (adjustedEdge < 5) continue;
-    if (cf < 0.50)        continue;
+    if (best.edge < 5) continue;
+    if (cf < 0.50)     continue;
 
     // Quarter Kelly capped à 5% bankroll (cohérent ML/spread/total)
     const kellyB    = best.decimal - 1;
@@ -5754,7 +5759,7 @@ function _botMatchPlayerPropsToLines(propsPrediction, linesMap, homeTeam, awayTe
       odds_line:         _decToAm(best.decimal),
       odds_source:       best.book,
       edge_raw:          best.edge,
-      edge:              adjustedEdge,
+      edge:              best.edge,
       kelly_stake:       kelly,
       confidence_factor: cf,
       confidence_label:  p.confidence?.label ?? 'medium',
@@ -7006,6 +7011,23 @@ function _computeTennisPlayerStats(rows, playerName, surface, today) {
     daysSince = Math.floor((today - d) / 86400000);
   }
 
+  // 5 derniers matchs pour affichage UI · date · adversaire · score · résultat · surface
+  const last5_matches = last10.slice(0, 5).map(m => {
+    const isWin = m.winner_name === resolvedName;
+    const opponent = isWin ? m.loser_name : m.winner_name;
+    const d = m.tourney_date || '';
+    const dateIso = d.length === 8 ? `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}` : null;
+    return {
+      date:        dateIso,
+      opponent,
+      score:       m.score || null,
+      result:      isWin ? 'W' : 'L',
+      surface:     m.surface || null,
+      tourney:     m.tourney_name || null,
+      round:       m.round || null,
+    };
+  });
+
   return {
     name: playerName,
     resolved_name:      resolvedName !== playerName ? resolvedName : undefined,
@@ -7015,6 +7037,7 @@ function _computeTennisPlayerStats(rows, playerName, surface, today) {
     recent_form_ema_global:  Math.round(ema * 100) / 100,
     recent_form_ema_surface: surfaceEma != null ? Math.round(surfaceEma * 100) / 100 : null,
     surface_form_sample:     surfaceLast10.length,
+    last5_matches,
     service_stats:      svcStats,
     break_point_stats:  bpStats,
     load_14d:           load14d,
@@ -9004,7 +9027,9 @@ function _botTennisBettingRecs(score, oddsH2H, ctx = {}) {
   if (Math.abs(edgeP1) >= EDGE_MIN) pushRec(edgeP1 > 0 ? 'HOME' : 'AWAY', edgeP1 > 0 ? score : 1 - score, edgeP1 > 0 ? p1Odds : p2Odds);
   if (recs.length === 0) return null;
   recs.sort((a, b) => b.edge - a.edge);
-  return { recommendations: recs, best: recs[0] };
+  // Mode A (prudent) : exclure les paris contrarian du "best".
+  const best = recs.find(r => !r.is_contrarian) ?? null;
+  return { recommendations: recs, best };
 }
 
 function _botTennisDataQuality(variables) {

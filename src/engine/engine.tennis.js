@@ -559,13 +559,18 @@ export class EngineTennis {
     // Trier par edge décroissant
     recs.sort((a, b) => b.edge - a.edge);
 
+    // Mode A (prudent) : ne JAMAIS marquer un pari contrarian comme "best".
+    // Edge sur outsider non validé empiriquement (sample tennis ≈ 0 logs settlés).
+    // Les recs contrarian restent visibles dans la liste, mais sans recommandation.
+    const nonContrarian = recs.filter(r => !r.is_contrarian);
+
     const marketProbP1 = 1 / p1Odds;
     const marketProbP2 = 1 / p2Odds;
     const vigSum       = marketProbP1 + marketProbP2;
 
     return {
       recommendations: recs,
-      best:            recs[0],
+      best:            nonContrarian[0] ?? null,
       market_prob_home: Math.round((marketProbP1 / vigSum) * 100) / 100,
       market_prob_away: Math.round((marketProbP2 / vigSum) * 100) / 100,
     };

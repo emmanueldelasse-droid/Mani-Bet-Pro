@@ -321,7 +321,7 @@ function _renderMLBMarches(log, match) {
     <div style="display:grid;grid-template-columns:1fr auto auto auto auto;gap:4px;padding:0 10px 4px">
       <div></div>
       <div style="font-size:10px;color:var(--color-text-secondary);text-align:center">Cote</div>
-      <div style="font-size:10px;color:var(--color-text-secondary);text-align:center">Edge</div>
+      <div style="font-size:10px;color:var(--color-text-secondary);text-align:center">Avantage</div>
       <div style="font-size:10px;color:var(--color-text-secondary);text-align:center">Fiabilité</div>
       <div></div>
     </div>
@@ -586,7 +586,11 @@ function renderBlocSyntheseSummary(analysis, match) {
 
   if (!best || best.edge < 5) return '';
 
-  const typeLabel = best.type === 'MONEYLINE' ? 'Vainqueur'
+  // "Vainqueur" est trompeur quand le pari est sur l'outsider (cote sous-évaluée
+  // mais on pense que l'autre gagne). best.is_contrarian est défini par les
+  // moteurs tennis/NBA/MLB quand side ≠ favori du score moteur.
+  const isContrarian = best.is_contrarian === true;
+  const typeLabel = best.type === 'MONEYLINE' ? (isContrarian ? 'Pari valeur' : 'Vainqueur')
                   : best.type === 'SPREAD' ? 'Handicap'
                   : best.type === 'PLAYER_POINTS' ? 'Props'
                   : 'O/U';
@@ -628,7 +632,7 @@ function renderBlocSyntheseSummary(analysis, match) {
         </div>
         <div style="text-align:center">
           <div style="font-size:18px;font-weight:700;color:${edgeColor}">+${best.edge}%</div>
-          <div style="font-size:9px;color:var(--color-text-secondary)">Edge</div>
+          <div style="font-size:9px;color:var(--color-text-secondary)">Avantage</div>
         </div>
         ${fiabHtml}
       </div>
@@ -856,7 +860,7 @@ function renderBlocPourquoi(analysis, match, storeInstance) {
 
     return `
       <div style="margin-top:10px;font-size:12px;padding:8px 12px;background:rgba(34,197,94,0.06);border-left:3px solid ${color};border-radius:6px;color:var(--color-text-secondary)">
-        ${icon} <strong style="color:${color}">Trend O/U ${ouLine}</strong> sur les 10 derniers matchs — ${parts.join(' · ')}
+        ${icon} <strong style="color:${color}">Tendance O/U ${ouLine}</strong> sur les 10 derniers matchs — ${parts.join(' · ')}
       </div>`;
   })();
 
@@ -1300,7 +1304,7 @@ function renderBlocTousLesParis(analysis, match) {
       <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:4px;padding:0 10px 4px">
         <div></div>
         <div style="font-size:10px;color:var(--color-text-secondary);text-align:center">Cote</div>
-        <div style="font-size:10px;color:var(--color-text-secondary);text-align:center">Cote s/évaluée</div>
+        <div style="font-size:10px;color:var(--color-text-secondary);text-align:center">Cote sous-évaluée</div>
         <div></div>
       </div>
       ${section('Vainqueur', mlRows)}
@@ -1534,57 +1538,51 @@ function _buildSyntheseLines(analysis, match) {
   const home       = match?.home_team?.name ?? 'Domicile';
   const away       = match?.away_team?.name ?? 'Extérieur';
   const predictive = analysis.predictive_score != null ? Math.round(analysis.predictive_score * 100) : null;
-  const keySignals = (analysis.key_signals ?? []).slice(0, 2).map(s => _simplifyLabel(s.label, s.variable)).filter(Boolean);
-  const best       = analysis.betting_recommendations?.best ?? null;
 
   const lines = [];
   const line = (icon, text) => `<div style="display:flex;gap:8px;padding:4px 0"><span style="flex-shrink:0">${icon}</span><div>${text}</div></div>`;
 
-  // Ligne 1 — qui est favori et à combien
-  if (predictive != null) {
-    const favName  = predictive > 50 ? home : away;
-    const favProb  = predictive > 50 ? predictive : 100 - predictive;
-    const othProb  = 100 - favProb;
-    if (Math.abs(predictive - 50) < 5) {
-      lines.push(line('⚖️', `Match équilibré selon notre analyse : <strong>${escapeHtml(home)}</strong> ${predictive}% contre <strong>${escapeHtml(away)}</strong> ${100 - predictive}%.`));
-    } else {
-      lines.push(line('🎯', `Favori : <strong>${escapeHtml(favName)}</strong> à <strong>${favProb}%</strong> de chances estimées (vs ${othProb}%).`));
-    }
-  } else {
+  if (predictive == null) {
     lines.push(line('⚠️', 'Données insuffisantes pour déterminer un favori.'));
+    return lines;
   }
 
-  // Ligne 2 — comparaison marché vs analyse
-  if (best && best.implied_prob != null && best.edge != null) {
-    const oddsDec = best.odds_decimal ? Number(best.odds_decimal).toFixed(2) : '—';
-    lines.push(line('💰', `Cote bookmaker <strong>${oddsDec}</strong> = marché donne <strong>${best.implied_prob}%</strong> de chances. Notre analyse voit <strong>${best.edge}% de plus</strong> → valeur détectée.`));
-  }
-
-  // Ligne 3 — raisons (sans redondance)
-  if (keySignals.length) {
-    const listed = keySignals.map(s => `<strong>${escapeHtml(s.toLowerCase())}</strong>`).join(' et ');
-    lines.push(line('📊', `Ce qui fait pencher l'analyse : ${listed}.`));
-  }
-
-  // Ligne 4 — action recommandée
-  if (best) {
-    const typeLabel = best.type === 'MONEYLINE' ? 'Victoire'
-                    : best.type === 'SPREAD' ? 'Handicap'
-                    : best.type === 'PLAYER_POINTS' ? `Points ${best.player ?? ''}`
-                    : 'Total de points';
-    let sideLabel;
-    if (best.type === 'PLAYER_POINTS') sideLabel = `${best.side === 'OVER' ? '+' : '−'}${best.line}`;
-    else if (best.side === 'HOME')     sideLabel = home;
-    else if (best.side === 'AWAY')     sideLabel = away;
-    else if (best.side === 'OVER')     sideLabel = `Plus de ${best.ou_line ?? '—'}`;
-    else                               sideLabel = `Moins de ${best.ou_line ?? '—'}`;
-    lines.push(line('👉', `Pari suggéré : <strong>${escapeHtml(typeLabel)} — ${escapeHtml(sideLabel)}</strong>.`));
-  } else if (analysis.betting_recommendations != null) {
-    // Bot a tourné, mais pas trouvé de value
-    lines.push(line('🚫', 'Aucune cote sous-évaluée — passer ce match.'));
+  // Ligne 1 — favori (ou match équilibré)
+  if (Math.abs(predictive - 50) < 5) {
+    lines.push(line('⚖️', `Match équilibré : <strong>${escapeHtml(home)}</strong> ${predictive}% vs <strong>${escapeHtml(away)}</strong> ${100 - predictive}%.`));
   } else {
-    // Analyse bot pas encore faite (front-engine seul)
-    lines.push(line('⏳', 'Analyse bot en attente — l\'edge officiel apparaîtra après le prochain run.'));
+    const favName = predictive > 50 ? home : away;
+    const favProb = predictive > 50 ? predictive : 100 - predictive;
+    lines.push(line('🎯', `Favori : <strong>${escapeHtml(favName)}</strong> (${favProb}%).`));
+  }
+
+  // Ligne 2 — pourquoi : top signaux, groupés par joueur favorisé (direction VRAIE).
+  // POSITIVE → contribution>0 → favorise home · NEGATIVE → favorise away · NEUTRAL ignoré.
+  const topSignals = (analysis.key_signals ?? [])
+    .slice()
+    .sort((a, b) => Math.abs(b.contribution ?? 0) - Math.abs(a.contribution ?? 0))
+    .slice(0, 3);
+
+  const homeFactors = [];
+  const awayFactors = [];
+  for (const s of topSignals) {
+    const label = _simplifyLabel(s.label, s.variable);
+    if (!label) continue;
+    if (s.direction === 'POSITIVE')      homeFactors.push(label.toLowerCase());
+    else if (s.direction === 'NEGATIVE') awayFactors.push(label.toLowerCase());
+  }
+
+  const fmtList = (arr, name) => {
+    const items = arr.map(f => `<strong>${escapeHtml(f)}</strong>`).join(' et ');
+    const verb  = arr.length > 1 ? 'favorisent' : 'favorise';
+    return `${items} ${verb} <strong>${escapeHtml(name)}</strong>`;
+  };
+
+  const parts = [];
+  if (homeFactors.length) parts.push(fmtList(homeFactors, home));
+  if (awayFactors.length) parts.push(fmtList(awayFactors, away));
+  if (parts.length) {
+    lines.push(line('📊', `Pourquoi : ${parts.join(' ; ')}.`));
   }
 
   return lines;
@@ -1811,7 +1809,7 @@ function _openBetModal(btn, match, analysis, storeInstance) {
         <span style="font-size:15px;font-weight:700">${bankroll.toFixed(2)} €</span>
       </div>
       <div style="margin-bottom:12px">
-        <label style="display:block;font-size:11px;color:var(--color-text-secondary);margin-bottom:6px">Cote réelle prise <span style="font-style:italic">(modifiez si vous misez sur un autre book)</span></label>
+        <label style="display:block;font-size:11px;color:var(--color-text-secondary);margin-bottom:6px">Cote réelle prise <span style="font-style:italic">(modifiez si vous misez chez un autre bookmaker)</span></label>
         <input type="number" id="odds-input" class="paper-modal__input" value="${oddsDecimal}" placeholder="Ex: 2.70" step="0.05" min="1.01" style="font-size:20px;font-weight:700;text-align:center;letter-spacing:0.05em"/>
       </div>
       <div style="margin-bottom:12px">

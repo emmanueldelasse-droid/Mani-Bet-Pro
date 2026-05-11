@@ -53,7 +53,7 @@ function _renderShell() {
           <button class="bot-filter-btn active" data-filter="all">Tous</button>
           <button class="bot-filter-btn" data-filter="pending">En attente</button>
           <button class="bot-filter-btn" data-filter="settled">Settlé</button>
-          <button class="bot-filter-btn" data-filter="edge">Edge ≥5%</button>
+          <button class="bot-filter-btn" data-filter="edge">Avantage ≥5%</button>
         </div>
         <div class="toolbar__actions">
           <button class="btn btn--ghost btn--sm" id="bot-settle-btn" title="Enrichir avec résultats ESPN">
@@ -288,19 +288,19 @@ function _renderStats(stats, logs, sport = 'nba') {
     </div>
     <div class="stat-card">
       <div class="stat-card__value" style="color:var(--color-signal)">${edgeCount}</div>
-      <div class="stat-card__label">Edges ≥5%</div>
+      <div class="stat-card__label">Avantages ≥5%</div>
     </div>
     <div class="stat-card">
       <div class="stat-card__value" style="color:var(--color-success)">${stats.hit_rate != null ? stats.hit_rate + '%' : '—'}</div>
-      <div class="stat-card__label">Hit rate</div>
+      <div class="stat-card__label">Taux de réussite</div>
     </div>
     <div class="stat-card">
       <div class="stat-card__value">${stats.avg_edge != null ? '+' + stats.avg_edge + '%' : '—'}</div>
-      <div class="stat-card__label">Edge moyen</div>
+      <div class="stat-card__label">Avantage moyen</div>
     </div>
     <div class="stat-card">
       <div class="stat-card__value" style="color:var(--color-data-quality)">${stats.brier_score ?? '—'}</div>
-      <div class="stat-card__label">Brier Score</div>
+      <div class="stat-card__label">Score de Brier</div>
     </div>
     <div class="stat-card">
       <div class="stat-card__value" style="color:var(--color-volatility)">${highConf}</div>
@@ -506,10 +506,10 @@ function _renderDeepAnalysis(logs, phaseFilter = 'all', sport = 'nba') {
 
   // 1. Edge buckets — toujours afficher les 4 pour voir la progression
   const edgeBuckets = [
-    { label: 'Edge ≥ 10%', min: 10, max: 999 },
-    { label: 'Edge 7-10%', min: 7,  max: 10  },
-    { label: 'Edge 5-7%',  min: 5,  max: 7   },
-    { label: 'Edge 0-5%',  min: 0,  max: 5   },
+    { label: 'Avantage ≥ 10%', min: 10, max: 999 },
+    { label: 'Avantage 7-10%', min: 7,  max: 10  },
+    { label: 'Avantage 5-7%',  min: 5,  max: 7   },
+    { label: 'Avantage 0-5%',  min: 0,  max: 5   },
   ];
   const bucketRows = edgeBuckets.map(b => {
     const grp = settled.filter(l => (l.best_edge ?? 0) >= b.min && (l.best_edge ?? 0) < b.max);
@@ -564,7 +564,7 @@ function _renderDeepAnalysis(logs, phaseFilter = 'all', sport = 'nba') {
     const c = ouReco.filter(l => l.ou_was_right === true).length;
     const p = Math.round(c / ouReco.length * 1000) / 10;
     const col = p >= 60 ? 'var(--color-success)' : p >= 50 ? 'var(--color-warning)' : 'var(--color-danger)';
-    ouRows.push(`<div class="bot-analysis-row"><span>Reco O/U quand edge ≥ 5%</span><span style="color:${col};font-weight:700">${c}/${ouReco.length} · ${p}%</span></div>`);
+    ouRows.push(`<div class="bot-analysis-row"><span>Reco O/U quand avantage ≥ 5%</span><span style="color:${col};font-weight:700">${c}/${ouReco.length} · ${p}%</span></div>`);
   }
 
   // 4. Upsets
@@ -686,15 +686,15 @@ function _renderDeepAnalysis(logs, phaseFilter = 'all', sport = 'nba') {
         <div class="bot-analysis-help">Un joueur a-t-il dépassé (ou pas) sa ligne de points ? Settlement automatique via box scores ESPN après chaque match.</div>
         ${ppPct != null ? `
         <div class="bot-analysis-row" style="font-weight:600;background:var(--color-bg-elevated);padding-left:6px;padding-right:6px;border-radius:4px;margin-bottom:4px">
-          <span>Hit rate (recos edge ≥ 5%)</span>
+          <span>Taux de réussite (recos avantage ≥ 5%)</span>
           <span style="color:${ppColor};font-weight:800">${ppCorrect}/${ppSettled.length} · ${ppPct}%</span>
         </div>
-        ${ppByConf.high.t > 0 ? `<div class="bot-analysis-row"><span>Confidence HIGH</span><span style="font-weight:700">${ppByConf.high.c}/${ppByConf.high.t}</span></div>` : ''}
-        ${ppByConf.medium.t > 0 ? `<div class="bot-analysis-row"><span>Confidence MEDIUM</span><span style="font-weight:700">${ppByConf.medium.c}/${ppByConf.medium.t}</span></div>` : ''}
-        ${ppByConf.low.t > 0 ? `<div class="bot-analysis-row"><span>Confidence LOW</span><span style="font-weight:700">${ppByConf.low.c}/${ppByConf.low.t}</span></div>` : ''}
+        ${ppByConf.high.t > 0 ? `<div class="bot-analysis-row"><span>Confiance élevée</span><span style="font-weight:700">${ppByConf.high.c}/${ppByConf.high.t}</span></div>` : ''}
+        ${ppByConf.medium.t > 0 ? `<div class="bot-analysis-row"><span>Confiance moyenne</span><span style="font-weight:700">${ppByConf.medium.c}/${ppByConf.medium.t}</span></div>` : ''}
+        ${ppByConf.low.t > 0 ? `<div class="bot-analysis-row"><span>Confiance faible</span><span style="font-weight:700">${ppByConf.low.c}/${ppByConf.low.t}</span></div>` : ''}
         ` : `<div class="bot-analysis-row"><span style="color:var(--color-muted);font-size:11px">Aucune reco PLAYER_POINTS settlée pour le moment</span></div>`}
         <div class="bot-analysis-row"><span>Matchs avec projections</span><span style="font-weight:700">${withPP}</span></div>
-        <div class="bot-analysis-row"><span>Recos PLAYER_POINTS total</span><span style="font-weight:700">${totalPPRecs}</span></div>
+        <div class="bot-analysis-row"><span>Recos props joueur (total)</span><span style="font-weight:700">${totalPPRecs}</span></div>
       </div>`}
     </div>
   </div>
@@ -802,7 +802,7 @@ function _renderLogCard(log) {
         <div class="bot-log-badges">
           ${phase ? `<span class="bot-badge bot-badge--phase">${phase}</span>` : ''}
           ${_renderConfBadge(conf)}
-          ${hasEdge ? `<span class="bot-badge bot-badge--edge">Edge +${log.best_edge}%</span>` : ''}
+          ${hasEdge ? `<span class="bot-badge bot-badge--edge">+${log.best_edge}% avantage</span>` : ''}
           ${isSettled
             ? log.motor_was_right
               ? `<span class="bot-badge bot-badge--right">✓ Correct</span>`
@@ -926,7 +926,7 @@ function _renderDetailPanel(log) {
           : '';
         return `<div class="bot-detail-row">
         <span>${label}</span>
-        <span class="bot-detail-row__val">Edge +${r.edge}% · ${r.motor_prob}% prob · cote ${r.odds_line > 0 ? '+' : ''}${r.odds_line}${extra}</span>
+        <span class="bot-detail-row__val">Avantage +${r.edge}% · ${r.motor_prob}% prob · cote ${r.odds_line > 0 ? '+' : ''}${r.odds_line}${extra}</span>
       </div>`;
       }).join('')}
     </div>` : ''}
@@ -1067,7 +1067,7 @@ function _renderTennisSettleDiag(container, data) {
   card.innerHTML = `
     <div style="font-weight:700;margin-bottom:8px;color:var(--color-text-primary)">📊 Diagnostic dernière exécution Settler</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
-      <div><span style="color:var(--color-text-secondary)">Total settled :</span> <strong>${total}</strong></div>
+      <div><span style="color:var(--color-text-secondary)">Total réglés :</span> <strong>${total}</strong></div>
       <div><span style="color:var(--color-text-secondary)">Pending trouvés :</span> <strong>${totalPending}</strong></div>
       <div><span style="color:var(--color-text-secondary)">Résultats ESPN :</span> <strong>${totalEspn}</strong></div>
       <div><span style="color:var(--color-text-secondary)">Résultats api-tennis :</span> <strong>${totalApi}</strong></div>

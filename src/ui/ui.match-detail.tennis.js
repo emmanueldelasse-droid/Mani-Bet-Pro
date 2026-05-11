@@ -139,6 +139,12 @@ function _pct(x) { return x == null ? '—' : `${Math.round(x * 100)}%`; }
 function _num(x, d = 1) { return x == null || !Number.isFinite(x) ? '—' : Number(x).toFixed(d); }
 function _int(x) { return x == null || !Number.isFinite(x) ? '—' : String(Math.round(x)); }
 
+// Traduction libellé surface pour affichage user. NE PAS utiliser pour les clés
+// API (`/tennis/stats?surface=Clay`) qui doivent rester en anglais.
+function _surfaceFr(s) {
+  return { Clay: 'Terre battue', Hard: 'Dur', Grass: 'Gazon', Carpet: 'Moquette' }[s] ?? s;
+}
+
 // Convertit diff Elo en proba attendue P1 (formule Elo standard)
 function _eloExpected(e1, e2) {
   if (e1 == null || e2 == null) return null;
@@ -200,7 +206,7 @@ function _renderEloRanking(match, data) {
   const useSurf = eSurf1 != null && eSurf2 != null && nSurf1 >= 10 && nSurf2 >= 10;
   const expectedP1 = useSurf ? _eloExpected(eSurf1, eSurf2) : _eloExpected(eAll1, eAll2);
   const quality   = useSurf ? 'VERIFIED' : (eAll1 != null && eAll2 != null ? 'PARTIAL' : 'MISSING');
-  const eloLabel  = useSurf ? `Elo ${surface}` : 'Elo overall';
+  const eloLabel  = useSurf ? `Elo ${_surfaceFr(surface)}` : 'Elo global';
 
   const diffDisplay = expectedP1 != null
     ? `<div style="font-size:20px;font-weight:800;color:var(--color-signal)">${Math.round(expectedP1 * 100)}% — ${Math.round((1 - expectedP1) * 100)}%</div>
@@ -225,14 +231,14 @@ function _renderEloRanking(match, data) {
         rank1 != null ? `#${rank1}` : '—',
         rank2 != null ? `#${rank2}` : '—',
         { better: 'low', raw1: rank1, raw2: rank2 })}
-      ${_statRow(`Elo ${surface}`,
+      ${_statRow(`Elo ${_surfaceFr(surface)}`,
         eSurf1 != null ? _int(eSurf1) : '—',
         eSurf2 != null ? _int(eSurf2) : '—',
         { better: 'high', raw1: eSurf1, raw2: eSurf2 })}
-      ${_statRow(`matchs ${surface}`,
+      ${_statRow(`matchs ${_surfaceFr(surface)}`,
         _int(nSurf1), _int(nSurf2),
         { better: 'high', raw1: nSurf1, raw2: nSurf2 })}
-      ${_statRow('Elo overall',
+      ${_statRow('Elo global',
         eAll1 != null ? _int(eAll1) : '—',
         eAll2 != null ? _int(eAll2) : '—',
         { better: 'high', raw1: eAll1, raw2: eAll2 })}
@@ -257,14 +263,14 @@ function _renderSurface(match, data) {
   return `
     <div class="card match-detail__bloc">
       <div class="bloc-header" style="margin-bottom:var(--space-3)">
-        <span class="bloc-header__title">🎯 Surface · ${_escapeHtml(surface)}</span>
+        <span class="bloc-header__title">🎯 Surface · ${_escapeHtml(_surfaceFr(surface))}</span>
         ${_qualityBadge(quality)}
       </div>
-      <div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:8px">Win rate 12 derniers mois sur ${_escapeHtml(surface)}</div>
-      ${_statRow('Win rate',
+      <div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:8px">Taux de victoires (12 derniers mois) sur ${_escapeHtml(_surfaceFr(surface).toLowerCase())}</div>
+      ${_statRow('Taux victoires',
         _pct(wr1), _pct(wr2),
         { better: 'high', raw1: wr1, raw2: wr2 })}
-      ${_statRow('Matchs (12m)',
+      ${_statRow('Matchs (12 mois)',
         _int(n1), _int(n2),
         { raw1: n1, raw2: n2 })}
     </div>`;
@@ -280,7 +286,6 @@ function _renderRecentForm(match, data) {
   const quality = (lag1 > 3 || lag2 > 3) ? 'PARTIAL'
                 : (ema1 == null || ema2 == null) ? 'MISSING' : 'VERIFIED';
 
-  // EMA ∈ [0,1] → interprétation humaine
   const _formLabel = (e) => {
     if (e == null) return '—';
     if (e >= 0.70) return `🔥 en feu`;
@@ -290,19 +295,62 @@ function _renderRecentForm(match, data) {
     return `❄️ en crise`;
   };
 
+  // 5 derniers matchs (date + adversaire + score + V/D)
+  const last1 = data.p1?.last5_matches ?? [];
+  const last2 = data.p2?.last5_matches ?? [];
+
+  const fmtDate = (iso) => {
+    if (!iso) return '—';
+    const [y, m, d] = iso.split('-');
+    return `${d}/${m}`;
+  };
+
+  const renderMatchRow = (m) => {
+    if (!m) return `<div style="font-size:11px;color:var(--color-muted);padding:3px 0">—</div>`;
+    const resultColor = m.result === 'W' ? 'var(--color-success)' : 'var(--color-danger)';
+    const resultLabel = m.result === 'W' ? 'V' : 'D';
+    const opp = m.opponent ?? '—';
+    const score = m.score ?? '';
+    return `<div style="display:flex;align-items:center;gap:6px;font-size:11px;padding:2px 0;color:var(--color-text-secondary)">
+      <span style="font-weight:700;color:${resultColor};width:14px;flex-shrink:0">${resultLabel}</span>
+      <span style="width:34px;flex-shrink:0;font-variant-numeric:tabular-nums">${fmtDate(m.date)}</span>
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--color-text)">${_escapeHtml(opp)}</span>
+      <span style="font-variant-numeric:tabular-nums;color:var(--color-text-secondary)">${_escapeHtml(score)}</span>
+    </div>`;
+  };
+
+  const list1 = last1.length > 0 ? last1.slice(0, 5).map(renderMatchRow).join('') : '<div style="font-size:11px;color:var(--color-muted);padding:4px 0">Aucun match recensé</div>';
+  const list2 = last2.length > 0 ? last2.slice(0, 5).map(renderMatchRow).join('') : '<div style="font-size:11px;color:var(--color-muted);padding:4px 0">Aucun match recensé</div>';
+
+  const p1Name = match?.home_team?.name ?? data.p1?.name ?? 'Joueur 1';
+  const p2Name = match?.away_team?.name ?? data.p2?.name ?? 'Joueur 2';
+
   return `
     <div class="card match-detail__bloc">
       <div class="bloc-header" style="margin-bottom:var(--space-3)">
         <span class="bloc-header__title">🔥 Forme récente</span>
         ${_qualityBadge(quality)}
       </div>
-      <div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:8px">EMA 10 derniers matchs · 1.00 = 10/10 victoires</div>
-      ${_statRow('EMA forme',
+      <div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:8px">Moyenne pondérée des 10 derniers matchs · 1.00 = 10 victoires sur 10</div>
+      ${_statRow('Forme récente',
         ema1 != null ? ema1.toFixed(2) : '—',
         ema2 != null ? ema2.toFixed(2) : '—',
         { better: 'high', raw1: ema1, raw2: ema2 })}
       ${_statRow('Tendance',
         _formLabel(ema1), _formLabel(ema2))}
+      <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--color-border)">
+        <div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:6px">5 derniers matchs</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <div>
+            <div style="font-size:11px;font-weight:700;margin-bottom:4px">${_escapeHtml(p1Name)}</div>
+            ${list1}
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:700;margin-bottom:4px">${_escapeHtml(p2Name)}</div>
+            ${list2}
+          </div>
+        </div>
+      </div>
     </div>`;
 }
 

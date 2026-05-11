@@ -1427,7 +1427,8 @@ function _analyzeMLBMatch(match) {
     est_total_runs:   estTotal,
     park_factor:      parkFactor,
     recommendations,
-    best_recommendation: recommendations[0] ?? null,
+    // Mode A (prudent) : exclure les paris contrarian du "best".
+    best_recommendation: recommendations.find(r => !r.is_contrarian) ?? null,
     variables_used: {
       pitcher_fip_diff: { value: Math.round(fipDiff * 100) / 100, quality: 'OK' },
       run_diff_adv:     { value: Math.round(runDiffAdv * 100), quality: hRD !== 0 ? 'OK' : 'MISSING' },

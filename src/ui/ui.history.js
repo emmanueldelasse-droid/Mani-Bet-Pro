@@ -41,7 +41,7 @@ async function _renderPage(container, storeInstance) {
     '<div class="view-header">',
     '<div class="view-header__meta">MANI BET PRO</div>',
     '<h1 class="view-header__title">Journal de paris</h1>',
-    '<div class="view-header__sub">Paper Trading \u00b7 Mode simulation</div>',
+    '<div class="view-header__sub">Paris simul\u00e9s \u00b7 Mode d\u00e9mo</div>',
     '</div>',
     _renderBankrollCard(state, pendingStake, trueCapital),
     _renderBankrollChart(state),
@@ -229,16 +229,16 @@ function _renderMetricsCard(metrics, totalBets, pendingCount) {
       'var(--color-text)',
       pendingCount > 0 ? pendingCount + ' en attente' : null
     ),
-    _metricCell('Hit rate', metrics.hit_rate !== null ? metrics.hit_rate + '%' : '\u2014', hitColor),
+    _metricCell('Taux de r\u00e9ussite', metrics.hit_rate !== null ? metrics.hit_rate + '%' : '\u2014', hitColor),
     _metricCell('ROI', metrics.roi !== null ? (metrics.roi > 0 ? '+' : '') + metrics.roi + '%' : '\u2014', roiColor),
 
     // Mise totale = clôturés seulement (les PENDING sont dans "engagés" de la bankroll)
     _metricCell('Mis\u00e9 (cl\u00f4tur\u00e9s)', totalStakedDisplay.toFixed(2) + ' \u20ac', 'var(--color-text)'),
     _metricCell('CLV moyen', metrics.avg_clv !== null ? (metrics.avg_clv > 0 ? '+' : '') + metrics.avg_clv + '%' : '\u2014', metrics.avg_clv > 0 ? 'var(--color-success)' : 'var(--color-muted)'),
-    _metricCell('Brier Score', metrics.brier_score !== null ? metrics.brier_score.toFixed(4) : '\u2014', 'var(--color-muted)', brierLabel),
+    _metricCell('Score de Brier', metrics.brier_score !== null ? metrics.brier_score.toFixed(4) : '\u2014', 'var(--color-muted)', brierLabel),
 
     '</div>',
-    '<div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:var(--space-2)">Hit rate par niveau d\'edge</div>',
+    '<div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:var(--space-2)">Taux de réussite par niveau d\'avantage</div>',
     '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-2)">',
     edgeBuckets,
     '</div>',
@@ -259,7 +259,7 @@ function _renderStrategyCard(metrics) {
     const data = strategies[key];
     if (!data) return '<div style="display:flex;justify-content:space-between;align-items:center;padding:var(--space-2) 0;border-bottom:1px solid var(--color-border)"><div><div style="font-size:12px;font-weight:600">' + strat.label + '</div><div style="font-size:10px;color:var(--color-text-secondary)">Strat\u00e9gie ' + key + '</div></div><span style="font-size:11px;color:var(--color-text-secondary)">Pas de donn\u00e9es</span></div>';
     const roiColor = data.roi > 0 ? 'var(--color-success)' : 'var(--color-danger)';
-    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:var(--space-2) 0;border-bottom:1px solid var(--color-border)"><div><div style="font-size:12px;font-weight:600">' + strat.label + '</div><div style="font-size:10px;color:var(--color-text-secondary)">Strat\u00e9gie ' + key + ' \u00b7 ' + data.total + ' paris</div></div><div style="text-align:right"><div style="font-size:13px;font-weight:600;color:' + roiColor + '">ROI ' + (data.roi !== null ? (data.roi > 0 ? '+' : '') + data.roi + '%' : '\u2014') + '</div><div style="font-size:10px;color:var(--color-text-secondary)">' + data.hit_rate + '% hit rate</div></div></div>';
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:var(--space-2) 0;border-bottom:1px solid var(--color-border)"><div><div style="font-size:12px;font-weight:600">' + strat.label + '</div><div style="font-size:10px;color:var(--color-text-secondary)">Strat\u00e9gie ' + key + ' \u00b7 ' + data.total + ' paris</div></div><div style="text-align:right"><div style="font-size:13px;font-weight:600;color:' + roiColor + '">ROI ' + (data.roi !== null ? (data.roi > 0 ? '+' : '') + data.roi + '%' : '\u2014') + '</div><div style="font-size:10px;color:var(--color-text-secondary)">' + data.hit_rate + '% taux de réussite</div></div></div>';
   }).join('');
 
   return '<div class="card" style="margin-bottom:var(--space-4)"><div style="font-weight:600;font-size:14px;margin-bottom:var(--space-3)">Comparaison strat\u00e9gies</div><div style="display:flex;flex-direction:column;gap:var(--space-2)">' + rows + '</div></div>';
@@ -368,7 +368,7 @@ function _renderBetRow(bet, isFirstInGroup, groupSize) {
     '<div style="display:flex;gap:12px;font-size:11px;margin-bottom:4px;flex-wrap:wrap">',
     '<span><strong>' + (bet.side_label || '') + '</strong> ' + (oddsDecimal ? oddsDecimal.toFixed(2) : '') + '</span>',
     '<span style="color:var(--color-text-secondary)">Mise : ' + bet.stake.toFixed(2) + ' \u20ac</span>',
-    '<span style="color:var(--color-text-secondary)">Edge : ' + bet.edge + '%</span>',
+    '<span style="color:var(--color-text-secondary)">Avantage : ' + bet.edge + '%</span>',
     bet.pnl !== null ? '<span style="color:' + (bet.pnl >= 0 ? 'var(--color-success)' : 'var(--color-danger)') + '">P&L : ' + (bet.pnl >= 0 ? '+' : '') + bet.pnl.toFixed(2) + ' \u20ac</span>' : '',
     bet.clv !== null ? '<span style="color:var(--color-text-secondary)">CLV : ' + (bet.clv > 0 ? '+' : '') + bet.clv + '%</span>' : '',
     '</div>',
@@ -421,7 +421,7 @@ function _renderBetDetail(bet) {
   if (bet.ou_line != null)     rows.push(_detailRow('Ligne O/U', bet.ou_line + ' pts'));
 
   rows.push(_detailRow('Mise', bet.stake.toFixed(2) + ' \u20ac'));
-  rows.push(_detailRow('Edge moteur', '+' + bet.edge + '%'));
+  rows.push(_detailRow('Avantage moteur', '+' + bet.edge + '%'));
 
   if (bet.motor_prob   != null) rows.push(_detailRow('Prob. moteur', bet.motor_prob + '%'));
   if (bet.implied_prob != null) rows.push(_detailRow('Prob. march\u00e9', bet.implied_prob + '%'));
@@ -606,7 +606,7 @@ function _openModal(container, bet) {
 function _exportCSV(bets) {
   if (!bets.length) return;
 
-  const headers = ['Date', 'Match', 'Score', 'March\u00e9', 'C\u00f4te', 'C\u00f4te decimale', 'Mise', 'Edge', 'Moteur%', 'March\u00e9%', 'R\u00e9sultat', 'P&L', 'CLV', 'Strat\u00e9gie', 'Signal dominant'];
+  const headers = ['Date', 'Match', 'Score', 'March\u00e9', 'Cote', 'Cote d\u00e9cimale', 'Mise', 'Avantage', 'Moteur%', 'March\u00e9%', 'R\u00e9sultat', 'Gain/Perte', 'CLV', 'Strat\u00e9gie', 'Signal dominant'];
   const rows = bets.map(function(b) {
     const dec = _americanToDecimal(b.odds_taken);
     return [

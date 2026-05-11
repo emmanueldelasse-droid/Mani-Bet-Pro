@@ -126,7 +126,7 @@ export class EngineNBA {
 
     const hasOdds    = matchData?.odds != null || matchData?.market_odds != null;
     const bettingRecs = (score !== null && hasOdds)
-      ? computeBettingRecommendations(score, matchData?.odds ?? {}, matchData, variables, signals, marketDivergence)
+      ? computeBettingRecommendations(score, matchData?.odds ?? {}, enrichedData, variables, signals, marketDivergence)
       : null;
 
     Logger.debug('ENGINE_NBA_RESULT', {

@@ -217,6 +217,7 @@ export function computeMLB(matchData) {
       const impliedProb = americanToProb(best.odds);
       const edge        = Math.round((prob - impliedProb) * 100);
       if (edge >= EDGE_THRESHOLD_MIN) {
+        const isContrarian = (side === 'HOME' && homeProb <= 0.5) || (side === 'AWAY' && awayProb <= 0.5);
         recommendations.push({
           type:        'MONEYLINE',
           label:       'Vainqueur',
@@ -229,6 +230,7 @@ export function computeMLB(matchData) {
           edge,
           kelly_stake: computeKelly(prob, best.odds),
           has_value:   true,
+          is_contrarian: isContrarian,
         });
       }
     }
@@ -280,7 +282,8 @@ export function computeMLB(matchData) {
 
   // Trier par edge décroissant
   recommendations.sort((a, b) => b.edge - a.edge);
-  const best = recommendations[0] ?? null;
+  // Mode A (prudent) : exclure les paris contrarian du "best".
+  const best = recommendations.find(r => !r.is_contrarian) ?? null;
 
   return {
     home_prob:    Math.round(homeProb  * 100),
