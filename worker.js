@@ -123,7 +123,7 @@ const QUOTA_KV_KEY        = 'odds_quota_state';
 const TANK01_KV_KEY       = 'tank01_teams_stats';
 const TANK01_INJURIES_KEY = 'tank01_injuries_impact';
 const TANK01_ROSTER_KEY   = 'tank01_roster_injuries_v1';
-const TENNIS_CSV_KEY      = 'tennis_csv_stats_v6';   // v6 : H2H pondéré récence + dates par match (api-tennis 365j)
+const TENNIS_CSV_KEY      = 'tennis_csv_stats_v7';   // v7 : matching tolérant noms Sackmann↔api-tennis (lastname+initiale)
 const TENNIS_ODDS_KEY     = 'tennis_odds_cache_v2';   // v2 : whitelist books fiables (exclut Matchbook/Smarkets)
 const TENNIS_API_BASE     = 'https://api.api-tennis.com/tennis';
 const TENNIS_API_KEYMAP   = 'tennis_api_keymap_v1';   // KV cache name → player_key
@@ -6694,23 +6694,35 @@ async function _apiTennisFetchRecentMatches(playerInfo, env, daysBack = 60) {
 // - Matchs api-tennis sans équivalent Sackmann → ajoutés tels quels.
 // Limite Sackmann : tourney_date = date de début du tournoi · tous les matchs d'un même
 // tournoi partagent la même date → affichage UI incorrect. api-tennis fournit la vraie date.
+//
+// Matching noms tolérant : Sackmann stocke "Sorana Cirstea" (nom complet) et api-tennis
+// souvent "S. Cirstea" (initiale). Indexe par lastname+initiale pour permettre match.
 function _mergeTennisRows(sackmannRows, apiRows) {
-  // Index api-tennis par paire (winner|loser) normalisée pour lookup rapide
+  // Clé tolérante : "lastname|firstInitial" (gère "Sorana Cirstea" vs "S. Cirstea")
+  const nameKey = (raw) => {
+    const norm = _normalizeTennisName(raw);
+    const parts = norm.split(' ').filter(Boolean);
+    if (parts.length < 2) return norm;
+    return `${parts[parts.length - 1]}|${parts[0][0]}`;
+  };
+  const pairKey = (w, l) => `${nameKey(w)}>${nameKey(l)}`;
+  // Index api-tennis par paire tolérante
   const apiByPair = new Map();
   for (const a of apiRows) {
-    const k = `${_normalizeTennisName(a.winner_name)}|${_normalizeTennisName(a.loser_name)}`;
+    const k = pairKey(a.winner_name, a.loser_name);
     if (!apiByPair.has(k)) apiByPair.set(k, []);
     apiByPair.get(k).push(a);
   }
   const dateInt = (s) => parseInt(s || '0', 10);
   const seenApi = new Set();
   for (const r of sackmannRows) {
-    const k = `${_normalizeTennisName(r.winner_name)}|${_normalizeTennisName(r.loser_name)}`;
+    const k = pairKey(r.winner_name, r.loser_name);
     const candidates = apiByPair.get(k);
     if (!candidates?.length) continue;
     const sd = dateInt(r.tourney_date);
     let best = null, bestDiff = Infinity;
     for (const a of candidates) {
+      if (seenApi.has(a)) continue;
       const ad = dateInt(a.tourney_date);
       const diff = Math.abs(sd - ad);
       if (diff <= 10 && diff < bestDiff) { best = a; bestDiff = diff; }
