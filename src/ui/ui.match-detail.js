@@ -574,7 +574,11 @@ function renderBlocSyntheseSummary(analysis, match) {
 
   if (!best || best.edge < 5) return '';
 
-  const typeLabel = best.type === 'MONEYLINE' ? 'Vainqueur'
+  // "Vainqueur" est trompeur quand le pari est sur l'outsider (cote sous-évaluée
+  // mais on pense que l'autre gagne). best.is_contrarian est défini par les
+  // moteurs tennis/NBA/MLB quand side ≠ favori du score moteur.
+  const isContrarian = best.is_contrarian === true;
+  const typeLabel = best.type === 'MONEYLINE' ? (isContrarian ? 'Pari valeur' : 'Vainqueur')
                   : best.type === 'SPREAD' ? 'Handicap'
                   : best.type === 'PLAYER_POINTS' ? 'Props'
                   : 'O/U';
@@ -1522,57 +1526,51 @@ function _buildSyntheseLines(analysis, match) {
   const home       = match?.home_team?.name ?? 'Domicile';
   const away       = match?.away_team?.name ?? 'Extérieur';
   const predictive = analysis.predictive_score != null ? Math.round(analysis.predictive_score * 100) : null;
-  const keySignals = (analysis.key_signals ?? []).slice(0, 2).map(s => _simplifyLabel(s.label, s.variable)).filter(Boolean);
-  const best       = analysis.betting_recommendations?.best ?? null;
 
   const lines = [];
   const line = (icon, text) => `<div style="display:flex;gap:8px;padding:4px 0"><span style="flex-shrink:0">${icon}</span><div>${text}</div></div>`;
 
-  // Ligne 1 — qui est favori et à combien
-  if (predictive != null) {
-    const favName  = predictive > 50 ? home : away;
-    const favProb  = predictive > 50 ? predictive : 100 - predictive;
-    const othProb  = 100 - favProb;
-    if (Math.abs(predictive - 50) < 5) {
-      lines.push(line('⚖️', `Match équilibré selon notre analyse : <strong>${escapeHtml(home)}</strong> ${predictive}% contre <strong>${escapeHtml(away)}</strong> ${100 - predictive}%.`));
-    } else {
-      lines.push(line('🎯', `Favori : <strong>${escapeHtml(favName)}</strong> à <strong>${favProb}%</strong> de chances estimées (vs ${othProb}%).`));
-    }
-  } else {
+  if (predictive == null) {
     lines.push(line('⚠️', 'Données insuffisantes pour déterminer un favori.'));
+    return lines;
   }
 
-  // Ligne 2 — comparaison marché vs analyse
-  if (best && best.implied_prob != null && best.edge != null) {
-    const oddsDec = best.odds_decimal ? Number(best.odds_decimal).toFixed(2) : '—';
-    lines.push(line('💰', `Cote bookmaker <strong>${oddsDec}</strong> = marché donne <strong>${best.implied_prob}%</strong> de chances. Notre analyse voit <strong>${best.edge}% de plus</strong> → valeur détectée.`));
-  }
-
-  // Ligne 3 — raisons (sans redondance)
-  if (keySignals.length) {
-    const listed = keySignals.map(s => `<strong>${escapeHtml(s.toLowerCase())}</strong>`).join(' et ');
-    lines.push(line('📊', `Ce qui fait pencher l'analyse : ${listed}.`));
-  }
-
-  // Ligne 4 — action recommandée
-  if (best) {
-    const typeLabel = best.type === 'MONEYLINE' ? 'Victoire'
-                    : best.type === 'SPREAD' ? 'Handicap'
-                    : best.type === 'PLAYER_POINTS' ? `Points ${best.player ?? ''}`
-                    : 'Total de points';
-    let sideLabel;
-    if (best.type === 'PLAYER_POINTS') sideLabel = `${best.side === 'OVER' ? '+' : '−'}${best.line}`;
-    else if (best.side === 'HOME')     sideLabel = home;
-    else if (best.side === 'AWAY')     sideLabel = away;
-    else if (best.side === 'OVER')     sideLabel = `Plus de ${best.ou_line ?? '—'}`;
-    else                               sideLabel = `Moins de ${best.ou_line ?? '—'}`;
-    lines.push(line('👉', `Pari suggéré : <strong>${escapeHtml(typeLabel)} — ${escapeHtml(sideLabel)}</strong>.`));
-  } else if (analysis.betting_recommendations != null) {
-    // Bot a tourné, mais pas trouvé de value
-    lines.push(line('🚫', 'Aucune cote sous-évaluée — passer ce match.'));
+  // Ligne 1 — favori (ou match équilibré)
+  if (Math.abs(predictive - 50) < 5) {
+    lines.push(line('⚖️', `Match équilibré : <strong>${escapeHtml(home)}</strong> ${predictive}% vs <strong>${escapeHtml(away)}</strong> ${100 - predictive}%.`));
   } else {
-    // Analyse bot pas encore faite (front-engine seul)
-    lines.push(line('⏳', 'Analyse bot en attente — l\'edge officiel apparaîtra après le prochain run.'));
+    const favName = predictive > 50 ? home : away;
+    const favProb = predictive > 50 ? predictive : 100 - predictive;
+    lines.push(line('🎯', `Favori : <strong>${escapeHtml(favName)}</strong> (${favProb}%).`));
+  }
+
+  // Ligne 2 — pourquoi : top signaux, groupés par joueur favorisé (direction VRAIE).
+  // POSITIVE → contribution>0 → favorise home · NEGATIVE → favorise away · NEUTRAL ignoré.
+  const topSignals = (analysis.key_signals ?? [])
+    .slice()
+    .sort((a, b) => Math.abs(b.contribution ?? 0) - Math.abs(a.contribution ?? 0))
+    .slice(0, 3);
+
+  const homeFactors = [];
+  const awayFactors = [];
+  for (const s of topSignals) {
+    const label = _simplifyLabel(s.label, s.variable);
+    if (!label) continue;
+    if (s.direction === 'POSITIVE')      homeFactors.push(label.toLowerCase());
+    else if (s.direction === 'NEGATIVE') awayFactors.push(label.toLowerCase());
+  }
+
+  const fmtList = (arr, name) => {
+    const items = arr.map(f => `<strong>${escapeHtml(f)}</strong>`).join(' et ');
+    const verb  = arr.length > 1 ? 'favorisent' : 'favorise';
+    return `${items} ${verb} <strong>${escapeHtml(name)}</strong>`;
+  };
+
+  const parts = [];
+  if (homeFactors.length) parts.push(fmtList(homeFactors, home));
+  if (awayFactors.length) parts.push(fmtList(awayFactors, away));
+  if (parts.length) {
+    lines.push(line('📊', `Pourquoi : ${parts.join(' ; ')}.`));
   }
 
   return lines;

@@ -6985,6 +6985,23 @@ function _computeTennisPlayerStats(rows, playerName, surface, today) {
     daysSince = Math.floor((today - d) / 86400000);
   }
 
+  // 5 derniers matchs pour affichage UI · date · adversaire · score · résultat · surface
+  const last5_matches = last10.slice(0, 5).map(m => {
+    const isWin = m.winner_name === resolvedName;
+    const opponent = isWin ? m.loser_name : m.winner_name;
+    const d = m.tourney_date || '';
+    const dateIso = d.length === 8 ? `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}` : null;
+    return {
+      date:        dateIso,
+      opponent,
+      score:       m.score || null,
+      result:      isWin ? 'W' : 'L',
+      surface:     m.surface || null,
+      tourney:     m.tourney_name || null,
+      round:       m.round || null,
+    };
+  });
+
   return {
     name: playerName,
     resolved_name:      resolvedName !== playerName ? resolvedName : undefined,
@@ -6994,6 +7011,7 @@ function _computeTennisPlayerStats(rows, playerName, surface, today) {
     recent_form_ema_global:  Math.round(ema * 100) / 100,
     recent_form_ema_surface: surfaceEma != null ? Math.round(surfaceEma * 100) / 100 : null,
     surface_form_sample:     surfaceLast10.length,
+    last5_matches,
     service_stats:      svcStats,
     break_point_stats:  bpStats,
     load_14d:           load14d,
