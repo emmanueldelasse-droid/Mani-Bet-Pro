@@ -124,7 +124,7 @@ const TANK01_KV_KEY       = 'tank01_teams_stats';
 const TANK01_INJURIES_KEY = 'tank01_injuries_impact';
 const TANK01_ROSTER_KEY   = 'tank01_roster_injuries_v1';
 const TENNIS_CSV_KEY      = 'tennis_csv_stats_v5';   // v5 : ajout last5_matches dans stats joueur
-const TENNIS_ODDS_KEY     = 'tennis_odds_cache';
+const TENNIS_ODDS_KEY     = 'tennis_odds_cache_v2';   // v2 : whitelist books fiables (exclut Matchbook/Smarkets)
 const TENNIS_API_BASE     = 'https://api.api-tennis.com/tennis';
 const TENNIS_API_KEYMAP   = 'tennis_api_keymap_v1';   // KV cache name → player_key
 const TENNIS_ODDS_SNAP_PREFIX = 'tennis_odds_snap_';  // KV : historique cotes par match (steam)
@@ -6478,15 +6478,36 @@ async function handleTennisOdds(url, env, origin) {
     const resp    = await fetchTimeout(oddsUrl, { headers: { Accept: 'application/json' } }, 12000);
     if (!resp.ok) return jsonResponse({ available: false, note: `Odds API error ${resp.status}` }, 200, origin);
     const data    = await resp.json();
+    // Whitelist bookmakers fiables : évite outliers Matchbook/Smarkets (exchanges
+    // peer-to-peer, thin liquidity → cotes aberrantes). Aligné NBA · si match
+    // pas couvert, fallback sur tous les books triés par cote la plus haute.
+    const TRUSTED_BOOKS = new Set([
+      'pinnacle', 'winamax', 'betclic', 'unibet_eu', 'unibet_fr',
+      'bet365', 'betsson', 'williamhill', 'marathonbet',
+    ]);
     const matches = (Array.isArray(data) ? data : []).map(event => {
       let bestP1 = null, bestP2 = null, bestBook = null;
+      // 1ère passe : books fiables uniquement
       for (const bk of (event.bookmakers ?? [])) {
+        if (!TRUSTED_BOOKS.has(bk.key)) continue;
         const h2h = bk.markets?.find(m => m.key === 'h2h');
         if (!h2h) continue;
         const o1 = h2h.outcomes?.find(o => o.name === event.home_team)?.price;
         const o2 = h2h.outcomes?.find(o => o.name === event.away_team)?.price;
         if (!o1 || !o2) continue;
         if (!bestP1 || o1 > bestP1) { bestP1 = o1; bestP2 = o2; bestBook = bk.title; }
+      }
+      // 2e passe (fallback) : si aucun book fiable n'a coté, on accepte tous
+      // les books pour ne pas perdre le match. Source notée pour debug.
+      if (!bestP1) {
+        for (const bk of (event.bookmakers ?? [])) {
+          const h2h = bk.markets?.find(m => m.key === 'h2h');
+          if (!h2h) continue;
+          const o1 = h2h.outcomes?.find(o => o.name === event.home_team)?.price;
+          const o2 = h2h.outcomes?.find(o => o.name === event.away_team)?.price;
+          if (!o1 || !o2) continue;
+          if (!bestP1 || o1 > bestP1) { bestP1 = o1; bestP2 = o2; bestBook = `${bk.title} (fallback)`; }
+        }
       }
       return {
         id: event.id, home_player: event.home_team, away_player: event.away_team,
