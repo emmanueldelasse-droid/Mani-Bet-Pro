@@ -15,17 +15,25 @@ export { americanToDecimal, decimalToAmerican };
 export const WORKER_URL = 'https://manibetpro.emmanueldelasse.workers.dev';
 
 export const SIGNAL_LABELS = {
+  // NBA
   'recent_form_ema':       'Forme récente',
   'home_away_split':       'Avantage terrain',
   'efg_diff':              'Efficacité au tir',
   'net_rating_diff':       'Niveau général',
   'win_pct_diff':          'Bilan victoires/défaites',
   'absences_impact':       'Blessures',
-  'ts_diff':               'Efficacité offensive',
+  'ts_diff':               'Efficacité au tir vrai (TS%)',
   'avg_pts_diff':          'Points marqués',
   'defensive_diff':        'Défense',
   'back_to_back':          'Fatigue (match consécutif)',
   'rest_days_diff':        'Repos',
+  'pace_diff':             'Rythme de jeu',
+  'b2b_cumul_diff':        'Cumul matchs consécutifs',
+  'travel_load_diff':      'Charge de voyage',
+  // MLB
+  'pitcher_fip_diff':      'Avantage pitcher (FIP)',
+  'run_diff_adv':          'Différentiel runs saison',
+  'rest_adv':              'Repos pitcher',
   // Tennis
   'ranking_elo_diff':      'Niveau joueur (Elo)',
   'surface_winrate_diff':  'Réussite sur la surface',

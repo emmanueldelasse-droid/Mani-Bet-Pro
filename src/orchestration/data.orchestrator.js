@@ -1394,9 +1394,12 @@ function _analyzeMLBMatch(match) {
     const implied = 1 / best.decimalOdds;
     const edge    = Math.round((prob - implied) * 100);
     if (edge >= 5) {
+      // Mode prudent : flag contrarian = on bet sur le côté < 50% selon notre proba
+      const isContrarian = (side === 'HOME' && homeProb <= 0.5) || (side === 'AWAY' && homeProb > 0.5);
       recommendations.push({ type: 'MONEYLINE', side, edge,
         odds_decimal: best.decimalOdds, odds_source: best.bookmaker,
-        motor_prob: Math.round(prob * 100), implied_prob: Math.round(implied * 100), has_value: true });
+        motor_prob: Math.round(prob * 100), implied_prob: Math.round(implied * 100),
+        has_value: true, is_contrarian: isContrarian });
     }
   }
   recommendations.sort((a, b) => b.edge - a.edge);
@@ -1412,6 +1415,19 @@ function _analyzeMLBMatch(match) {
   if (!away_pitcher?.era && !away_pitcher?.fip) missing.push('away_pitcher');
 
   // Format compatible EngineCore
+  // key_signals : variables avec contribution non négligeable, direction POSITIVE
+  // si favorise HOME, NEGATIVE si favorise AWAY. Permet à la synthèse d'afficher
+  // "Pourquoi : pitcher favorise <équipe>".
+  const _sigDir = (contrib) => Math.abs(contrib) < 0.005 ? 'NEUTRAL' : contrib > 0 ? 'POSITIVE' : 'NEGATIVE';
+  const key_signals = [
+    { variable: 'pitcher_fip_diff', label: 'Avantage pitcher (FIP)',
+      contribution: pitcherAdv, direction: _sigDir(pitcherAdv) },
+    { variable: 'run_diff_adv',     label: 'Différentiel runs saison',
+      contribution: runDiffAdv,  direction: _sigDir(runDiffAdv) },
+    { variable: 'rest_adv',         label: 'Repos pitcher',
+      contribution: restAdv,     direction: _sigDir(restAdv) },
+  ].filter(s => Math.abs(s.contribution) >= 0.01);
+
   return {
     sport:            'MLB',
     match_id:         match.id,
@@ -1429,6 +1445,7 @@ function _analyzeMLBMatch(match) {
     recommendations,
     // Mode A (prudent) : exclure les paris contrarian du "best".
     best_recommendation: recommendations.find(r => !r.is_contrarian) ?? null,
+    key_signals,
     variables_used: {
       pitcher_fip_diff: { value: Math.round(fipDiff * 100) / 100, quality: 'OK' },
       run_diff_adv:     { value: Math.round(runDiffAdv * 100), quality: hRD !== 0 ? 'OK' : 'MISSING' },
