@@ -219,9 +219,12 @@ export function computeBettingRecommendations(score, odds, matchData, variables,
   // edge affiche '—' au lieu de sa prob réelle.
   const ouNoValue = recs.filter(r => r.type === 'OVER_UNDER' && !r.has_value);
   const allRecs   = [...validRecs, ...ouNoValue];
+  // Mode A (prudent) : exclure les paris contrarian du "best" — pas assez de
+  // données pour valider l'edge sur outsider. Recs restent visibles dans la liste.
+  const nonContrarianValid = validRecs.filter(r => !r.is_contrarian);
   return {
     recommendations:        allRecs,
-    best:                   isCriticalDivergence ? null : (validRecs[0] ?? null),
+    best:                   isCriticalDivergence ? null : (nonContrarianValid[0] ?? null),
     computed_at:            new Date().toISOString(),
     market_divergence_flag: marketDivergence?.flag ?? 'low',
     market_divergence_pts:  marketDivergence?.divergence_pts ?? null,

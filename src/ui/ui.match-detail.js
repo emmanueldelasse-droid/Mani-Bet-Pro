@@ -1795,7 +1795,7 @@ function _openBetModal(btn, match, analysis, storeInstance) {
         <span style="font-size:15px;font-weight:700">${bankroll.toFixed(2)} €</span>
       </div>
       <div style="margin-bottom:12px">
-        <label style="display:block;font-size:11px;color:var(--color-text-secondary);margin-bottom:6px">Cote réelle prise <span style="font-style:italic">(modifiez si vous misez sur un autre book)</span></label>
+        <label style="display:block;font-size:11px;color:var(--color-text-secondary);margin-bottom:6px">Cote réelle prise <span style="font-style:italic">(modifiez si vous misez chez un autre bookmaker)</span></label>
         <input type="number" id="odds-input" class="paper-modal__input" value="${oddsDecimal}" placeholder="Ex: 2.70" step="0.05" min="1.01" style="font-size:20px;font-weight:700;text-align:center;letter-spacing:0.05em"/>
       </div>
       <div style="margin-bottom:12px">

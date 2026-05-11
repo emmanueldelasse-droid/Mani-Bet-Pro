@@ -371,10 +371,10 @@ function _renderDeepAnalysis(logs, phaseFilter = 'all', sport = 'nba') {
 
   // 1. Edge buckets — toujours afficher les 4 pour voir la progression
   const edgeBuckets = [
-    { label: 'Edge ≥ 10%', min: 10, max: 999 },
-    { label: 'Edge 7-10%', min: 7,  max: 10  },
-    { label: 'Edge 5-7%',  min: 5,  max: 7   },
-    { label: 'Edge 0-5%',  min: 0,  max: 5   },
+    { label: 'Avantage ≥ 10%', min: 10, max: 999 },
+    { label: 'Avantage 7-10%', min: 7,  max: 10  },
+    { label: 'Avantage 5-7%',  min: 5,  max: 7   },
+    { label: 'Avantage 0-5%',  min: 0,  max: 5   },
   ];
   const bucketRows = edgeBuckets.map(b => {
     const grp = settled.filter(l => (l.best_edge ?? 0) >= b.min && (l.best_edge ?? 0) < b.max);

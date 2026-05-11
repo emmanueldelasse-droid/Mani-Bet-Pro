@@ -5280,20 +5280,24 @@ function _botComputeBettingRecs(score, matchData, signals, marketDivergence) {
         const k = (b * motorProb - (1 - motorProb)) / b;
         return k <= 0 ? 0 : Math.min(k * 0.25, 0.05);
       })();
+      const isContrarian = (side === 'HOME' && score <= 0.5) || (side === 'AWAY' && score > 0.5);
       recs.push({
         type: 'MONEYLINE', side,
         odds_line: bestBook.odds, odds_source: bestBook.bookmaker,
         motor_prob: Math.round(motorProb * 100), implied_prob: Math.round(implied * 100),
         edge: Math.round(absEdge * 100),
         has_value: true, kelly_stake: kelly,
+        is_contrarian: isContrarian,
       });
     }
   }
 
   const isCritDiv = marketDivergence?.flag === 'critical';
+  // Mode A (prudent) : exclure les paris contrarian du "best".
+  const nonContrarian = recs.filter(r => !r.is_contrarian);
   return {
     recommendations: recs,
-    best: isCritDiv ? null : (recs[0] ?? null),
+    best: isCritDiv ? null : (nonContrarian[0] ?? null),
     market_divergence_flag: marketDivergence?.flag ?? 'low',
   };
 }
@@ -8988,7 +8992,9 @@ function _botTennisBettingRecs(score, oddsH2H, ctx = {}) {
   if (Math.abs(edgeP1) >= EDGE_MIN) pushRec(edgeP1 > 0 ? 'HOME' : 'AWAY', edgeP1 > 0 ? score : 1 - score, edgeP1 > 0 ? p1Odds : p2Odds);
   if (recs.length === 0) return null;
   recs.sort((a, b) => b.edge - a.edge);
-  return { recommendations: recs, best: recs[0] };
+  // Mode A (prudent) : exclure les paris contrarian du "best".
+  const best = recs.find(r => !r.is_contrarian) ?? null;
+  return { recommendations: recs, best };
 }
 
 function _botTennisDataQuality(variables) {
