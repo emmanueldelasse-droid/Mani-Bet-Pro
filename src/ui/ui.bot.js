@@ -894,40 +894,40 @@ function _renderDetailPanel(log) {
 
   return `
     <div class="bot-detail-section">
-      <div class="bot-detail-title">Toutes les variables</div>
+      <div class="bot-detail-title">Toutes les variables d'analyse</div>
       ${Object.entries(vars).map(([k, v]) => `
         <div class="bot-detail-row">
           <span>${_shortSignalLabel(k)}</span>
           <span class="bot-detail-row__val">
             ${v.value != null ? _fmtVal(k, v.value) : '—'}
-            <span style="font-size:10px;color:var(--color-muted);font-weight:400"> ${v.quality ?? ''}</span>
+            <span style="font-size:10px;color:var(--color-muted);font-weight:400"> ${_qualityFr(v.quality)}</span>
           </span>
         </div>`).join('')}
     </div>
 
     ${missing.length ? `<div class="bot-detail-section">
-      <div class="bot-detail-title">Variables manquantes</div>
+      <div class="bot-detail-title">Données manquantes</div>
       <div style="font-size:12px;color:var(--color-danger)">${missing.map(_shortSignalLabel).join(', ')}</div>
     </div>` : ''}
 
     ${log.market_divergence ? `<div class="bot-detail-section">
-      <div class="bot-detail-title">Divergence marché</div>
-      <div class="bot-detail-row"><span>Divergence</span><span class="bot-detail-row__val">${log.market_divergence.divergence_pts ?? '—'} pts · ${log.market_divergence.flag}</span></div>
-      <div class="bot-detail-row"><span>Implied home</span><span class="bot-detail-row__val">${log.market_divergence.market_implied_home != null ? Math.round(log.market_divergence.market_implied_home * 100) + '%' : '—'}</span></div>
+      <div class="bot-detail-title">Écart bot vs bookmaker</div>
+      <div class="bot-detail-row"><span>Différence de prédiction</span><span class="bot-detail-row__val">${log.market_divergence.divergence_pts ?? '—'} pts · ${_divergenceFlagFr(log.market_divergence.flag)}</span></div>
+      <div class="bot-detail-row"><span>Bookmaker donne au domicile</span><span class="bot-detail-row__val">${log.market_divergence.market_implied_home != null ? Math.round(log.market_divergence.market_implied_home * 100) + '%' : '—'}</span></div>
     </div>` : ''}
 
     ${recs.length ? `<div class="bot-detail-section">
-      <div class="bot-detail-title">Recommandations</div>
+      <div class="bot-detail-title">Recommandations de paris</div>
       ${recs.map(r => {
         const label = r.type === 'PLAYER_POINTS'
-          ? `${r.player} ${r.side} ${r.line}`
-          : `${r.type} ${r.side}`;
+          ? `${r.player} · ${r.side === 'OVER' ? 'plus de' : 'moins de'} ${r.line} pts`
+          : _betTypeFr(r.type, r.side);
         const extra = r.type === 'PLAYER_POINTS'
-          ? ` · proj ${r.projected_pts} · conf ${r.confidence_label ?? '—'}${r.edge_raw && r.edge_raw !== r.edge ? ` (raw ${r.edge_raw}%→${r.edge}%)` : ''} · ${r.odds_source ?? ''}`
+          ? ` · projection ${r.projected_pts} pts · ${_confidenceFr(r.confidence_label)}${r.edge_raw && r.edge_raw !== r.edge ? ` (avantage brut ${r.edge_raw}% → ajusté ${r.edge}%)` : ''}${r.odds_source ? ' · source ' + r.odds_source : ''}`
           : '';
         return `<div class="bot-detail-row">
         <span>${label}</span>
-        <span class="bot-detail-row__val">Avantage +${r.edge}% · ${r.motor_prob}% prob · cote ${r.odds_line > 0 ? '+' : ''}${r.odds_line}${extra}</span>
+        <span class="bot-detail-row__val">Cote sous-évaluée de +${r.edge}% · prob. bot ${r.motor_prob}% · cote ${_fmtOdds(r.odds_line)}${extra}</span>
       </div>`;
       }).join('')}
     </div>` : ''}
@@ -936,14 +936,14 @@ function _renderDetailPanel(log) {
     ${_renderMLBPitcherStrikeoutsSection(log)}
 
     ${log.star_absence_modifier != null && log.star_absence_modifier !== 1 ? `<div class="bot-detail-section">
-      <div class="bot-detail-title">Modificateur star absence</div>
-      <div style="font-size:12px;color:var(--color-warning)">× ${log.star_absence_modifier} appliqué au score</div>
+      <div class="bot-detail-title">Ajustement pour absence d'une star</div>
+      <div style="font-size:12px;color:var(--color-warning)">Score multiplié par × ${log.star_absence_modifier} (joueur clé absent)</div>
     </div>` : ''}
 
     <div style="font-size:10px;color:var(--color-muted);padding-top:8px">
       Analysé le ${log.logged_at ? new Date(log.logged_at).toLocaleString('fr-FR') : '—'}
-      · Score méthode : ${log.score_method ?? '—'}
-      · Phase : ${log.nba_phase ?? '—'}
+      · Méthode de calcul : ${_scoreMethodFr(log.score_method)}
+      · Phase compétition : ${log.nba_phase ?? '—'}
     </div>
   `;
 }
@@ -954,24 +954,25 @@ function _renderPlayerPropsSection(log) {
   const all = [...(pp.home_players ?? []), ...(pp.away_players ?? [])];
   if (all.length === 0) return '';
 
+  // v6.90 : titre + valeurs traduits FR · ppg = moyenne saison, pts/min = points par minute
   const hasMarket = all.some(p => p.market);
   const title = hasMarket
-    ? `Props joueur (Phase ${pp.phase} · marché connecté)`
-    : `Props joueur (Phase ${pp.phase} · projection seule)`;
+    ? `Points par joueur · phase ${pp.phase} · ligne bookmaker disponible`
+    : `Points par joueur · phase ${pp.phase} · projection seule`;
 
   const rows = all.slice(0, 10).map(p => {
     const mk   = p.market;
-    const line = mk ? ` vs ${mk.line}` : '';
+    const line = mk ? ` vs ligne ${mk.line}` : '';
     const edge = mk && (mk.over_edge != null || mk.under_edge != null)
-      ? ` · edge O:${mk.over_edge ?? '—'}% U:${mk.under_edge ?? '—'}%`
+      ? ` · avantage plus de:${mk.over_edge ?? '—'}% · moins de:${mk.under_edge ?? '—'}%`
       : '';
-    const model = p.model === 'pts_per_min' ? 'pts/min' : 'ppg';
+    const model = p.model === 'pts_per_min' ? 'points/minute' : 'moyenne saison';
     const conf  = p.confidence?.label
-      ? ` · <span style="color:${p.confidence.label === 'high' ? 'var(--color-success)' : p.confidence.label === 'low' ? 'var(--color-danger)' : 'var(--color-warning)'}">conf ${p.confidence.label}</span>`
+      ? ` · <span style="color:${p.confidence.label === 'high' ? 'var(--color-success)' : p.confidence.label === 'low' ? 'var(--color-danger)' : 'var(--color-warning)'}">${_confidenceFr(p.confidence.label)}</span>`
       : '';
     return `<div class="bot-detail-row">
       <span>${p.name} (${p.team})</span>
-      <span class="bot-detail-row__val">${p.projected_pts} pts [${model}]${line}${edge}${conf}</span>
+      <span class="bot-detail-row__val">${p.projected_pts} pts <span style="color:var(--color-muted);font-size:10px">(${model})</span>${line}${edge}${conf}</span>
     </div>`;
   }).join('');
 
@@ -990,21 +991,25 @@ function _renderMLBPitcherStrikeoutsSection(log) {
   if (pitchers.length === 0) return '';
 
   const rows = pitchers.map(p => {
+    // v6.90 : terminologie traduite · K=strikeouts (retraits sur prises) · K/9=K par 9 manches
+    // IP=manches lancées (innings pitched) · matchup=ajustement vs frappeurs adverses
     const actualHtml = p.actual_ks != null
-      ? ` · <strong style="color:${Math.abs(p.actual_ks - p.projected_ks) <= 1.5 ? 'var(--color-success)' : 'var(--color-warning)'}">réel ${p.actual_ks}K en ${p.actual_ip ?? '—'}IP</strong>`
+      ? ` · <strong style="color:${Math.abs(p.actual_ks - p.projected_ks) <= 1.5 ? 'var(--color-success)' : 'var(--color-warning)'}">réel ${p.actual_ks} retraits en ${p.actual_ip ?? '—'} manches</strong>`
       : '';
     return `<div class="bot-detail-row">
       <span>${p.name ?? '—'}</span>
       <span class="bot-detail-row__val">
-        proj ${p.projected_ks}K · base ${p.base_ks}K (K/9=${p.k_per_9} · IP=${p.expected_ip})
-        ${p.opponent_mult !== 1 ? ` · matchup ×${p.opponent_mult}` : ''}
+        projection ${p.projected_ks} retraits · base ${p.base_ks}
+        <span style="font-size:10px;color:var(--color-muted)">(taux ${p.k_per_9}/9 manches · ${p.expected_ip} manches prévues)</span>
+        ${p.opponent_mult !== 1 ? ` · ajustement adversaire ×${p.opponent_mult}` : ''}
         ${actualHtml}
       </span>
     </div>`;
   }).join('');
 
+  const phaseLabel = pp.phase === 1 ? '1 · projection seule' : pp.phase === 2 ? '2 · projection + cotes' : pp.phase;
   return `<div class="bot-detail-section">
-    <div class="bot-detail-title">Strikeouts pitcher (Phase ${pp.phase} · projection)</div>
+    <div class="bot-detail-title">Retraits sur prises (lanceurs) · phase ${phaseLabel}</div>
     ${rows}
   </div>`;
 }
@@ -1012,21 +1017,109 @@ function _renderMLBPitcherStrikeoutsSection(log) {
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 
 function _shortSignalLabel(variable) {
+  // v6.90 : labels traduits en français accessible (titres courts)
   const map = {
-    net_rating_diff: 'Net Rating',
-    efg_diff:        'eFG%',
-    recent_form_ema: 'Forme EMA',
-    home_away_split: 'Split dom/ext',
-    absences_impact: 'Absences',
-    win_pct_diff:    'Win%',
+    net_rating_diff: 'Écart attaque/défense',
+    efg_diff:        'Réussite au tir',
+    recent_form_ema: 'Forme récente (10 matchs)',
+    home_away_split: 'Écart domicile/extérieur',
+    absences_impact: 'Impact absences',
+    win_pct_diff:    'Écart victoires',
     defensive_diff:  'Défense',
-    back_to_back:    'B2B',
-    rest_days_diff:  'Repos',
-    ts_diff:         'TS%',
-    avg_pts_diff:    'Pts/match',
-    pace_diff:       'Pace',
+    back_to_back:    'Match enchaîné (back-to-back)',
+    rest_days_diff:  'Jours de repos',
+    ts_diff:         'Efficacité au tir (TS%)',
+    avg_pts_diff:    'Points marqués/match',
+    pace_diff:       'Rythme de jeu',
+    b2b_cumul_diff:  'Fatigue cumulée (14j)',
+    travel_load_diff:'Charge déplacement',
+    // Tennis
+    ranking_elo_diff:     'Niveau (Elo / classement)',
+    surface_winrate_diff: 'Taux victoires sur surface',
+    h2h_surface:          'Confrontations directes',
+    service_dominance:    'Dominance au service',
+    pressure_dominance:   'Balles de break',
+    physical_load_diff:   'Charge physique (14j)',
+    market_steam_diff:    'Mouvement de cote',
+    fatigue_index:        'Fraîcheur',
   };
   return map[variable] ?? variable;
+}
+
+// v6.90 : helpers traduction FR · qualité données / type pari / cote / confiance
+function _qualityFr(quality) {
+  return {
+    VERIFIED:   'fiable',
+    PARTIAL:    'partiel',
+    ESTIMATED:  'estimé',
+    LOW_SAMPLE: 'échantillon faible',
+    MISSING:    'manquant',
+  }[quality] ?? (quality ? String(quality).toLowerCase() : '');
+}
+
+function _betTypeFr(type, side) {
+  // type: MONEYLINE / SPREAD / OVER_UNDER / PLAYER_POINTS · side: HOME/AWAY/OVER/UNDER
+  const typeMap = {
+    MONEYLINE:     'Vainqueur',
+    SPREAD:        'Handicap',
+    OVER_UNDER:    'Total points',
+    PLAYER_POINTS: 'Points joueur',
+  };
+  const sideMap = {
+    HOME:  'domicile',
+    AWAY:  'visiteur',
+    OVER:  'plus de',
+    UNDER: 'moins de',
+  };
+  const t = typeMap[type] ?? type;
+  const s = sideMap[side] ?? side;
+  return `${t} · ${s}`;
+}
+
+function _confidenceFr(confLabel) {
+  return {
+    high:   'confiance élevée',
+    medium: 'confiance moyenne',
+    low:    'confiance faible',
+    HIGH:   'confiance élevée',
+    MEDIUM: 'confiance moyenne',
+    LOW:    'confiance faible',
+  }[confLabel] ?? confLabel ?? '—';
+}
+
+function _americanToDecimalSafe(usOdds) {
+  const n = Number(usOdds);
+  if (!Number.isFinite(n) || n === 0) return null;
+  return n > 0 ? Math.round((n / 100 + 1) * 100) / 100 : Math.round((100 / -n + 1) * 100) / 100;
+}
+
+function _fmtOdds(usOdds) {
+  // Affiche la cote européenne (décimale) plus accessible que ±196
+  const dec = _americanToDecimalSafe(usOdds);
+  return dec != null ? dec.toFixed(2) : '—';
+}
+
+function _divergenceFlagFr(flag) {
+  return { strong: 'forte', medium: 'modérée', weak: 'faible', none: '—' }[flag] ?? flag ?? '—';
+}
+
+function _resultStatusFr(status) {
+  return {
+    PENDING: 'En attente',
+    WIN:     'Gagné',
+    LOSS:    'Raté',
+    PUSH:    'Annulé (push)',
+    VOID:    'Annulé',
+  }[status] ?? status ?? '—';
+}
+
+function _scoreMethodFr(method) {
+  return {
+    CALIBRATED:   'calibrée (poids ajustés)',
+    BAYESIAN:     'bayésienne',
+    HEURISTIC:    'heuristique',
+    BASELINE:     'baseline',
+  }[method] ?? method ?? '—';
 }
 
 function _fmtVal(variable, value) {
