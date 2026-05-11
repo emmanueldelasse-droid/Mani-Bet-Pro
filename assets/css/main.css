@@ -25,6 +25,15 @@ body {
   min-height: 100dvh;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
+  /* v6.86 : chiffres tabulaires + features Inter (cv11=alt one) → cotes/edges alignés verticalement */
+  font-feature-settings: "tnum" 1, "cv11" 1, "ss01" 1;
+}
+
+/* Force tabular-nums sur tous les éléments numériques (cotes, edges, scores, kelly) */
+.mc-team__odds, .mc-team__prob, .mc-best-rec__odds, .mc-best-rec__edge,
+.mc-vs__score, code, [class*="font-mono"],
+.mc-pill__val, .mc-team__record {
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── VARIABLES DARK (défaut) ── */
@@ -40,7 +49,7 @@ body {
 
   --color-text-primary:   #e8e8f0;
   --color-text-secondary: #8888a8;
-  --color-text-muted:     #55556a;
+  --color-text-muted:     #7a7a96;  /* v6.86 : 2.72→4.6:1 vs bg base · WCAG AA pass */
   --color-text-inverse:   #0a0a0f;
 
   --color-signal:         #3b82f6;
@@ -48,7 +57,7 @@ body {
   --color-robust-high:    #22c55e;
   --color-robust-mid:     #f97316;
   --color-robust-low:     #ef4444;
-  --color-volatility:     #a855f7;
+  --color-volatility:     #06b6d4;  /* v6.86 : purple→cyan · évite anti-pattern "AI gradient" fintech */
   --color-data-quality:   #06b6d4;
   --color-disagreement:   #f59e0b;
   --color-inconclusive:   #6b7280;
@@ -68,7 +77,7 @@ body {
 
   --font-mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --font-display: 'Bebas Neue', 'Inter', system-ui, sans-serif; /* sport iconique */
+  --font-display: 'Inter', system-ui, sans-serif;  /* v6.86 : Bebas Neue retiré · stack fintech minimal */
   --color-basket: #f97316;       /* orange ballon basket */
   --color-basket-soft: #fb923c;
   --color-mlb: #dc2626;          /* rouge baseball MLB */
@@ -210,6 +219,13 @@ body.theme-light,
 
 .nav__icon  { font-size: 18px; line-height: 1; }
 .nav__label { font-size: 10px; font-weight: 500; letter-spacing: 0.02em; }
+
+/* iPhone SE / 12 mini · 6 onglets serrés sur 320-380px */
+@media (max-width: 380px) {
+  .nav__item    { padding: var(--space-2) 4px; }
+  .nav__icon    { font-size: 16px; }
+  .nav__label   { font-size: 9px; letter-spacing: 0; }
+}
 
 /* ── CONTENU PRINCIPAL ── */
 #main-view {
@@ -752,6 +768,100 @@ body.theme-light .toast,
 
 .dashboard { display: flex; flex-direction: column; gap: var(--space-5); }
 
+/* v6.91 : Thème par sport · variable --sport-accent propagée dans tout le dashboard */
+.dashboard[data-sport="NBA"]    { --sport-accent: #f97316; --sport-accent-soft: rgba(249,115,22,0.12); }
+.dashboard[data-sport="MLB"]    { --sport-accent: #dc2626; --sport-accent-soft: rgba(220,38,38,0.10); }
+.dashboard[data-sport="TENNIS"] { --sport-accent: #84cc16; --sport-accent-soft: rgba(132,204,22,0.12); }
+
+/* Date chip active = couleur sport */
+.dashboard .date-selector .chip--active {
+  background: var(--sport-accent, var(--color-signal)) !important;
+  color: #0a0a0f !important;
+  border-color: var(--sport-accent, var(--color-signal)) !important;
+  font-weight: 700;
+}
+
+/* Summary card "Matchs" (total) : top accent line couleur sport */
+.dashboard .summary-card {
+  position: relative;
+  overflow: hidden;
+}
+.dashboard .summary-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--sport-accent, var(--color-signal));
+  opacity: 0.45;
+}
+.dashboard .summary-card--muted::before { opacity: 0.15; }
+
+/* Hero header dashboard · v6.91 */
+.dashboard-hero {
+  background: linear-gradient(135deg, var(--sport-accent-soft, rgba(59,130,246,0.10)) 0%, transparent 60%);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  position: relative;
+  overflow: hidden;
+}
+.dashboard-hero::after {
+  /* Bande accent en bas pour signaler le sport */
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 3px;
+  background: var(--sport-accent, var(--color-signal));
+  opacity: 0.6;
+}
+.dashboard-hero__icon {
+  font-size: clamp(52px, 16vw, 80px);
+  line-height: 1;
+  flex-shrink: 0;
+  filter: drop-shadow(0 4px 12px var(--sport-accent-soft, rgba(0,0,0,0.2)));
+}
+.dashboard-hero__text { flex: 1; min-width: 0; }
+.dashboard-hero__eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: 2px;
+}
+.dashboard-hero__title {
+  font-family: var(--font-display);
+  font-size: clamp(28px, 9vw, 48px);
+  font-weight: 800;
+  color: var(--sport-accent, var(--color-signal));
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+.dashboard-hero__date {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-top: 6px;
+}
+.dashboard-hero__refresh {
+  font-size: 18px;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  align-self: flex-start;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform var(--transition-fast), color var(--transition-fast);
+}
+.dashboard-hero__refresh:hover { color: var(--sport-accent, var(--color-signal)); transform: rotate(180deg); }
+
+
 .dashboard__summary {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -837,6 +947,28 @@ body.theme-light .chip--active,
   box-shadow: 0 2px 12px rgba(0,0,0,0.25);
 }
 
+/* v6.87 : Hiérarchie visuelle par décision · skill ui-ux-pro-max */
+/* ANALYSER = à étudier · ressort en vert subtil · attire l'œil */
+.match-card[data-decision="ANALYSER"] {
+  background: linear-gradient(180deg, rgba(34,197,94,0.04) 0%, var(--color-bg-surface) 60%);
+  box-shadow: 0 0 0 1px rgba(34,197,94,0.12);
+}
+.match-card[data-decision="ANALYSER"]:hover {
+  background: linear-gradient(180deg, rgba(34,197,94,0.07) 0%, var(--color-bg-surface) 60%);
+  box-shadow: 0 2px 16px rgba(34,197,94,0.15);
+}
+/* EXPLORER = candidat possible · normal mais légèrement chaud */
+.match-card[data-decision="EXPLORER"] {
+  background: linear-gradient(180deg, rgba(245,158,11,0.025) 0%, var(--color-bg-surface) 60%);
+}
+/* INSUFFISANT = pas pour pari · estompé pour disparaître visuellement */
+.match-card[data-decision="INSUFFISANT"] {
+  opacity: 0.72;
+}
+.match-card[data-decision="INSUFFISANT"]:hover {
+  opacity: 1;
+}
+
 /* ── HEADER ── */
 .match-card__header {
   display: flex;
@@ -882,6 +1014,19 @@ body.theme-light .chip--active,
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 112px;
+}
+
+/* Tennis : noms longs (Auger-Aliassime, Tsitsipas-Sakellaridis) sur 2 lignes */
+.match-card[data-sport="TENNIS"] .mc-team__name,
+.dashboard[data-sport="TENNIS"] .mc-team__name {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  max-width: none;
+  font-size: 11px;
+  line-height: 1.25;
+  word-break: break-word;
 }
 
 .mc-team__record {
@@ -1108,19 +1253,33 @@ body.theme-light .chip--active,
   margin-top: var(--space-3);
 }
 
-.match-detail__team     { flex: 1; display: flex; flex-direction: column; gap: var(--space-1); text-align: left; }
+.match-detail__team     { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); text-align: left; }
 .match-detail__team--away { text-align: right; align-items: flex-end; }
 
 .match-detail__team-abbr {
   font-family: var(--font-display);
-  font-size: 42px;
-  font-weight: 400;
+  /* v6.90 : font-size responsive iPhone · clamp scale viewport · évite débordement */
+  /* iPhone SE 320px → 19px · 12 mini 375px → 22.5px · Plus 414px → 24.8px · tablet+ 42px capped */
+  font-size: clamp(18px, 6vw, 42px);
+  font-weight: 600;
   color: var(--color-text-primary);
-  letter-spacing: 0.02em;
-  line-height: 1;
+  letter-spacing: 0.01em;
+  line-height: 1.05;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.match-detail__team-name { font-size: 14px; color: var(--color-text-secondary); font-weight: 500; }
+.match-detail__team-name {
+  font-size: clamp(11px, 3vw, 14px);
+  color: var(--color-text-secondary);
+  font-weight: 500;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .match-detail__team-role { font-size: 11px; letter-spacing: 0.04em; }
 
 .match-detail__separator { display: flex; align-items: center; justify-content: center; width: 40px; }
@@ -1362,19 +1521,21 @@ body.theme-light .paper-modal__input::placeholder,
   position: fixed;
   bottom: 80px;
   right: 16px;
-  width: 36px;
-  height: 36px;
+  /* iPhone HIG min touch target 44pt */
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   border: 1px solid var(--color-border-default);
   background: var(--color-bg-elevated);
   cursor: pointer;
-  font-size: 16px;
+  font-size: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 100;
   box-shadow: var(--shadow-md);
   transition: transform 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
 }
 
 #theme-toggle:hover { transform: scale(1.1); }

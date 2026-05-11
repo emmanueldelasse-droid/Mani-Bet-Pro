@@ -123,7 +123,7 @@ const QUOTA_KV_KEY        = 'odds_quota_state';
 const TANK01_KV_KEY       = 'tank01_teams_stats';
 const TANK01_INJURIES_KEY = 'tank01_injuries_impact';
 const TANK01_ROSTER_KEY   = 'tank01_roster_injuries_v1';
-const TENNIS_CSV_KEY      = 'tennis_csv_stats';
+const TENNIS_CSV_KEY      = 'tennis_csv_stats_v4';   // v4 v6.84 : ajout h2h.matches[] avec scores
 const TENNIS_ODDS_KEY     = 'tennis_odds_cache';
 const TENNIS_API_BASE     = 'https://api.api-tennis.com/tennis';
 const TENNIS_API_KEYMAP   = 'tennis_api_keymap_v1';   // KV cache name → player_key
@@ -411,7 +411,7 @@ export default {
         return jsonResponse({
           status:    'ok',
           worker:    'mani-bet-pro',
-          version:   '6.79.0',
+          version:   '6.85.0',
           timestamp: new Date().toISOString(),
           routes: [
             'GET /nba/matches', 'GET /nba/team/:id/stats', 'GET /nba/team/:id/recent',
@@ -6688,18 +6688,26 @@ async function handleTennisStats(url, env, origin) {
     // Sackmann : repo tennis_atp (fichiers atp_matches_YYYY.csv) · tennis_wta (fichiers wta_matches_YYYY.csv)
     const repoSlug   = tour === 'wta' ? 'tennis_wta'  : 'tennis_atp';
     const fileSlug   = tour === 'wta' ? 'wta_matches' : 'atp_matches';
+    // v6.83 : couverture étendue 2023+2024+2025 complet+2026 pour H2H complet.
+    // Avant : seulement 2026 + S2 2025 → 60-70% des H2H invisibles.
+    // _computeTennisPlayerStats filtre déjà recent_form/surface_winrate sur 12 mois,
+    // donc charger plus de rows ne pollue pas les stats récentes — seul l'Elo et le
+    // H2H bénéficient de la profondeur historique.
     const CSV_2026 = `https://raw.githubusercontent.com/JeffSackmann/${repoSlug}/master/${fileSlug}_2026.csv`;
     const CSV_2025 = `https://raw.githubusercontent.com/JeffSackmann/${repoSlug}/master/${fileSlug}_2025.csv`;
-    const [r2026, r2025] = await Promise.allSettled([
+    const CSV_2024 = `https://raw.githubusercontent.com/JeffSackmann/${repoSlug}/master/${fileSlug}_2024.csv`;
+    const CSV_2023 = `https://raw.githubusercontent.com/JeffSackmann/${repoSlug}/master/${fileSlug}_2023.csv`;
+    const [r2026, r2025, r2024, r2023] = await Promise.allSettled([
       fetchTimeout(CSV_2026, {}, 15000),
       fetchTimeout(CSV_2025, {}, 15000),
+      fetchTimeout(CSV_2024, {}, 15000),
+      fetchTimeout(CSV_2023, {}, 15000),
     ]);
     let allRows = [];
     if (r2026.status === 'fulfilled' && r2026.value.ok) allRows = allRows.concat(_parseTennisCSV(await r2026.value.text()));
-    if (r2025.status === 'fulfilled' && r2025.value.ok) {
-      const rows2025 = _parseTennisCSV(await r2025.value.text()).filter(r => parseInt(r.tourney_date || '0') >= 20250601);
-      allRows = allRows.concat(rows2025);
-    }
+    if (r2025.status === 'fulfilled' && r2025.value.ok) allRows = allRows.concat(_parseTennisCSV(await r2025.value.text()));
+    if (r2024.status === 'fulfilled' && r2024.value.ok) allRows = allRows.concat(_parseTennisCSV(await r2024.value.text()));
+    if (r2023.status === 'fulfilled' && r2023.value.ok) allRows = allRows.concat(_parseTennisCSV(await r2023.value.text()));
 
     // Augmentation api-tennis · matchs des 60 derniers jours (comble retard Sackmann 2-3j)
     let apiTennisAdded = 0;
@@ -6748,16 +6756,19 @@ async function handleTennisStats(url, env, origin) {
       const qualSlug = tour === 'wta' ? 'wta_matches_qual_itf' : 'atp_matches_qual_chall';
       const QUAL_2026 = `https://raw.githubusercontent.com/JeffSackmann/${repoSlug}/master/${qualSlug}_2026.csv`;
       const QUAL_2025 = `https://raw.githubusercontent.com/JeffSackmann/${repoSlug}/master/${qualSlug}_2025.csv`;
-      const [q2026, q2025] = await Promise.allSettled([
+      const QUAL_2024 = `https://raw.githubusercontent.com/JeffSackmann/${repoSlug}/master/${qualSlug}_2024.csv`;
+      const QUAL_2023 = `https://raw.githubusercontent.com/JeffSackmann/${repoSlug}/master/${qualSlug}_2023.csv`;
+      const [q2026, q2025, q2024, q2023] = await Promise.allSettled([
         fetchTimeout(QUAL_2026, {}, 15000),
         fetchTimeout(QUAL_2025, {}, 15000),
+        fetchTimeout(QUAL_2024, {}, 15000),
+        fetchTimeout(QUAL_2023, {}, 15000),
       ]);
       let qualRows = [];
       if (q2026.status === 'fulfilled' && q2026.value.ok) qualRows = qualRows.concat(_parseTennisCSV(await q2026.value.text()));
-      if (q2025.status === 'fulfilled' && q2025.value.ok) {
-        const rows = _parseTennisCSV(await q2025.value.text()).filter(r => parseInt(r.tourney_date || '0') >= 20250601);
-        qualRows = qualRows.concat(rows);
-      }
+      if (q2025.status === 'fulfilled' && q2025.value.ok) qualRows = qualRows.concat(_parseTennisCSV(await q2025.value.text()));
+      if (q2024.status === 'fulfilled' && q2024.value.ok) qualRows = qualRows.concat(_parseTennisCSV(await q2024.value.text()));
+      if (q2023.status === 'fulfilled' && q2023.value.ok) qualRows = qualRows.concat(_parseTennisCSV(await q2023.value.text()));
       if (qualRows.length) {
         const combinedRows = allRows.concat(qualRows);
         const eloQual = _computeTennisEloTable(combinedRows);
@@ -6785,8 +6796,19 @@ async function handleTennisStats(url, env, origin) {
     }
     if (players.length === 2 && stats[players[0]] && stats[players[1]]) {
       const h2h = _computeTennisH2H(allRows, players[0], players[1], surface);
-      stats[players[0]].h2h = { [players[1]]: { p1_wins: h2h.p1_wins, p2_wins: h2h.p2_wins } };
-      stats[players[1]].h2h = { [players[0]]: { p1_wins: h2h.p2_wins, p2_wins: h2h.p1_wins } };
+      // v6.82 surface+overall · v6.84 ajout liste détaillée matchs (avec scores)
+      // Côté players[1], inverser "winner" du detail (p1 ↔ p2)
+      const flippedMatches = h2h.overall.matches.map(m => ({ ...m, winner: m.winner === 'p1' ? 'p2' : 'p1' }));
+      stats[players[0]].h2h = { [players[1]]: {
+        p1_wins: h2h.surface.p1_wins, p2_wins: h2h.surface.p2_wins,
+        p1_wins_overall: h2h.overall.p1_wins, p2_wins_overall: h2h.overall.p2_wins,
+        matches: h2h.overall.matches,
+      } };
+      stats[players[1]].h2h = { [players[0]]: {
+        p1_wins: h2h.surface.p2_wins, p2_wins: h2h.surface.p1_wins,
+        p1_wins_overall: h2h.overall.p2_wins, p2_wins_overall: h2h.overall.p1_wins,
+        matches: flippedMatches,
+      } };
     }
 
     // Ne pas cacher (ou cacher court) si toutes les résolutions ont échoué.
@@ -7028,11 +7050,25 @@ function _computeTennisPlayerStats(rows, playerName, surface, today) {
 function _computeTennisH2H(rows, p1, p2, surface) {
   const n1 = _resolveTennisPlayerName(rows, p1) ?? p1;
   const n2 = _resolveTennisPlayerName(rows, p2) ?? p2;
-  const h2h = rows.filter(r =>
-    ((r.winner_name === n1 && r.loser_name === n2) || (r.winner_name === n2 && r.loser_name === n1)) &&
-    r.surface === surface
-  );
-  return { p1_wins: h2h.filter(r => r.winner_name === p1).length, p2_wins: h2h.filter(r => r.winner_name === p2).length };
+  const isMatch = (r) => (r.winner_name === n1 && r.loser_name === n2) || (r.winner_name === n2 && r.loser_name === n1);
+  const allMatches = rows.filter(isMatch);
+  const surfMatches = allMatches.filter(r => r.surface === surface);
+  const count = (arr, name) => arr.filter(r => r.winner_name === name).length;
+  // v6.84 : détail matchs (date desc) pour affichage UI scores/dates/tournoi
+  const detail = (r) => ({
+    date:       r.tourney_date ?? null,
+    tournament: r.tourney_name ?? null,
+    round:      r.round ?? null,
+    surface:    r.surface ?? null,
+    score:      r.score ?? null,
+    winner:     r.winner_name === n1 ? 'p1' : 'p2',
+  });
+  const sortByDateDesc = (a, b) => String(b.date ?? '').localeCompare(String(a.date ?? ''));
+  const matchesDetail = allMatches.map(detail).sort(sortByDateDesc);
+  return {
+    surface: { p1_wins: count(surfMatches, n1), p2_wins: count(surfMatches, n2) },
+    overall: { p1_wins: count(allMatches,  n1), p2_wins: count(allMatches,  n2), matches: matchesDetail },
+  };
 }
 
 // Elo overall + par surface · K=32 · init 1500 · walk chronologique · surfaces: Hard/Clay/Grass
@@ -8028,97 +8064,84 @@ function _mlbGetMarketOdds(oddsData, homeName, awayName) {
 function _mlbEngineCompute(matchData) {
   const { home_pitcher, away_pitcher, home_season, away_season, venue, market_odds, weather } = matchData;
 
-  // 1. Starting pitcher FIP edge (cœur du moteur MLB · poids 0.20)
+  // 1. Starting pitcher FIP edge · poids 0.20 → 0.10 (calib v6.81 : effect_size 0.04 ne justifie pas le poids #1)
   const hFIP = home_pitcher?.fip ?? home_pitcher?.era ?? 4.20;
   const aFIP = away_pitcher?.fip ?? away_pitcher?.era ?? 4.20;
   const fipDiff    = aFIP - hFIP;
-  const pitcherAdv = Math.tanh(fipDiff / 2) * 0.20;
+  const pitcherAdv = Math.tanh(fipDiff / 2) * 0.10;
 
-  // 2. Rest days starter
+  // 2. Rest days starter — calib v6.81 : neutralisé (effect_size 0 sur 225 logs)
   const hRest  = home_pitcher?.rest_days ?? 4;
   const aRest  = away_pitcher?.rest_days ?? 4;
-  const rScore = (r) => r < 3 ? -0.03 : r < 4 ? -0.01 : r <= 6 ? 0 : -0.01;
-  const restAdv = rScore(hRest) - rScore(aRest);
+  const restAdv = 0;
 
-  // 3. Run differential saison (poids 0.07)
+  // 3. Run differential saison · poids 0.07 → 0.05 (calib v6.81 : effect_size 0.08)
   const hRunDiff   = home_season?.run_diff ?? 0;
   const aRunDiff   = away_season?.run_diff ?? 0;
-  const runDiffAdv = Math.tanh((hRunDiff - aRunDiff) / 50) * 0.07;
+  const runDiffAdv = Math.tanh((hRunDiff - aRunDiff) / 50) * 0.05;
 
-  // 4. Team OPS différentiel (offensive, poids 0.08)
+  // 4. Team OPS différentiel · poids 0.08 → 0.14 (calib v6.81 : effect_size 0.19, 2e meilleur signal)
   let opsAdv = 0;
   if (home_season?.ops != null && away_season?.ops != null) {
-    opsAdv = Math.tanh((home_season.ops - away_season.ops) / 0.050) * 0.08;
+    opsAdv = Math.tanh((home_season.ops - away_season.ops) / 0.050) * 0.14;
   }
 
-  // 5. Team ERA différentiel (défensif global, inclut bullpen · poids 0.07)
+  // 5. Team ERA différentiel — calib v6.81 : supprimé (effect inversé mean_diff -0.161, redondant FIP+bullpen)
   let teamEraAdv = 0;
-  if (home_season?.team_era != null && away_season?.team_era != null) {
-    teamEraAdv = Math.tanh((away_season.team_era - home_season.team_era) / 1.0) * 0.07;
-  }
 
-  // 6. Home/away split (spécifique performance chez soi / en déplacement · poids 0.05)
+  // 6. Home/away split · poids 0.05 → 0.03 (calib v6.81 : effect_size 0.13)
   let splitAdv = 0;
   const hHomeGames = (home_season?.home_wins ?? 0) + (home_season?.home_losses ?? 0);
   const aAwayGames = (away_season?.away_wins ?? 0) + (away_season?.away_losses ?? 0);
   if (hHomeGames >= 20 && aAwayGames >= 20) {
     const hHomePct = home_season.home_wins / hHomeGames;
     const aAwayPct = away_season.away_wins / aAwayGames;
-    splitAdv = Math.tanh((hHomePct - aAwayPct) / 0.200) * 0.05;
+    splitAdv = Math.tanh((hHomePct - aAwayPct) / 0.200) * 0.03;
   }
 
-  // 7. Forme récente — last10 record (poids 0.04)
+  // 7. Forme récente last10 · poids 0.04 → 0.10 (calib v6.81 : effect_size 0.26, MEILLEUR signal MLB)
   let formAdv = 0;
   const hLast10Games = (home_season?.last10_wins ?? 0) + (home_season?.last10_losses ?? 0);
   const aLast10Games = (away_season?.last10_wins ?? 0) + (away_season?.last10_losses ?? 0);
   if (hLast10Games >= 5 && aLast10Games >= 5) {
     const hLast10Pct = home_season.last10_wins / hLast10Games;
     const aLast10Pct = away_season.last10_wins / aLast10Games;
-    formAdv = Math.tanh((hLast10Pct - aLast10Pct) / 0.300) * 0.04;
+    formAdv = Math.tanh((hLast10Pct - aLast10Pct) / 0.300) * 0.10;
   }
 
-  // 8. Bullpen ERA isolé (poids 0.05) · impact fort sur les manches 6-9
+  // 8. Bullpen ERA · calib v6.81 : signe inversé (mean_diff -0.273) + 0.05 → 0.04
+  // Hypothèse : équipes au bullpen ERA récente haute = jouent matchs serrés (sélection)
   let bullpenAdv = 0;
   if (home_season?.bullpen_era != null && away_season?.bullpen_era != null) {
-    bullpenAdv = Math.tanh((away_season.bullpen_era - home_season.bullpen_era) / 1.0) * 0.05;
+    bullpenAdv = Math.tanh((home_season.bullpen_era - away_season.bullpen_era) / 1.0) * 0.04;
   }
 
-  // 9. Park factor × qualité offensive (poids 0.03)
-  // Parc hitters-friendly favorise l'équipe avec meilleure offensive
+  // 9. Park factor — calib v6.81 : neutralisé sur ML (effet inversé mean_diff -0.048)
+  // parkFact toujours utilisé pour O/U via L8152
   let parkAdv = 0;
   const pf = MLB_PARK_FACTORS_W[venue] ?? 100;
-  if (home_season?.ops != null && away_season?.ops != null) {
-    const opsDiffSign = Math.sign(home_season.ops - away_season.ops);
-    parkAdv = Math.tanh((pf - 100) / 10) * 0.03 * opsDiffSign;
-  }
 
-  // 10. BABIP regression (poids 0.02) · indicateur chance/malchance récente
-  // BABIP élevé vs moyenne ligue (~0.295) = probablement chanceux → régression à venir
-  // L'équipe chanceuse récemment est légèrement défavorisée (correction statistique)
+  // 10. BABIP regression · calib v6.81 : signe inversé (mean_diff -0.179)
+  // Hypothèse "régression" fausse à court terme · BABIP haut = équipe en feu, momentum
   let babipAdv = 0;
   if (home_season?.babip != null && away_season?.babip != null) {
     const LEAGUE_BABIP = 0.295;
-    const hDiff = home_season.babip - LEAGUE_BABIP;  // positif = chanceux
+    const hDiff = home_season.babip - LEAGUE_BABIP;
     const aDiff = away_season.babip - LEAGUE_BABIP;
-    // L'équipe avec BABIP plus haut est "chanceuse" → pénalisée (régression)
-    babipAdv = Math.tanh((aDiff - hDiff) / 0.030) * 0.02;
+    babipAdv = Math.tanh((hDiff - aDiff) / 0.030) * 0.02;
   }
 
-  // 11. Météo (poids 0.04) · vent vers l'extérieur + chaleur → +HR
-  // Favorise l'équipe avec meilleure offensive (plus de HR = plus de runs pour elle)
+  // 11. Météo · poids 0.04 → 0.02 (calib v6.81 : effect_size 0.12)
   let weatherAdv = 0;
   if (weather && !weather.indoor && !weather.error && weather.wind_speed_mps != null) {
-    // Vent > 5 m/s affecte le jeu · modèle simplifié : vent fort → plus de variance
-    // Chaleur (>25°C) augmente le scoring (balle vole mieux)
     let score = 0;
     if (weather.wind_speed_mps > 5)  score += 0.5;
     if (weather.wind_speed_mps > 8)  score += 0.3;
     if (weather.temp_celsius   > 25) score += 0.4;
     if (weather.temp_celsius   < 10) score -= 0.3;
-    // Favorise meilleure offensive si conditions favorables au scoring
     if (home_season?.ops != null && away_season?.ops != null && score !== 0) {
       const opsDiffSign = Math.sign(home_season.ops - away_season.ops);
-      weatherAdv = Math.tanh(score) * 0.04 * opsDiffSign;
+      weatherAdv = Math.tanh(score) * 0.02 * opsDiffSign;
     }
   }
 
@@ -8809,10 +8832,10 @@ function _botTennisExtractVariables(p1, p2, surface, oddsCtx = null) {
   // 1) ranking_elo_diff : priorité Elo surface (>= 10 matchs) > Elo overall (>= 20) > rank
   const nSurf1 = p1?.elo_surface_matches ?? 0;
   const nSurf2 = p2?.elo_surface_matches ?? 0;
-  if (p1?.elo_surface != null && p2?.elo_surface != null && nSurf1 >= 10 && nSurf2 >= 10) {
+  if (p1?.elo_surface != null && p2?.elo_surface != null && nSurf1 >= 8 && nSurf2 >= 8) {
     const sig = _tennisEloSignal(p1.elo_surface, p2.elo_surface);
     out.ranking_elo_diff = { ...sig, source: `elo_${String(surface ?? '').toLowerCase()}`, quality: 'VERIFIED' };
-  } else if (p1?.elo_overall != null && p2?.elo_overall != null && (p1?.elo_matches ?? 0) >= 20 && (p2?.elo_matches ?? 0) >= 20) {
+  } else if (p1?.elo_overall != null && p2?.elo_overall != null && (p1?.elo_matches ?? 0) >= 15 && (p2?.elo_matches ?? 0) >= 15) {
     const sig = _tennisEloSignal(p1.elo_overall, p2.elo_overall);
     out.ranking_elo_diff = { ...sig, source: 'elo_overall', quality: 'PARTIAL' };
   } else if (p1?.current_rank != null && p2?.current_rank != null) {
@@ -8841,14 +8864,18 @@ function _botTennisExtractVariables(p1, p2, surface, oddsCtx = null) {
     out.recent_form_ema = { value: null, source: 'sackmann', quality: 'MISSING' };
   }
 
-  // 4) h2h_surface
+  // 4) h2h_surface — surface du tournoi en priorité · fallback toutes surfaces (v6.82)
   const h2h = p1?.h2h?.[p2?.name];
   if (h2h && (h2h.p1_wins + h2h.p2_wins) > 0) {
     const total = h2h.p1_wins + h2h.p2_wins;
     const wr = h2h.p1_wins / total;
-    out.h2h_surface = { value: Math.round(((wr - 0.5) * 2) * 100) / 100, total, source: 'sackmann', quality: total >= 3 ? 'VERIFIED' : 'LOW_SAMPLE' };
+    out.h2h_surface = { value: Math.round(((wr - 0.5) * 2) * 100) / 100, total, source: 'sackmann', scope: 'surface', quality: total >= 3 ? 'VERIFIED' : 'LOW_SAMPLE' };
+  } else if (h2h && ((h2h.p1_wins_overall ?? 0) + (h2h.p2_wins_overall ?? 0)) > 0) {
+    const total = (h2h.p1_wins_overall ?? 0) + (h2h.p2_wins_overall ?? 0);
+    const wr = (h2h.p1_wins_overall ?? 0) / total;
+    out.h2h_surface = { value: Math.round(((wr - 0.5) * 2) * 100) / 100, total, source: 'sackmann', scope: 'overall', quality: 'PARTIAL' };
   } else {
-    out.h2h_surface = { value: 0, source: 'sackmann', quality: 'LOW_SAMPLE' };
+    out.h2h_surface = { value: 0, source: 'sackmann', scope: 'none', quality: 'LOW_SAMPLE' };
   }
 
   // 5) service_dominance — 1st won % + (aces - df) / svpt
@@ -8867,8 +8894,10 @@ function _botTennisExtractVariables(p1, p2, surface, oddsCtx = null) {
   }
 
   // 6) fatigue_index — diff jours depuis dernier match
+  // Calib v6.81 : signe inversé · effect_size 0.29 mean_diff -0.148 sur 149 logs
+  // → joueur qui a joué récemment = en rythme · longue pause = rouille
   if (p1?.days_since_last_match != null && p2?.days_since_last_match != null) {
-    const diff = p1.days_since_last_match - p2.days_since_last_match;
+    const diff = p2.days_since_last_match - p1.days_since_last_match;
     const lag = Math.max(p1?.csv_lag_days ?? 0, p2?.csv_lag_days ?? 0);
     out.fatigue_index = { value: Math.max(-1, Math.min(1, diff / 7)), source: 'sackmann', quality: lag > 3 ? 'PARTIAL' : 'VERIFIED' };
   } else {
@@ -8886,10 +8915,12 @@ function _botTennisExtractVariables(p1, p2, surface, oddsCtx = null) {
     out.pressure_dominance = { value: null, source: 'sackmann', quality: b1 || b2 ? 'LOW_SAMPLE' : 'MISSING' };
   }
 
-  // 8) physical_load_diff — sets joués sur 14 derniers jours · p1 reposé = signal positif
+  // 8) physical_load_diff — sets joués sur 14 derniers jours
+  // Calib v6.81 : signe inversé · effect_size 0.26 mean_diff -0.062 sur 142 logs
+  // → joueur enchaîne les sets = momentum tournoi · acclimaté conditions
   const l1 = p1?.load_14d, l2 = p2?.load_14d;
   if (l1 && l2) {
-    const diff = (l2.sets_played ?? 0) - (l1.sets_played ?? 0);
+    const diff = (l1.sets_played ?? 0) - (l2.sets_played ?? 0);
     out.physical_load_diff = { value: Math.max(-1, Math.min(1, diff / 15)), source: 'sackmann', quality: 'VERIFIED' };
   } else {
     out.physical_load_diff = { value: null, source: 'sackmann', quality: 'MISSING' };
@@ -8902,7 +8933,9 @@ function _botTennisExtractVariables(p1, p2, surface, oddsCtx = null) {
   if (odds_now?.p1 && odds_now?.p2 && odds_open?.p1 && odds_open?.p2) {
     const p1Drop = (odds_open.p1 - odds_now.p1) / odds_open.p1;
     const p2Drop = (odds_open.p2 - odds_now.p2) / odds_open.p2;
-    const diff = p1Drop - p2Drop;
+    // Calib v6.81 : signe inversé (contrarian) · effect_size 0.16 mean_diff -0.13
+    // sur 155 logs · marché tennis sur-réagit · fader le steam
+    const diff = p2Drop - p1Drop;
     if (Math.abs(diff) < 0.03) {
       out.market_steam_diff = { value: 0, source: 'odds_history', quality: 'VERIFIED' };
     } else {
@@ -8955,7 +8988,9 @@ function _botTennisBettingRecs(score, oddsH2H, ctx = {}) {
   const implP1 = 1 / p1Odds, implP2 = 1 / p2Odds;
   const edgeP1 = score - implP1, edgeP2 = (1 - score) - implP2;
   const EDGE_MIN           = 0.05;
-  const EDGE_MAX_ML        = 0.25;
+  // Calib v6.81 : 0.25 → 0.18 · bucket edge_10+ (60.3%) sous-performe edge_0-5 (64%)
+  // sur 215 logs · marché tennis sharp · gros edge = erreur modèle plus probable
+  const EDGE_MAX_ML        = 0.18;
   const LONGSHOT_THRESHOLD = 5.0;
   const MIN_TOTAL_MATCHES  = 15;
   const recs = [];

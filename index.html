@@ -9,13 +9,15 @@
   <meta name="apple-mobile-web-app-title" content="ManiBetPro" />
   <meta name="theme-color" content="#0a0a0f" />
   <meta http-equiv="cache-control" content="no-cache" />
-  <meta name="build" content="20260429-195032-38d5629" />
+  <meta name="build" content="20260510-210302-aaf5818" />
   <link rel="apple-touch-icon" href="assets/icons/icon.svg" />
   <link rel="icon" type="image/svg+xml" href="assets/icons/icon.svg" />
+  <link rel="manifest" href="manifest.json" />
   <title>Mani Bet Pro</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- v6.86 : retiré Bebas Neue · Inter avec poids 300-700 + variant-numeric tabular pour cotes/edges -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="assets/css/main.css" />
   <link rel="stylesheet" href="assets/css/ui.primitives.css" />
 </head>
@@ -30,9 +32,17 @@
         <span class="nav__title">Mani Bet Pro</span>
       </div>
       <div class="nav__links" id="nav-links">
-        <button class="nav__item active" data-route="dashboard" aria-label="Dashboard">
-          <span class="nav__icon">◉</span>
-          <span class="nav__label">Dashboard</span>
+        <button class="nav__item active" data-route="nba" aria-label="NBA">
+          <span class="nav__icon">🏀</span>
+          <span class="nav__label">NBA</span>
+        </button>
+        <button class="nav__item" data-route="mlb" aria-label="MLB">
+          <span class="nav__icon">⚾</span>
+          <span class="nav__label">MLB</span>
+        </button>
+        <button class="nav__item" data-route="tennis" aria-label="Tennis">
+          <span class="nav__icon">🎾</span>
+          <span class="nav__label">Tennis</span>
         </button>
         <button class="nav__item" data-route="history" aria-label="Historique">
           <span class="nav__icon">◎</span>
@@ -41,10 +51,6 @@
         <button class="nav__item" data-route="bot" aria-label="Bot">
           <span class="nav__icon">⟁</span>
           <span class="nav__label">Bot</span>
-        </button>
-        <button class="nav__item" data-route="lab" aria-label="Laboratoire">
-          <span class="nav__icon">⬡</span>
-          <span class="nav__label">Labo</span>
         </button>
         <button class="nav__item" data-route="settings" aria-label="Réglages">
           <span class="nav__icon">⚙</span>

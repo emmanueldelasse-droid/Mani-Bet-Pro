@@ -10,6 +10,8 @@ néant
 3 sports même vocabulaire confiance : `Conf. HIGH/MEDIUM/LOW/INCONCLUSIVE` · jamais `Data quality` (MLB) · file:`ui.bot.js:264`
 
 ## TODO
+- [ ] P1 surveiller hit rate MLB+tennis 50 paris post-v6.81 (PR #123 #124) · revert isolé si baisse
+- [ ] P2 NBA recheck calib à 80+ logs (actuel 53 hit 67.9% v6.79 valide) · `travel_load` inversé n=22 ignoré
 - [ ] P2 gate `confidence=INCONCLUSIVE` si `data_quality<0.55` (worker.js:5185)
 - [ ] P2 `/bot/calibration/analyze?sport=tennis` après 30+ logs settlés
 - [ ] P3 relancer Alon après 50+ logs post-v6.78
@@ -44,7 +46,7 @@ Worker `manibetpro.emmanueldelasse.workers.dev` · Front GH Pages · KV `PAPER_T
 Sackmann CSV lag 2-3j · api-tennis 60j fallback · CSV qual_chall/qual_itf hors tour principal
 9 vars : ranking_elo · surface_wr · recent_form · pressure_dom · h2h · service · physical_load_14d · market_steam · fatigue
 Elo K=32 init 1500 · log TTL 90j · odds_snap 7j · steam opener [4h, 48h] bruit <3% → 0
-Garde-fous (worker.js:7964 + engine.tennis.js:365) : edge>25% / cote≥5+edge>15% / matchs<15 drop
+Garde-fous (worker.js:8935 + engine.tennis.js:499) : edge>18% / cote≥5+edge>15% / matchs<15 drop
 
 ## Pièges Timezone
 `_botFormatDate` Intl · DST auto · nightly 10-11h UTC idempotent

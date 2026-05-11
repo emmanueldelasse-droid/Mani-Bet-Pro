@@ -361,34 +361,67 @@ function _renderH2H(match, data) {
   const p2Name = match?.away_team?.name ?? data.p2?.name;
   const surface = data.surface ?? 'Hard';
 
-  // h2h stocké côté p1 : data.p1.h2h[p2Name] = { p1_wins, p2_wins }
+  // v6.82 surface+overall · v6.84 ajout matches[] avec scores/dates/tournoi
   const h2h = data.p1?.h2h?.[p2Name] ?? null;
-  const w1  = h2h?.p1_wins ?? 0;
-  const w2  = h2h?.p2_wins ?? 0;
-  const total = w1 + w2;
+  const sw1  = h2h?.p1_wins ?? 0;
+  const sw2  = h2h?.p2_wins ?? 0;
+  const ow1  = h2h?.p1_wins_overall ?? 0;
+  const ow2  = h2h?.p2_wins_overall ?? 0;
+  const matches = Array.isArray(h2h?.matches) ? h2h.matches : [];
+  const overTotal = ow1 + ow2;
 
-  const quality = total >= 3 ? 'VERIFIED' : total >= 1 ? 'LOW_SAMPLE' : 'MISSING';
+  const overallQuality = overTotal >= 3 ? 'VERIFIED' : overTotal >= 1 ? 'LOW_SAMPLE' : 'MISSING';
 
-  const summary = total === 0
-    ? `<div style="font-size:12px;color:var(--color-muted);text-align:center;padding:10px 0">Aucune confrontation recensée sur ${_escapeHtml(_surfaceFr(surface).toLowerCase())}.</div>`
-    : `<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:6px;align-items:center;padding:8px 0">
-         <div style="font-size:26px;font-weight:800;color:${w1 > w2 ? 'var(--color-signal)' : 'var(--color-text)'}">${w1}</div>
-         <div style="font-size:10px;color:var(--color-text-secondary);text-align:center;white-space:nowrap">${total} match${total > 1 ? 's' : ''}</div>
-         <div style="font-size:26px;font-weight:800;color:${w2 > w1 ? 'var(--color-signal)' : 'var(--color-text)'};text-align:right">${w2}</div>
-       </div>`;
+  const renderRow = (w1, w2, label) => {
+    const total = w1 + w2;
+    if (total === 0) {
+      return `<div style="font-size:11px;color:var(--color-muted);text-align:center;padding:6px 0">${label} : aucune confrontation</div>`;
+    }
+    return `
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 0">
+        <span style="font-size:10px;color:var(--color-text-secondary);min-width:90px">${label}</span>
+        <span style="font-size:18px;font-weight:800;color:${w1 > w2 ? 'var(--color-signal)' : 'var(--color-text)'}">${w1}</span>
+        <span style="font-size:10px;color:var(--color-text-secondary);flex:1;text-align:center">${total} match${total > 1 ? 's' : ''}</span>
+        <span style="font-size:18px;font-weight:800;color:${w2 > w1 ? 'var(--color-signal)' : 'var(--color-text)'}">${w2}</span>
+      </div>`;
+  };
+
+  const fmtDate = (d) => (!d || d.length < 8) ? '—' : `${d.slice(6,8)}/${d.slice(4,6)}/${d.slice(0,4)}`;
+  const renderMatch = (m) => {
+    const dateStr = fmtDate(m.date);
+    const winnerName = m.winner === 'p1' ? p1Name : p2Name;
+    const winnerColor = m.winner === 'p1' ? 'var(--color-signal)' : 'var(--color-text)';
+    const surfTag = m.surface ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,0.06);color:var(--color-text-secondary);margin-left:4px">${_escapeHtml(m.surface)}</span>` : '';
+    return `
+      <div style="display:grid;grid-template-columns:auto 1fr auto;gap:8px;padding:5px 0;border-bottom:1px solid var(--color-border);align-items:center">
+        <span style="font-size:10px;color:var(--color-text-secondary);min-width:64px">${dateStr}</span>
+        <div style="font-size:11px;line-height:1.3">
+          <div style="color:${winnerColor};font-weight:600">${_escapeHtml(winnerName ?? '—')}</div>
+          <div style="color:var(--color-text-secondary);font-size:10px">${_escapeHtml(m.tournament ?? '—')} · ${_escapeHtml(m.round ?? '—')}${surfTag}</div>
+        </div>
+        <span style="font-size:11px;font-family:monospace;color:var(--color-text);text-align:right">${_escapeHtml(m.score ?? '—')}</span>
+      </div>`;
+  };
+  const matchesHtml = matches.length === 0 ? '' : `
+    <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--color-border)">
+      <div style="font-size:10px;color:var(--color-text-secondary);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px">Détail des matchs</div>
+      ${matches.slice(0, 15).map(renderMatch).join('')}
+      ${matches.length > 15 ? `<div style="font-size:10px;color:var(--color-text-secondary);text-align:center;padding-top:4px">+ ${matches.length - 15} autres</div>` : ''}
+    </div>`;
 
   return `
     <div class="card match-detail__bloc">
       <div class="bloc-header" style="margin-bottom:var(--space-3)">
-        <span class="bloc-header__title">⚔️ Confrontations directes</span>
-        ${_qualityBadge(quality)}
+        <span class="bloc-header__title">⚔️ H2H direct</span>
+        ${_qualityBadge(overallQuality)}
       </div>
-      <div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:4px">Sur ${_escapeHtml(_surfaceFr(surface).toLowerCase())}</div>
-      ${summary}
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:4px">
+      ${renderRow(sw1, sw2, `Sur ${_escapeHtml(surface)}`)}
+      ${renderRow(ow1, ow2, 'Toutes surfaces')}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;padding-top:6px;border-top:1px solid var(--color-border)">
         <div style="font-size:11px;text-align:left;color:var(--color-text-secondary)">${_escapeHtml(p1Name ?? '—')}</div>
         <div style="font-size:11px;text-align:right;color:var(--color-text-secondary)">${_escapeHtml(p2Name ?? '—')}</div>
       </div>
+      ${matchesHtml}
     </div>`;
 }
 

@@ -516,6 +516,34 @@ function _legacyDecision(analysis) {
   return 'INSUFFISANT';
 }
 
+// Évaluation 6 critères "pariable tennis" (calib v6.81) — affichage dashboard
+// Critères alignés avec recommandations vrai-argent prudentes :
+// 1) Conf. HIGH/MEDIUM · 2) edge 5-15% · 3) cote ≤3.50
+// 4) ranking_elo_diff VERIFIED/PARTIAL · 5) surface_winrate VERIFIED/PARTIAL
+// 6) ≥5 variables sur 9 avec valeur (couverture suffisante)
+function _evaluateTennisCriteria(analysis) {
+  const best = analysis?.betting_recommendations?.best ?? null;
+  const conf = analysis?.confidence_level ?? null;
+  const vars = analysis?.variables_used ?? {};
+  const edge = best?.edge ?? null;
+  const odds = best?.odds_decimal ?? null;
+
+  const items = [
+    { label: 'Conf.',     ok: conf === 'HIGH' || conf === 'MEDIUM', value: conf ?? '—' },
+    { label: 'Edge 5-15', ok: edge != null && edge >= 5 && edge <= 15, value: edge != null ? `${edge}%` : '—' },
+    { label: 'Cote ≤3.5', ok: odds != null && odds <= 3.50, value: odds != null ? Number(odds).toFixed(2) : '—' },
+    { label: 'Elo ok',    ok: ['VERIFIED','PARTIAL'].includes(vars?.ranking_elo_diff?.quality), value: vars?.ranking_elo_diff?.quality ?? 'MISSING' },
+    { label: 'Surface',   ok: ['VERIFIED','PARTIAL'].includes(vars?.surface_winrate_diff?.quality), value: vars?.surface_winrate_diff?.quality ?? 'MISSING' },
+  ];
+
+  const definedCount = Object.values(vars).filter(v => v?.value != null && v?.quality !== 'MISSING').length;
+  items.push({ label: '≥5 vars', ok: definedCount >= 5, value: `${definedCount}/9` });
+
+  const okCount = items.filter(i => i.ok).length;
+  const verdict = okCount === 6 ? 'BET' : okCount >= 4 ? 'CAUTION' : 'SKIP';
+  return { items, okCount, verdict };
+}
+
 function _renderShell(selectedDate, selectedSport) {
   const displayDate = new Date(selectedDate + 'T12:00:00').toLocaleDateString('fr-FR', {
     weekday: 'long', day: 'numeric', month: 'long',
@@ -523,22 +551,30 @@ function _renderShell(selectedDate, selectedSport) {
   const today    = _getTodayDate();
   const tomorrow = _offsetDate(today, 1);
 
+  // v6.91 : Hero header par sport · emoji + "DASHBOARD <SPORT>" · couleurs via --sport-accent CSS
+  const sportMeta = {
+    NBA:    { emoji: '🏀', label: 'NBA' },
+    MLB:    { emoji: '⚾', label: 'MLB' },
+    TENNIS: { emoji: '🎾', label: 'Tennis' },
+  }[selectedSport] ?? { emoji: '◪', label: selectedSport };
+
   return `
     <div class="dashboard" data-sport="${selectedSport}">
-      <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
-        <div>
-          <div class="page-header__eyebrow">Mani Bet Pro</div>
-          <div class="page-header__title">Dashboard</div>
-          <div class="page-header__sub">${displayDate}</div>
+      <div class="dashboard-hero">
+        <div class="dashboard-hero__icon">${sportMeta.emoji}</div>
+        <div class="dashboard-hero__text">
+          <div class="dashboard-hero__eyebrow">Dashboard</div>
+          <div class="dashboard-hero__title">${sportMeta.label.toUpperCase()}</div>
+          <div class="dashboard-hero__date">${displayDate}</div>
         </div>
-        <button id="refresh-btn" style="font-size:11px;padding:5px 10px;border-radius:6px;border:1px solid var(--color-border);background:var(--color-bg);color:var(--color-muted);cursor:pointer;margin-top:4px;flex-shrink:0">⟳ Actualiser</button>
+        <button id="refresh-btn" class="dashboard-hero__refresh" aria-label="Actualiser">⟳</button>
       </div>
 
       <div class="date-selector filter-chips" id="date-selector">
         <button class="chip ${selectedDate === today ? 'chip--active' : ''}" data-date="${today}">Aujourd'hui</button>
         <button class="chip ${selectedDate === tomorrow ? 'chip--active' : ''}" data-date="${tomorrow}">Demain</button>
         <input type="date" id="date-picker" value="${selectedDate}"
-          style="background:var(--color-card);border:1px solid var(--color-border);color:var(--color-text);border-radius:20px;padding:4px 12px;font-size:12px;cursor:pointer;"
+          style="background:var(--color-card);border:1px solid var(--color-border);color:var(--color-text);border-radius:20px;padding:6px 12px;font-size:16px;cursor:pointer;min-height:36px;"
         />
       </div>
 
@@ -558,13 +594,11 @@ function _renderShell(selectedDate, selectedSport) {
       </div>
 
       <div class="dashboard__filters">
-        <div class="filter-row">
-          <span class="filter-label">Sport</span>
-          <div class="filter-chips" id="filter-sports">
-            <button class="chip ${selectedSport === 'NBA' ? 'chip--active' : ''}" data-sport="NBA">🏀 NBA</button>
-            <button class="chip ${selectedSport === 'MLB' ? 'chip--active' : ''}" data-sport="MLB">⚾ MLB</button>
-            <button class="chip ${selectedSport === 'TENNIS' ? 'chip--active' : ''}" data-sport="TENNIS">🎾 Tennis</button>
-          </div>
+        <!-- Sport chips supprimées v6.85 · sélection via nav top NBA/MLB/Tennis -->
+        <div class="filter-chips" id="filter-sports" style="display:none">
+          <button class="chip" data-sport="NBA">NBA</button>
+          <button class="chip" data-sport="MLB">MLB</button>
+          <button class="chip" data-sport="TENNIS">TENNIS</button>
         </div>
         <div class="filter-row">
           <span class="filter-label">Décision</span>
@@ -592,8 +626,17 @@ function _renderShell(selectedDate, selectedSport) {
 function _renderMatchCards(list, matches) {
   list.innerHTML = '';
   if (!matches.length) { _renderEmptyState(list); return; }
+  // Tri : matchs à venir/en cours par datetime asc, terminés à la fin
+  const sorted = [...matches].sort((a, b) => {
+    const aFinal = a.status === 'STATUS_FINAL' || a.status === 'STATUS_FINAL_OT';
+    const bFinal = b.status === 'STATUS_FINAL' || b.status === 'STATUS_FINAL_OT';
+    if (aFinal !== bFinal) return aFinal ? 1 : -1;
+    const at = a.datetime ? new Date(a.datetime).getTime() : Infinity;
+    const bt = b.datetime ? new Date(b.datetime).getTime() : Infinity;
+    return at - bt;
+  });
   const frag = document.createDocumentFragment();
-  matches.forEach(match => frag.appendChild(_createMatchCard(match)));
+  sorted.forEach(match => frag.appendChild(_createMatchCard(match)));
   list.appendChild(frag);
 }
 
@@ -601,6 +644,7 @@ function _createMatchCard(match) {
   const card           = document.createElement('div');
   card.className       = 'match-card';
   card.dataset.matchId = match.id;
+  if (match.sport) card.dataset.sport = match.sport;
 
   const time          = match.datetime
     ? new Date(match.datetime).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
@@ -741,6 +785,7 @@ function _createMatchCard(match) {
     <div id="best-rec-${match.id}" style="display:none"></div>
     <div id="recs-${match.id}" class="match-card__recs" style="display:none"></div>
     <div id="bet-indicator-${match.id}" style="margin-top:6px"></div>
+    ${isTennis ? `<div id="tennis-criteria-${match.id}" class="mc-tennis-crit" style="display:none"></div>` : ''}
   `;
 
   card.style.cursor = 'pointer';
@@ -769,6 +814,8 @@ function _updateMatchCard(list, matchId, analysis, match, ptState) {
   }
 
   card.dataset.analysisId = analysis.analysis_id ?? '';
+  // v6.87 : data-decision pour hiérarchie visuelle CSS (emphasis ANALYSER · dim INSUFFISANT)
+  card.dataset.decision = decision;
 
   const borderColors = { ANALYSER: 'var(--color-success)', EXPLORER: 'var(--color-warning)' };
   const borderColor = borderColors[decision];
@@ -940,6 +987,50 @@ function _updateMatchCard(list, matchId, analysis, match, ptState) {
       bestRecEl?.after(el);
     }
   }
+
+  // Strip 6 critères pariable (tennis uniquement, calib v6.81)
+  if (match?.sport === 'TENNIS') {
+    const critEl = card.querySelector(`#tennis-criteria-${matchId}`);
+    if (critEl && !critEl.dataset.rendered) {
+      const { items, okCount, verdict } = _evaluateTennisCriteria(analysis);
+      const verdictColor = verdict === 'BET' ? '#22c55e' : verdict === 'CAUTION' ? '#f59e0b' : '#ef4444';
+      const verdictBg    = verdict === 'BET' ? 'rgba(34,197,94,0.10)' : verdict === 'CAUTION' ? 'rgba(245,158,11,0.10)' : 'rgba(239,68,68,0.08)';
+      const verdictLabel = verdict === 'BET' ? '✓ Pariable' : verdict === 'CAUTION' ? '⚠ Prudence' : '✗ Skip';
+      const dotsHtml = items.map(it => {
+        const c = it.ok ? '#22c55e' : '#ef4444';
+        return `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${c}" title="${it.label}: ${it.value}"></span>`;
+      }).join('');
+      const tooltip = items.map(it => `${it.ok ? '✓' : '✗'} ${it.label} (${it.value})`).join(' · ');
+      critEl.style.cssText = `display:flex;align-items:center;gap:8px;margin-top:6px;padding:8px 10px;border-radius:6px;background:${verdictBg};color:${verdictColor};font-size:11px;font-weight:600;min-height:36px;cursor:pointer;-webkit-tap-highlight-color:transparent`;
+      critEl.title = tooltip;
+      critEl.innerHTML = `
+        <span style="display:flex;gap:3px;align-items:center">${dotsHtml}</span>
+        <span style="font-weight:700">${okCount}/6</span>
+        <span>${verdictLabel}</span>
+        <span style="margin-left:auto;font-size:10px;opacity:0.6">ⓘ</span>
+      `;
+      // Tap mobile : tooltip HTML invisible au touch → afficher détail dans toast
+      critEl.addEventListener('click', (e) => {
+        e.stopPropagation(); // ne pas ouvrir la fiche match
+        _showCriteriaToast(items, okCount, verdict);
+      });
+      critEl.dataset.rendered = '1';
+    }
+  }
+}
+
+// Toast détail des 6 critères pariable (mobile-friendly · tap au lieu de hover)
+function _showCriteriaToast(items, okCount, verdict) {
+  const verdictLabel = verdict === 'BET' ? '✓ Pariable' : verdict === 'CAUTION' ? '⚠ Prudence' : '✗ Skip';
+  const verdictColor = verdict === 'BET' ? '#22c55e' : verdict === 'CAUTION' ? '#f59e0b' : '#ef4444';
+  const list = items.map(it => `<div style="padding:4px 0;display:flex;gap:8px;font-size:13px"><span style="color:${it.ok ? '#22c55e' : '#ef4444'};font-weight:700;min-width:14px">${it.ok ? '✓' : '✗'}</span><span style="flex:1">${it.label}</span><span style="color:var(--color-text-secondary);font-family:monospace">${it.value}</span></div>`).join('');
+  const toast = document.createElement('div');
+  toast.style.cssText = `position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:var(--color-card);border:1px solid ${verdictColor};border-radius:10px;padding:14px 16px;z-index:9999;min-width:260px;max-width:90vw;box-shadow:0 8px 24px rgba(0,0,0,0.3);color:var(--color-text)`;
+  toast.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-weight:700;color:${verdictColor}"><span>${okCount}/6 · ${verdictLabel}</span><span style="cursor:pointer;font-size:18px;line-height:1;color:var(--color-text-secondary)">×</span></div>${list}`;
+  document.body.appendChild(toast);
+  const close = () => toast.remove();
+  toast.querySelector('span:last-child')?.addEventListener('click', close);
+  setTimeout(close, 6000);
 }
 
 function _updateSummary(container, total, conclusive, rejected) {

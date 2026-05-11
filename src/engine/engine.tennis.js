@@ -23,8 +23,8 @@ import { Logger }         from '../utils/utils.logger.js';
 
 const MIN_SURFACE_MATCHES = 8;   // minimum matchs sur la surface sur 12 mois
 const EMA_N               = 10;  // nombre de matchs pour le calcul EMA
-const MIN_ELO_MATCHES     = 20;  // minimum matchs pour fiabilité Elo overall
-const MIN_ELO_SURFACE     = 10;  // minimum matchs surface pour Elo surface fiable
+const MIN_ELO_MATCHES     = 15;  // calib v6.81 : 20→15 · couverture Elo +30 logs estimés
+const MIN_ELO_SURFACE     = 8;   // calib v6.81 : 10→8 · ranking_elo_diff manquait 73% paris
 
 // ── MOTEUR PRINCIPAL ──────────────────────────────────────────────────────
 
@@ -215,9 +215,8 @@ export class EngineTennis {
   // ── SIGNAL 4 : H2H sur même surface ──────────────────────────────────
 
   static _h2hSurface(p1, p2, surface) {
-    // Worker stocke h2h[opponent_name] = { p1_wins, p2_wins } sans dim surface.
-    // On cherche l'entrée pour le nom du joueur 2 (p2.name peut être absent
-    // selon la source · fallback : prendre la première clé du h2h de p1).
+    // v6.82 : worker stocke surface (p1_wins/p2_wins) + overall (p1_wins_overall/p2_wins_overall)
+    // Priorité : surface du tournoi · fallback : toutes surfaces (quality PARTIAL)
     const h2hMap = p1?.h2h ?? null;
     const target = p2?.name && h2hMap?.[p2.name]
       ? h2hMap[p2.name]
@@ -226,26 +225,34 @@ export class EngineTennis {
     if (!target) {
       return { value: null, source: 'sackmann_csv', quality: 'MISSING' };
     }
-    const h2h = target;
 
-    const total = (h2h.p1_wins ?? 0) + (h2h.p2_wins ?? 0);
+    const surfTotal = (target.p1_wins ?? 0) + (target.p2_wins ?? 0);
+    const overTotal = (target.p1_wins_overall ?? 0) + (target.p2_wins_overall ?? 0);
 
-    if (total === 0) {
-      return { value: 0, p1_wins: 0, p2_wins: 0, source: 'sackmann_csv', quality: 'LOW_SAMPLE' };
+    let used, scope, quality;
+    if (surfTotal > 0) {
+      used = { p1_wins: target.p1_wins, p2_wins: target.p2_wins, total: surfTotal };
+      scope = 'surface';
+      quality = surfTotal >= 3 ? 'VERIFIED' : 'LOW_SAMPLE';
+    } else if (overTotal > 0) {
+      used = { p1_wins: target.p1_wins_overall, p2_wins: target.p2_wins_overall, total: overTotal };
+      scope = 'overall';
+      quality = 'PARTIAL';
+    } else {
+      return { value: 0, p1_wins: 0, p2_wins: 0, total: 0, scope: 'none', source: 'sackmann_csv', quality: 'LOW_SAMPLE' };
     }
 
-    // Win rate p1 dans les H2H sur cette surface — centré sur 0.5
-    const p1WinRate = h2h.p1_wins / total;
-    const diff      = p1WinRate - 0.5;   // entre -0.5 et +0.5
-    const normalized = diff * 2;          // entre -1 et +1
+    const p1WinRate  = used.p1_wins / used.total;
+    const normalized = (p1WinRate - 0.5) * 2;
 
     return {
       value:   Math.round(normalized * 100) / 100,
-      p1_wins: h2h.p1_wins,
-      p2_wins: h2h.p2_wins,
-      total,
+      p1_wins: used.p1_wins,
+      p2_wins: used.p2_wins,
+      total:   used.total,
+      scope,
       source:  'sackmann_csv',
-      quality: total >= 3 ? 'VERIFIED' : 'LOW_SAMPLE',
+      quality,
     };
   }
 
@@ -335,8 +342,9 @@ export class EngineTennis {
     }
     const sets1 = l1.sets_played ?? 0;
     const sets2 = l2.sets_played ?? 0;
-    // Diff inversé : p1 a joué MOINS de sets → signal positif (frais)
-    const diff = sets2 - sets1;
+    // Calib v6.81 : signe inversé · plus de sets joués = momentum tournoi
+    // (effect_size 0.26 mean_diff -0.062 sur 142 logs settlés)
+    const diff = sets1 - sets2;
     // Normalisation : ±15 sets sur 14j = saturation
     const normalized = Math.max(-1, Math.min(1, diff / 15));
 
@@ -370,7 +378,9 @@ export class EngineTennis {
     // Steam vers p1 : p1Now < p1Op (cote baisse) ET p2Now > p2Op (cote monte)
     const p1Drop = (p1Op - p1Now) / p1Op;   // > 0 si baisse vers p1
     const p2Drop = (p2Op - p2Now) / p2Op;   // > 0 si baisse vers p2
-    const diff   = p1Drop - p2Drop;          // > 0 → steam vers p1
+    // Calib v6.81 : signe inversé (contrarian) · marché tennis sur-réagit · fader
+    // (effect_size 0.16 mean_diff -0.13 sur 155 logs)
+    const diff   = p2Drop - p1Drop;          // > 0 → contrarian vers p1
     // Mouvement < 3% = bruit · sinon normalisation sur ±15%
     if (Math.abs(diff) < 0.03) {
       return { value: 0, source: 'odds_history', quality: 'VERIFIED' };
@@ -396,9 +406,10 @@ export class EngineTennis {
       return { value: null, source: 'sackmann_csv', quality: 'MISSING' };
     }
 
-    // Différentiel de repos : p1 plus reposé = signal positif
+    // Calib v6.81 : signe inversé · joueur en rythme > joueur sortant de pause
+    // (effect_size 0.29 mean_diff -0.148 sur 149 logs · le PLUS fort signal tennis)
     // Plage typique : 0-14 jours entre matchs en tournoi → ±1 normalisé sur 7j
-    const diff      = days1 - days2;
+    const diff      = days2 - days1;
     const normalized = Math.max(-1, Math.min(1, diff / 7));
 
     const quality   = (p1?.csv_lag_days ?? 0) > 3 || (p2?.csv_lag_days ?? 0) > 3
@@ -496,7 +507,8 @@ export class EngineTennis {
     const edgeP2  = pP2 - implP2;
 
     const EDGE_MIN          = 0.05;  // 5% minimum
-    const EDGE_MAX_ML       = 0.25;  // au-delà, modèle probablement faux (marché sharp en tennis)
+    // Calib v6.81 : 0.25 → 0.18 · bucket edge_10+ sous-performe edge_0-5 sur 215 logs
+    const EDGE_MAX_ML       = 0.18;  // au-delà, modèle probablement faux (marché sharp en tennis)
     const LONGSHOT_THRESHOLD = 5.0;  // cote ≥ 5.0 = outsider lourd
     const MIN_TOTAL_MATCHES = 15;    // sous ce seuil, échantillon trop petit pour parier
     const recs              = [];
