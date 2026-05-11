@@ -340,6 +340,9 @@ export default {
       if (path === '/mlb/team-stats' && request.method === 'GET')
         return await handleMLBTeamStats(env, origin);
 
+      if (path === '/mlb/team-recent' && request.method === 'GET')
+        return await handleMLBTeamRecent(env, url, origin);
+
       if (path === '/mlb/bullpen-stats' && request.method === 'GET')
         return await handleMLBBullpenStats(env, origin);
 
@@ -7609,6 +7612,78 @@ async function handleMLBBullpenStats(env, origin) {
   } catch (err) {
     return jsonResponse({ available: false, note: err.message, teams: {} }, 200, origin);
   }
+}
+
+// ── HANDLER : 5 DERNIERS MATCHS MLB par équipe ────────────────────────────────
+// Saison régulière + playoffs de l'année en cours (filtre season=_mlbSeason())
+// Cache KV 1h par team_id · ESPN team schedule endpoint
+async function handleMLBTeamRecent(env, url, origin) {
+  const teamId = url.searchParams.get('team_id');
+  const n      = Math.min(10, Math.max(1, parseInt(url.searchParams.get('n') ?? '5', 10) || 5));
+  if (!teamId || !/^\d+$/.test(teamId)) {
+    return errorResponse('team_id requis (entier ESPN)', 400, origin);
+  }
+
+  const season   = _mlbSeason();
+  const cacheKey = `mlb_team_recent_${teamId}_${season}`;
+  if (env?.PAPER_TRADING) {
+    try {
+      const cached = await env.PAPER_TRADING.get(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Date.now() - parsed.fetched_at < 3600 * 1000) {
+          return jsonResponse({ ...parsed, source: 'cache' }, 200, origin);
+        }
+      }
+    } catch (_) {}
+  }
+
+  const scheduleUrl = `https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/teams/${teamId}/schedule?season=${season}`;
+  const data = await espnFetch(scheduleUrl);
+  if (!data) return errorResponse('ESPN team schedule fetch failed', 502, origin);
+
+  const events = Array.isArray(data.events) ? data.events : [];
+  // Filtrer matchs terminés (status FINAL) · ne PAS filtrer playoffs : ESPN renvoie
+  // saison régulière + post-saison dans la même requête.
+  const completed = events.filter(ev => {
+    const stateName = ev?.status?.type?.name ?? '';
+    return stateName === 'STATUS_FINAL' || stateName === 'STATUS_FINAL_OT';
+  });
+
+  // Tri date décroissante puis prendre les n premiers
+  completed.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  const games = completed.slice(0, n).map(ev => {
+    const comp        = ev.competitions?.[0] ?? {};
+    const competitors = comp.competitors ?? [];
+    const us          = competitors.find(c => c.team?.id === teamId);
+    const them        = competitors.find(c => c.team?.id !== teamId);
+    const usScore     = parseInt(us?.score)   || 0;
+    const themScore   = parseInt(them?.score) || 0;
+    const dateIso     = (ev.date ?? '').slice(0, 10);
+    return {
+      date:         dateIso,
+      opponent:     them?.team?.displayName ?? null,
+      opponent_abv: them?.team?.abbreviation ?? null,
+      home_away:    us?.homeAway === 'home' ? 'home' : 'away',
+      score:        `${usScore}-${themScore}`,
+      result:       usScore > themScore ? 'W' : 'L',
+      season_type:  comp.seasonType ?? ev.season?.type ?? null,
+    };
+  });
+
+  const payload = {
+    team_id:    teamId,
+    season,
+    games,
+    fetched_at: Date.now(),
+    source:     'espn',
+  };
+
+  if (env?.PAPER_TRADING) {
+    try { await env.PAPER_TRADING.put(cacheKey, JSON.stringify(payload), { expirationTtl: 7200 }); } catch (_) {}
+  }
+  return jsonResponse(payload, 200, origin);
 }
 
 // ── HANDLER : TEAM STATS MLB (hitting + pitching, saison) ─────────────────────
