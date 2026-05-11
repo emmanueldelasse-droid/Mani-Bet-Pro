@@ -6839,47 +6839,53 @@ async function handleApiTennisDebug(url, env, origin) {
 }
 
 // Test ESPN tennis API (free, sans clé).
-// search_athlete a confirmé que Cirstea = id=1774 dans ESPN. Ce test cherche le bon
-// endpoint pour récupérer l'historique des matchs avec dates précises.
+// PR #154 a identifié eventlog_core comme bon endpoint (46 events pour Cirstea 2026).
+// Maintenant on follow le competition.$ref du 1er event pour voir si on récupère date+score.
 async function handleEspnTennisTest(url, env, origin) {
   const athleteId = url.searchParams.get('id') ?? '1774';   // Cirstea par défaut
   const league = url.searchParams.get('league') ?? 'wta';
-  const endpoints = [
-    { label: 'profile',            url: `https://site.api.espn.com/apis/site/v3/sports/tennis/${league}/athletes/${athleteId}` },
-    { label: 'eventlog_site',      url: `https://site.api.espn.com/apis/site/v3/sports/tennis/${league}/athletes/${athleteId}/eventlog` },
-    { label: 'eventlog_core_2026', url: `https://sports.core.api.espn.com/v2/sports/tennis/leagues/${league}/seasons/2026/athletes/${athleteId}/eventlog` },
-    { label: 'eventlog_core_basic',url: `https://sports.core.api.espn.com/v2/sports/tennis/leagues/${league}/athletes/${athleteId}/eventlog` },
-    { label: 'statistics',         url: `https://site.api.espn.com/apis/site/v3/sports/tennis/${league}/athletes/${athleteId}/statistics` },
-    { label: 'gamelog',            url: `https://site.web.api.espn.com/apis/common/v3/sports/tennis/${league}/athletes/${athleteId}/gamelog` },
-    { label: 'overview',           url: `https://site.web.api.espn.com/apis/common/v3/sports/tennis/${league}/athletes/${athleteId}/overview` },
-    { label: 'scoreboard_today',   url: `https://site.api.espn.com/apis/site/v2/sports/tennis/${league}/scoreboard?dates=20260511` },
-  ];
-  const out = { athlete_id: athleteId, league, results: {} };
-  for (const ep of endpoints) {
-    try {
-      const resp = await fetchTimeout(ep.url, {}, 10000);
-      const text = await resp.text();
-      let parsed;
-      try { parsed = JSON.parse(text); } catch (_) { parsed = null; }
-      const topKeys = parsed && typeof parsed === 'object' ? Object.keys(parsed).slice(0, 12) : null;
-      // Cherche tableaux qui ressemblent à des events/matchs
-      const matchArrSize = (() => {
-        if (!parsed) return null;
-        if (Array.isArray(parsed.events)) return parsed.events.length;
-        if (Array.isArray(parsed.items)) return parsed.items.length;
-        if (parsed.events?.items && Array.isArray(parsed.events.items)) return parsed.events.items.length;
-        if (parsed.eventLog?.events?.items && Array.isArray(parsed.eventLog.events.items)) return parsed.eventLog.events.items.length;
-        return null;
-      })();
-      out.results[ep.label] = {
-        http_status:    resp.status,
-        top_keys:       topKeys,
-        match_count:    matchArrSize,
-        raw_excerpt:    text.slice(0, 600),
-      };
-    } catch (err) {
-      out.results[ep.label] = { error: err.message };
+  const out = { athlete_id: athleteId, league, steps: {} };
+
+  // Étape 1 : eventlog
+  const eventlogUrl = `https://sports.core.api.espn.com/v2/sports/tennis/leagues/${league}/athletes/${athleteId}/eventlog`;
+  try {
+    const resp = await fetchTimeout(eventlogUrl, {}, 10000);
+    const text = await resp.text();
+    const parsed = JSON.parse(text);
+    const items = parsed?.events?.items ?? [];
+    out.steps.eventlog = {
+      http_status:  resp.status,
+      total_events: parsed?.events?.count ?? null,
+      page_size:    parsed?.events?.pageSize ?? null,
+      items_in_page: items.length,
+      first_item_keys: items[0] ? Object.keys(items[0]) : null,
+    };
+
+    // Étape 2 : follow les 3 premiers competition.$ref
+    out.steps.competitions = [];
+    for (let i = 0; i < Math.min(3, items.length); i++) {
+      const competitionRef = items[i].competition?.$ref;
+      if (!competitionRef) { out.steps.competitions.push({ idx: i, error: 'no competition ref' }); continue; }
+      try {
+        const cresp = await fetchTimeout(competitionRef, {}, 10000);
+        const ctext = await cresp.text();
+        const cparsed = JSON.parse(ctext);
+        out.steps.competitions.push({
+          idx: i,
+          http_status:  cresp.status,
+          top_keys:     Object.keys(cparsed).slice(0, 15),
+          date:         cparsed.date ?? null,
+          status:       cparsed.status?.type?.name ?? null,
+          competitors_count: Array.isArray(cparsed.competitors) ? cparsed.competitors.length : null,
+          first_competitor_keys: cparsed.competitors?.[0] ? Object.keys(cparsed.competitors[0]) : null,
+          raw_excerpt:  ctext.slice(0, 800),
+        });
+      } catch (err) {
+        out.steps.competitions.push({ idx: i, error: err.message });
+      }
     }
+  } catch (err) {
+    out.steps.eventlog = { error: err.message };
   }
   return jsonResponse(out, 200, origin);
 }
