@@ -598,6 +598,29 @@ function _renderOpponentStatsHtml(s, surface) {
     <span style="font-size:12px;color:var(--color-text-secondary)">${label}</span>
     <span style="font-size:13px;font-weight:600;color:var(--color-text)">${val}</span>
   </div>`;
+
+  // v6.89 : liste 5 derniers matchs avec date + adversaire + score (déjà fournis par /tennis/stats)
+  const fmtDate = (iso) => {
+    if (!iso) return '—';
+    const [y, mo, d] = iso.split('-');
+    return `${d}/${mo}`;
+  };
+  const last5 = Array.isArray(s.last5_matches) ? s.last5_matches : [];
+  const last5Html = last5.length === 0
+    ? '<div style="font-size:11px;color:var(--color-text-secondary);padding:6px 0">Aucun match récent recensé.</div>'
+    : last5.map(m => {
+        const resColor = m.result === 'W' ? 'var(--color-success)' : 'var(--color-danger)';
+        const resLabel = m.result === 'W' ? 'V' : 'D';
+        const opp = _escapeHtml(m.opponent ?? '—');
+        const score = _escapeHtml(m.score ?? '');
+        return `<div style="display:flex;align-items:center;gap:6px;font-size:11px;padding:3px 0;color:var(--color-text-secondary)">
+          <span style="font-weight:700;color:${resColor};width:14px;flex-shrink:0">${resLabel}</span>
+          <span style="width:36px;flex-shrink:0;font-variant-numeric:tabular-nums">${fmtDate(m.date)}</span>
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--color-text)">${opp}</span>
+          <span style="font-variant-numeric:tabular-nums">${score}</span>
+        </div>`;
+      }).join('');
+
   return `
     <div style="text-align:left;padding:4px 0">
       ${row('Rang ATP/WTA', `#${rank}`)}
@@ -608,7 +631,11 @@ function _renderOpponentStatsHtml(s, surface) {
       ${row('Matchs recensés (2 ans)', totalMatches)}
       ${row('Jours depuis dernier match', fatigueLabel)}
     </div>
+    <div style="margin-top:14px">
+      <div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:6px;font-weight:600">5 derniers matchs</div>
+      ${last5Html}
+    </div>
     <div style="margin-top:14px;padding:8px 10px;background:var(--color-bg-secondary);border-radius:6px;font-size:10px;color:var(--color-text-secondary);line-height:1.5">
-      Source : Jeff Sackmann CSV. Stats sur 12-24 derniers mois.
+      Source : Jeff Sackmann CSV. Dates estimées via round du tournoi.
     </div>`;
 }
