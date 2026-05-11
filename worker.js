@@ -123,7 +123,7 @@ const QUOTA_KV_KEY        = 'odds_quota_state';
 const TANK01_KV_KEY       = 'tank01_teams_stats';
 const TANK01_INJURIES_KEY = 'tank01_injuries_impact';
 const TANK01_ROSTER_KEY   = 'tank01_roster_injuries_v1';
-const TENNIS_CSV_KEY      = 'tennis_csv_stats_v5';   // v5 : ajout last5_matches dans stats joueur
+const TENNIS_CSV_KEY      = 'tennis_csv_stats_v6';   // v6 : H2H pondéré récence + dates par match (api-tennis 365j)
 const TENNIS_ODDS_KEY     = 'tennis_odds_cache_v2';   // v2 : whitelist books fiables (exclut Matchbook/Smarkets)
 const TENNIS_API_BASE     = 'https://api.api-tennis.com/tennis';
 const TENNIS_API_KEYMAP   = 'tennis_api_keymap_v1';   // KV cache name → player_key
@@ -6687,17 +6687,41 @@ async function _apiTennisFetchRecentMatches(playerInfo, env, daysBack = 60) {
   }
 }
 
-// Dédup matchs entre Sackmann CSV et api-tennis : même (date, winner, loser) → on garde Sackmann
-// (stats service plus complètes). Supprime les doublons côté api-tennis.
+// Fusion Sackmann CSV + api-tennis.
+// - Match Sackmann avec équivalent api-tennis (mêmes joueurs ±10j) → on enrichit la
+//   ligne Sackmann avec la VRAIE date par match (event_date) + score exact (event_final_result)
+//   d'api-tennis · stats service Sackmann conservées intactes.
+// - Matchs api-tennis sans équivalent Sackmann → ajoutés tels quels.
+// Limite Sackmann : tourney_date = date de début du tournoi · tous les matchs d'un même
+// tournoi partagent la même date → affichage UI incorrect. api-tennis fournit la vraie date.
 function _mergeTennisRows(sackmannRows, apiRows) {
-  const seen = new Set();
-  for (const r of sackmannRows) {
-    seen.add(`${r.tourney_date}|${_normalizeTennisName(r.winner_name)}|${_normalizeTennisName(r.loser_name)}`);
+  // Index api-tennis par paire (winner|loser) normalisée pour lookup rapide
+  const apiByPair = new Map();
+  for (const a of apiRows) {
+    const k = `${_normalizeTennisName(a.winner_name)}|${_normalizeTennisName(a.loser_name)}`;
+    if (!apiByPair.has(k)) apiByPair.set(k, []);
+    apiByPair.get(k).push(a);
   }
-  const fresh = apiRows.filter(r => {
-    const k = `${r.tourney_date}|${_normalizeTennisName(r.winner_name)}|${_normalizeTennisName(r.loser_name)}`;
-    return !seen.has(k);
-  });
+  const dateInt = (s) => parseInt(s || '0', 10);
+  const seenApi = new Set();
+  for (const r of sackmannRows) {
+    const k = `${_normalizeTennisName(r.winner_name)}|${_normalizeTennisName(r.loser_name)}`;
+    const candidates = apiByPair.get(k);
+    if (!candidates?.length) continue;
+    const sd = dateInt(r.tourney_date);
+    let best = null, bestDiff = Infinity;
+    for (const a of candidates) {
+      const ad = dateInt(a.tourney_date);
+      const diff = Math.abs(sd - ad);
+      if (diff <= 10 && diff < bestDiff) { best = a; bestDiff = diff; }
+    }
+    if (best) {
+      r.tourney_date = best.tourney_date;
+      if (best.score) r.score = best.score;
+      seenApi.add(best);
+    }
+  }
+  const fresh = apiRows.filter(a => !seenApi.has(a));
   return sackmannRows.concat(fresh);
 }
 
@@ -6750,7 +6774,8 @@ async function handleTennisStats(url, env, origin) {
     if (r2024.status === 'fulfilled' && r2024.value.ok) allRows = allRows.concat(_parseTennisCSV(await r2024.value.text()));
     if (r2023.status === 'fulfilled' && r2023.value.ok) allRows = allRows.concat(_parseTennisCSV(await r2023.value.text()));
 
-    // Augmentation api-tennis · matchs des 60 derniers jours (comble retard Sackmann 2-3j)
+    // Augmentation api-tennis · matchs des 365 derniers jours (comble retard Sackmann
+    // 2-3j ET fournit les vraies dates par match + scores exacts pour _mergeTennisRows).
     let apiTennisAdded = 0;
     if (env.TENNIS_API_KEY) {
       const keymap = await _apiTennisGetKeymap(env);
@@ -6758,7 +6783,7 @@ async function handleTennisStats(url, env, origin) {
         const recentBatches = await Promise.allSettled(players.map(async (pName) => {
           const info = _apiTennisResolveKey(keymap, pName);
           if (!info) return [];
-          return _apiTennisFetchRecentMatches(info, env, 60);
+          return _apiTennisFetchRecentMatches(info, env, 365);
         }));
         const apiRows = recentBatches.flatMap(b => b.status === 'fulfilled' ? b.value : []);
         if (apiRows.length) {
@@ -6842,12 +6867,20 @@ async function handleTennisStats(url, env, origin) {
       const flippedMatches = h2h.overall.matches.map(m => ({ ...m, winner: m.winner === 'p1' ? 'p2' : 'p1' }));
       stats[players[0]].h2h = { [players[1]]: {
         p1_wins: h2h.surface.p1_wins, p2_wins: h2h.surface.p2_wins,
+        p1_wins_weighted: h2h.surface.p1_wins_weighted, p2_wins_weighted: h2h.surface.p2_wins_weighted,
+        weighted_total: h2h.surface.weighted_total,
         p1_wins_overall: h2h.overall.p1_wins, p2_wins_overall: h2h.overall.p2_wins,
+        p1_wins_overall_weighted: h2h.overall.p1_wins_weighted, p2_wins_overall_weighted: h2h.overall.p2_wins_weighted,
+        overall_weighted_total: h2h.overall.weighted_total,
         matches: h2h.overall.matches,
       } };
       stats[players[1]].h2h = { [players[0]]: {
         p1_wins: h2h.surface.p2_wins, p2_wins: h2h.surface.p1_wins,
+        p1_wins_weighted: h2h.surface.p2_wins_weighted, p2_wins_weighted: h2h.surface.p1_wins_weighted,
+        weighted_total: h2h.surface.weighted_total,
         p1_wins_overall: h2h.overall.p2_wins, p2_wins_overall: h2h.overall.p1_wins,
+        p1_wins_overall_weighted: h2h.overall.p2_wins_weighted, p2_wins_overall_weighted: h2h.overall.p1_wins_weighted,
+        overall_weighted_total: h2h.overall.weighted_total,
         matches: flippedMatches,
       } };
     }
@@ -7095,6 +7128,21 @@ function _computeTennisH2H(rows, p1, p2, surface) {
   const allMatches = rows.filter(isMatch);
   const surfMatches = allMatches.filter(r => r.surface === surface);
   const count = (arr, name) => arr.filter(r => r.winner_name === name).length;
+  // v6.85 : poids récence pour signal H2H (évite qu'une victoire 2023 pollue 2026)
+  // ≤1 an → 1.0 · 1-2 ans → 0.5 · 2-3 ans → 0.25 · >3 ans → 0.1
+  const today = new Date();
+  const todayMs = today.getTime();
+  const recencyWeight = (d) => {
+    if (!d || d.length !== 8) return 0.1;
+    const ms = new Date(`${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`).getTime();
+    const months = (todayMs - ms) / (30.44 * 86400000);
+    if (months <= 12) return 1.0;
+    if (months <= 24) return 0.5;
+    if (months <= 36) return 0.25;
+    return 0.1;
+  };
+  const weightedWins = (arr, name) => arr.reduce((acc, r) => acc + (r.winner_name === name ? recencyWeight(r.tourney_date) : 0), 0);
+  const weightedTotal = (arr) => arr.reduce((acc, r) => acc + recencyWeight(r.tourney_date), 0);
   // v6.84 : détail matchs (date desc) pour affichage UI scores/dates/tournoi
   const detail = (r) => ({
     date:       r.tourney_date ?? null,
@@ -7107,8 +7155,21 @@ function _computeTennisH2H(rows, p1, p2, surface) {
   const sortByDateDesc = (a, b) => String(b.date ?? '').localeCompare(String(a.date ?? ''));
   const matchesDetail = allMatches.map(detail).sort(sortByDateDesc);
   return {
-    surface: { p1_wins: count(surfMatches, n1), p2_wins: count(surfMatches, n2) },
-    overall: { p1_wins: count(allMatches,  n1), p2_wins: count(allMatches,  n2), matches: matchesDetail },
+    surface: {
+      p1_wins: count(surfMatches, n1),
+      p2_wins: count(surfMatches, n2),
+      p1_wins_weighted: Math.round(weightedWins(surfMatches, n1) * 100) / 100,
+      p2_wins_weighted: Math.round(weightedWins(surfMatches, n2) * 100) / 100,
+      weighted_total:   Math.round(weightedTotal(surfMatches) * 100) / 100,
+    },
+    overall: {
+      p1_wins: count(allMatches, n1),
+      p2_wins: count(allMatches, n2),
+      p1_wins_weighted: Math.round(weightedWins(allMatches, n1) * 100) / 100,
+      p2_wins_weighted: Math.round(weightedWins(allMatches, n2) * 100) / 100,
+      weighted_total:   Math.round(weightedTotal(allMatches) * 100) / 100,
+      matches:          matchesDetail,
+    },
   };
 }
 
@@ -8977,16 +9038,46 @@ function _botTennisExtractVariables(p1, p2, surface, oddsCtx = null) {
     out.recent_form_ema = { value: null, source: 'sackmann', quality: 'MISSING' };
   }
 
-  // 4) h2h_surface — surface du tournoi en priorité · fallback toutes surfaces (v6.82)
+  // 4) h2h_surface — v6.85 décroissance récence (1.0/0.5/0.25/0.1 sur 12/24/36 mois)
+  // Bascule surface → global si échantillon pondéré surface < 1.5 (évite victoire ancienne
+  // unique dominante · ex Cirstea-Ostapenko clay 0-1 datant 2023 · poids 0.1).
   const h2h = p1?.h2h?.[p2?.name];
-  if (h2h && (h2h.p1_wins + h2h.p2_wins) > 0) {
-    const total = h2h.p1_wins + h2h.p2_wins;
-    const wr = h2h.p1_wins / total;
-    out.h2h_surface = { value: Math.round(((wr - 0.5) * 2) * 100) / 100, total, source: 'sackmann', scope: 'surface', quality: total >= 3 ? 'VERIFIED' : 'LOW_SAMPLE' };
-  } else if (h2h && ((h2h.p1_wins_overall ?? 0) + (h2h.p2_wins_overall ?? 0)) > 0) {
-    const total = (h2h.p1_wins_overall ?? 0) + (h2h.p2_wins_overall ?? 0);
-    const wr = (h2h.p1_wins_overall ?? 0) / total;
-    out.h2h_surface = { value: Math.round(((wr - 0.5) * 2) * 100) / 100, total, source: 'sackmann', scope: 'overall', quality: 'PARTIAL' };
+  const MIN_W = 1.5;
+  if (h2h) {
+    const sW1 = h2h.p1_wins_weighted ?? 0;
+    const sW2 = h2h.p2_wins_weighted ?? 0;
+    const sWT = h2h.weighted_total ?? (sW1 + sW2);
+    const oW1 = h2h.p1_wins_overall_weighted ?? 0;
+    const oW2 = h2h.p2_wins_overall_weighted ?? 0;
+    const oWT = h2h.overall_weighted_total ?? (oW1 + oW2);
+    const sRaw = (h2h.p1_wins ?? 0) + (h2h.p2_wins ?? 0);
+    const oRaw = (h2h.p1_wins_overall ?? 0) + (h2h.p2_wins_overall ?? 0);
+    let w1, w2, total, scope, quality;
+    if (sWT >= MIN_W) {
+      w1 = sW1; w2 = sW2; total = sWT; scope = 'surface'; quality = sWT >= 3 ? 'VERIFIED' : 'LOW_SAMPLE';
+    } else if (oWT >= MIN_W) {
+      w1 = oW1; w2 = oW2; total = oWT; scope = 'overall'; quality = oWT >= 3 ? 'PARTIAL' : 'LOW_SAMPLE';
+    } else if (sRaw > 0 || oRaw > 0) {
+      const pickOverall = oRaw >= sRaw;
+      w1 = pickOverall ? oW1 : sW1;
+      w2 = pickOverall ? oW2 : sW2;
+      total = pickOverall ? Math.max(oWT, 0.1) : Math.max(sWT, 0.1);
+      scope = pickOverall ? 'overall_stale' : 'surface_stale';
+      quality = 'LOW_SAMPLE';
+    } else {
+      out.h2h_surface = { value: 0, source: 'sackmann', scope: 'none', quality: 'LOW_SAMPLE' };
+    }
+    if (scope) {
+      const wr = total > 0 ? w1 / total : 0.5;
+      out.h2h_surface = {
+        value:   Math.round(((wr - 0.5) * 2) * 100) / 100,
+        total:   Math.round(total * 100) / 100,
+        raw_total: scope.startsWith('surface') ? sRaw : oRaw,
+        source:  'sackmann',
+        scope,
+        quality,
+      };
+    }
   } else {
     out.h2h_surface = { value: 0, source: 'sackmann', scope: 'none', quality: 'LOW_SAMPLE' };
   }
