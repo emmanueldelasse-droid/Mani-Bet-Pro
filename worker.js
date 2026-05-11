@@ -6782,32 +6782,42 @@ async function handleApiTennisDebug(url, env, origin) {
         const info = _apiTennisResolveKey(keymap, pName);
         result.players_resolved[pName] = info ? { key: info.key, tour: info.tour, name: info.name } : null;
         if (info) {
-          // Test 3 plages : 30j, 90j, 365j pour identifier la limite du free tier
-          const ranges = [{ label: '30d', d: 30 }, { label: '90d', d: 90 }, { label: '365d', d: 365 }];
+          // Test 4 méthodes alternatives pour identifier la bonne API d'historique joueur :
+          // A) get_fixtures + player_key + date_range (méthode actuelle, ne marche pas)
+          // B) get_fixtures sans player_key (filtre client-side)
+          // C) get_players (profil joueur, peut inclure last matches)
+          // D) get_H2H (méthode dédiée H2H)
+          const today = new Date();
+          const start = new Date(today); start.setDate(start.getDate() - 30);
+          const ds = start.toISOString().slice(0, 10);
+          const de = today.toISOString().slice(0, 10);
+          const variants = [
+            { label: 'A_fixtures_pk',   url: `${TENNIS_API_BASE}/?method=get_fixtures&player_key=${info.key}&date_start=${ds}&date_stop=${de}&APIkey=${env.TENNIS_API_KEY}` },
+            { label: 'B_fixtures_nopk', url: `${TENNIS_API_BASE}/?method=get_fixtures&date_start=${ds}&date_stop=${de}&APIkey=${env.TENNIS_API_KEY}` },
+            { label: 'C_players',       url: `${TENNIS_API_BASE}/?method=get_players&player_key=${info.key}&APIkey=${env.TENNIS_API_KEY}` },
+            { label: 'D_event_h2h',     url: `${TENNIS_API_BASE}/?method=get_H2H&first_player_key=${info.key}&second_player_key=${info.key}&APIkey=${env.TENNIS_API_KEY}` },
+          ];
           result.fetches[pName] = {};
-          for (const { label, d } of ranges) {
-            const today = new Date();
-            const start = new Date(today); start.setDate(start.getDate() - d);
-            const ds = start.toISOString().slice(0, 10);
-            const de = today.toISOString().slice(0, 10);
-            const rawUrl = `${TENNIS_API_BASE}/?method=get_fixtures&player_key=${info.key}&date_start=${ds}&date_stop=${de}&APIkey=${env.TENNIS_API_KEY}`;
+          for (const v of variants) {
             try {
-              const resp = await fetchTimeout(rawUrl, {}, 12000);
+              const resp = await fetchTimeout(v.url, {}, 12000);
               const text = await resp.text();
               let parsed;
               try { parsed = JSON.parse(text); } catch (_) { parsed = null; }
-              const fixtures = Array.isArray(parsed?.result) ? parsed.result : [];
-              const finishedCount = fixtures.filter(fx => fx.event_status === 'Finished' || (fx.event_winner && fx.event_winner !== '')).length;
-              result.fetches[pName][label] = {
+              const resultData = parsed?.result;
+              const isArr = Array.isArray(resultData);
+              const isObj = resultData && typeof resultData === 'object' && !isArr;
+              result.fetches[pName][v.label] = {
                 http_status:       resp.status,
                 api_error_field:   parsed?.error ?? null,
                 api_success_field: parsed?.success ?? null,
-                total_fixtures:    fixtures.length,
-                finished_fixtures: finishedCount,
-                first_fixture_has_event_date: fixtures.length > 0 ? !!fixtures[0]?.event_date : null,
+                result_type:       isArr ? 'array' : isObj ? 'object' : (resultData === null ? 'null' : typeof resultData),
+                result_size:       isArr ? resultData.length : isObj ? Object.keys(resultData).length : 0,
+                result_top_keys:   isObj ? Object.keys(resultData).slice(0, 10) : (isArr && resultData[0] && typeof resultData[0] === 'object' ? Object.keys(resultData[0]).slice(0, 10) : null),
+                raw_excerpt:       text.slice(0, 300),
               };
             } catch (err) {
-              result.fetches[pName][label] = { error: err.message };
+              result.fetches[pName][v.label] = { error: err.message };
             }
           }
         }
