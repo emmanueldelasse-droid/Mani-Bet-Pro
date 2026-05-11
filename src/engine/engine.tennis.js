@@ -215,8 +215,10 @@ export class EngineTennis {
   // ── SIGNAL 4 : H2H sur même surface ──────────────────────────────────
 
   static _h2hSurface(p1, p2, surface) {
-    // v6.82 : worker stocke surface (p1_wins/p2_wins) + overall (p1_wins_overall/p2_wins_overall)
-    // Priorité : surface du tournoi · fallback : toutes surfaces (quality PARTIAL)
+    // v6.85 : worker fournit p1_wins_weighted + p2_wins_weighted (décroissance récence
+    // 1.0/0.5/0.25/0.1 sur tranches 12/24/36 mois). Évite qu'une victoire 2023 sur
+    // 1 seul H2H surface plombe le signal (ex Cirstea-Ostapenko Rome 2023 · poids 0.1).
+    // Bascule surface → global si échantillon pondéré surface < 1.5.
     const h2hMap = p1?.h2h ?? null;
     const target = p2?.name && h2hMap?.[p2.name]
       ? h2hMap[p2.name]
@@ -226,32 +228,47 @@ export class EngineTennis {
       return { value: null, source: 'sackmann_csv', quality: 'MISSING' };
     }
 
-    const surfTotal = (target.p1_wins ?? 0) + (target.p2_wins ?? 0);
-    const overTotal = (target.p1_wins_overall ?? 0) + (target.p2_wins_overall ?? 0);
+    const surfW1 = target.p1_wins_weighted ?? 0;
+    const surfW2 = target.p2_wins_weighted ?? 0;
+    const surfWT = target.weighted_total ?? (surfW1 + surfW2);
+    const overW1 = target.p1_wins_overall_weighted ?? 0;
+    const overW2 = target.p2_wins_overall_weighted ?? 0;
+    const overWT = target.overall_weighted_total ?? (overW1 + overW2);
+    const surfRaw = (target.p1_wins ?? 0) + (target.p2_wins ?? 0);
+    const overRaw = (target.p1_wins_overall ?? 0) + (target.p2_wins_overall ?? 0);
+    const MIN_WEIGHTED_SAMPLE = 1.5;
 
     let used, scope, quality;
-    if (surfTotal > 0) {
-      used = { p1_wins: target.p1_wins, p2_wins: target.p2_wins, total: surfTotal };
+    if (surfWT >= MIN_WEIGHTED_SAMPLE) {
+      used = { p1_wins: surfW1, p2_wins: surfW2, total: surfWT, raw_total: surfRaw };
       scope = 'surface';
-      quality = surfTotal >= 3 ? 'VERIFIED' : 'LOW_SAMPLE';
-    } else if (overTotal > 0) {
-      used = { p1_wins: target.p1_wins_overall, p2_wins: target.p2_wins_overall, total: overTotal };
+      quality = surfWT >= 3 ? 'VERIFIED' : 'LOW_SAMPLE';
+    } else if (overWT >= MIN_WEIGHTED_SAMPLE) {
+      used = { p1_wins: overW1, p2_wins: overW2, total: overWT, raw_total: overRaw };
       scope = 'overall';
-      quality = 'PARTIAL';
+      quality = overWT >= 3 ? 'PARTIAL' : 'LOW_SAMPLE';
+    } else if (surfRaw > 0 || overRaw > 0) {
+      const pickOverall = overRaw >= surfRaw;
+      used = pickOverall
+        ? { p1_wins: overW1, p2_wins: overW2, total: Math.max(overWT, 0.1), raw_total: overRaw }
+        : { p1_wins: surfW1, p2_wins: surfW2, total: Math.max(surfWT, 0.1), raw_total: surfRaw };
+      scope = pickOverall ? 'overall_stale' : 'surface_stale';
+      quality = 'LOW_SAMPLE';
     } else {
       return { value: 0, p1_wins: 0, p2_wins: 0, total: 0, scope: 'none', source: 'sackmann_csv', quality: 'LOW_SAMPLE' };
     }
 
-    const p1WinRate  = used.p1_wins / used.total;
+    const p1WinRate  = used.total > 0 ? used.p1_wins / used.total : 0.5;
     const normalized = (p1WinRate - 0.5) * 2;
 
     return {
-      value:   Math.round(normalized * 100) / 100,
-      p1_wins: used.p1_wins,
-      p2_wins: used.p2_wins,
-      total:   used.total,
+      value:     Math.round(normalized * 100) / 100,
+      p1_wins:   Math.round(used.p1_wins * 100) / 100,
+      p2_wins:   Math.round(used.p2_wins * 100) / 100,
+      total:     Math.round(used.total * 100) / 100,
+      raw_total: used.raw_total,
       scope,
-      source:  'sackmann_csv',
+      source:    'sackmann_csv',
       quality,
     };
   }
