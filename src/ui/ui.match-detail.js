@@ -27,6 +27,7 @@ import {
   formatRejection,
   resolveLatestAnalysisForMatch as _resolveLatestAnalysisForMatch,
   SIGNAL_LABELS,
+  surfaceFr,
   WORKER_URL,
 } from './ui.match-detail.helpers.js';
 import {
@@ -579,7 +580,7 @@ function renderShell(match, analysis, storeInstance) {
             <div class="match-detail__team-name">${match.home_team?.name ?? '—'}</div>
             ${homeStr ? pill('home', favHome) : ''}
             ${isTennis
-              ? `<div class="text-muted" style="font-size:11px;margin-top:2px">${match.surface ?? ''}${match.surface && match.tournament ? ' · ' : ''}${match.tournament ?? ''}</div>`
+              ? `<div class="text-muted" style="font-size:11px;margin-top:2px">${surfaceFr(match.surface)}${match.surface && match.tournament ? ' · ' : ''}${match.tournament ?? ''}</div>`
               : `<div style="display:inline-flex;align-self:flex-start;align-items:center;font-size:10px;font-weight:600;color:var(--color-text-secondary);background:var(--color-bg);border:1px solid var(--color-border);border-radius:4px;padding:1px 6px;margin-top:2px">🏠 Domicile</div>
                  <div class="text-muted mono" style="font-size:11px;margin-top:2px">${match.home_team?.record ?? ''}</div>`}
           </div>
