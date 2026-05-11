@@ -135,18 +135,26 @@ async function _loadAndRenderMLBStats(container, match, storeInstance) {
       ? `${match.date.slice(0,4)}-${match.date.slice(4,6)}-${match.date.slice(6,8)}`
       : null;
 
-    // 3 fetches en parallèle (tous cachés côté worker)
-    const [teamStatsResp, standingsResp, pitchersResp, botLogResp] = await Promise.allSettled([
+    // ESPN team ids requis pour /mlb/team-recent (5 derniers matchs)
+    const homeEspnId = match.home_team?.espn_id ?? null;
+    const awayEspnId = match.away_team?.espn_id ?? null;
+
+    // Fetches en parallèle (tous cachés côté worker)
+    const [teamStatsResp, standingsResp, pitchersResp, botLogResp, homeRecentResp, awayRecentResp] = await Promise.allSettled([
       fetch(`${WORKER_URL}/mlb/team-stats`,        { headers: { Accept: 'application/json' } }),
       fetch(`${WORKER_URL}/mlb/standings`,         { headers: { Accept: 'application/json' } }),
       fetch(`${WORKER_URL}/mlb/pitchers${dateStr ? `?date=${dateStr}` : ''}`, { headers: { Accept: 'application/json' } }),
       fetch(`${WORKER_URL}/mlb/bot/logs${match.date ? `?date=${match.date}` : ''}`, { headers: { Accept: 'application/json' } }),
+      homeEspnId ? fetch(`${WORKER_URL}/mlb/team-recent?team_id=${homeEspnId}&n=5`, { headers: { Accept: 'application/json' } }) : Promise.resolve(null),
+      awayEspnId ? fetch(`${WORKER_URL}/mlb/team-recent?team_id=${awayEspnId}&n=5`, { headers: { Accept: 'application/json' } }) : Promise.resolve(null),
     ]);
 
     const teamStatsData = teamStatsResp.status === 'fulfilled' ? await teamStatsResp.value.json() : null;
     const standingsData = standingsResp.status === 'fulfilled' ? await standingsResp.value.json() : null;
     const pitchersData  = pitchersResp.status  === 'fulfilled' ? await pitchersResp.value.json()  : null;
     const botLogs       = botLogResp.status    === 'fulfilled' ? await botLogResp.value.json()    : null;
+    const homeRecent    = homeRecentResp.status === 'fulfilled' && homeRecentResp.value ? await homeRecentResp.value.json() : null;
+    const awayRecent    = awayRecentResp.status === 'fulfilled' && awayRecentResp.value ? await awayRecentResp.value.json() : null;
 
     const homeStats  = teamStatsData?.teams?.[homeName] ?? null;
     const awayStats  = teamStatsData?.teams?.[awayName] ?? null;
@@ -163,6 +171,7 @@ async function _loadAndRenderMLBStats(container, match, storeInstance) {
       homeStats, awayStats,
       homeStand, awayStand,
       homePit, awayPit,
+      homeRecent, awayRecent,
       strikeoutsPrediction,
     });
   } catch (err) {
@@ -332,7 +341,35 @@ function _renderMLBMarches(log, match) {
 }
 
 function _renderMLBMatchDetail(data) {
-  const { homeName, awayName, homeStats, awayStats, homeStand, awayStand, homePit, awayPit, strikeoutsPrediction } = data;
+  const { homeName, awayName, homeStats, awayStats, homeStand, awayStand, homePit, awayPit, homeRecent, awayRecent, strikeoutsPrediction } = data;
+
+  // Bloc 5 derniers matchs (saison régulière + playoffs de l'année courante)
+  // Donnée fournie par /mlb/team-recent · cache backend 1h.
+  const renderRecentGames = (recent, teamName) => {
+    const games = Array.isArray(recent?.games) ? recent.games : [];
+    if (games.length === 0) {
+      return `<div style="font-size:11px;color:var(--color-muted);padding:6px 0">Aucun match terminé recensé pour ${teamName ?? '—'}.</div>`;
+    }
+    const fmtDate = (iso) => {
+      if (!iso || iso.length < 10) return '—';
+      const [, m, d] = iso.split('-');
+      return `${d}/${m}`;
+    };
+    return games.map(g => {
+      const resColor = g.result === 'W' ? 'var(--color-success)' : 'var(--color-danger)';
+      const resLabel = g.result === 'W' ? 'V' : 'D';
+      const hostMark = g.home_away === 'home' ? 'dom.' : 'ext.';
+      const opp = g.opponent_abv ?? g.opponent ?? '—';
+      return `
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;padding:3px 0;color:var(--color-text-secondary)">
+          <span style="font-weight:700;color:${resColor};width:14px;flex-shrink:0">${resLabel}</span>
+          <span style="width:38px;flex-shrink:0;font-variant-numeric:tabular-nums">${fmtDate(g.date)}</span>
+          <span style="width:38px;flex-shrink:0;font-size:10px">${hostMark}</span>
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--color-text)">${opp}</span>
+          <span style="font-variant-numeric:tabular-nums;color:var(--color-text)">${g.score ?? ''}</span>
+        </div>`;
+    }).join('');
+  };
 
   const compareRow = (label, hVal, aVal, fmt = (v) => v, reverse = false) => {
     const h = hVal != null ? fmt(hVal) : '—';
@@ -411,9 +448,26 @@ function _renderMLBMatchDetail(data) {
           ${compareRow('Ext.',         homeStand.away_wins != null ? homeStand.away_wins / Math.max(1, homeStand.away_wins + homeStand.away_losses) : null,
                                         awayStand.away_wins != null ? awayStand.away_wins / Math.max(1, awayStand.away_wins + awayStand.away_losses) : null,
                                         (v) => (v * 100).toFixed(0) + '%')}
-          ${compareRow('Last 10',      homeStand.last10_wins != null ? `${homeStand.last10_wins}-${homeStand.last10_losses}` : null,
+          ${compareRow('10 derniers', homeStand.last10_wins != null ? `${homeStand.last10_wins}-${homeStand.last10_losses}` : null,
                                         awayStand.last10_wins != null ? `${awayStand.last10_wins}-${awayStand.last10_losses}` : null,
                                         (v) => v)}
+        </div>
+      ` : ''}
+
+      ${(homeRecent || awayRecent) ? `
+        <div class="bloc-header" style="margin-bottom:var(--space-2);margin-top:14px">
+          <span class="bloc-header__title">🔥 5 derniers matchs</span>
+        </div>
+        <div style="font-size:10px;color:var(--color-text-secondary);margin-bottom:8px">Saison régulière + playoffs ${homeRecent?.season ?? awayRecent?.season ?? ''}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;background:var(--color-bg);border-radius:8px;padding:10px 14px">
+          <div>
+            <div style="font-size:11px;font-weight:700;margin-bottom:4px">${homeName ?? '—'}</div>
+            ${renderRecentGames(homeRecent, homeName)}
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:700;margin-bottom:4px">${awayName ?? '—'}</div>
+            ${renderRecentGames(awayRecent, awayName)}
+          </div>
         </div>
       ` : ''}
     </div>

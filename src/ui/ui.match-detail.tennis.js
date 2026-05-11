@@ -391,7 +391,7 @@ function _renderH2H(match, data) {
     const dateStr = fmtDate(m.date);
     const winnerName = m.winner === 'p1' ? p1Name : p2Name;
     const winnerColor = m.winner === 'p1' ? 'var(--color-signal)' : 'var(--color-text)';
-    const surfTag = m.surface ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,0.06);color:var(--color-text-secondary);margin-left:4px">${_escapeHtml(m.surface)}</span>` : '';
+    const surfTag = m.surface ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,0.06);color:var(--color-text-secondary);margin-left:4px">${_escapeHtml(_surfaceFr(m.surface))}</span>` : '';
     return `
       <div style="display:grid;grid-template-columns:auto 1fr auto;gap:8px;padding:5px 0;border-bottom:1px solid var(--color-border);align-items:center">
         <span style="font-size:10px;color:var(--color-text-secondary);min-width:64px">${dateStr}</span>
@@ -412,10 +412,10 @@ function _renderH2H(match, data) {
   return `
     <div class="card match-detail__bloc">
       <div class="bloc-header" style="margin-bottom:var(--space-3)">
-        <span class="bloc-header__title">⚔️ H2H direct</span>
+        <span class="bloc-header__title">⚔️ Confrontations directes</span>
         ${_qualityBadge(overallQuality)}
       </div>
-      ${renderRow(sw1, sw2, `Sur ${_escapeHtml(surface)}`)}
+      ${renderRow(sw1, sw2, `Sur ${_escapeHtml(_surfaceFr(surface).toLowerCase())}`)}
       ${renderRow(ow1, ow2, 'Toutes surfaces')}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;padding-top:6px;border-top:1px solid var(--color-border)">
         <div style="font-size:11px;text-align:left;color:var(--color-text-secondary)">${_escapeHtml(p1Name ?? '—')}</div>
