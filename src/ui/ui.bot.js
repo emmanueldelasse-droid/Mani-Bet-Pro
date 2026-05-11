@@ -892,17 +892,33 @@ function _renderDetailPanel(log) {
   const missing = log.missing_variables ?? [];
   const recs    = log.betting_recommendations?.recommendations ?? [];
 
+  // v6.91 : rendu plus visuel · interprétation en mots + barre visuelle au lieu de chiffres bruts
+  const isTennis = log.tour != null || log.p1 != null;
+  const homeName = log.p1 ?? log.home ?? null;
+  const awayName = log.p2 ?? log.away ?? null;
   return `
     <div class="bot-detail-section">
-      <div class="bot-detail-title">Toutes les variables d'analyse</div>
-      ${Object.entries(vars).map(([k, v]) => `
-        <div class="bot-detail-row">
+      <div class="bot-detail-title">Variables d'analyse</div>
+      <div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:8px;line-height:1.4">
+        Chaque variable indique qui est <strong>favorisé</strong> et avec quelle <strong>intensité</strong>.
+        ${isTennis ? 'Bleu = ' + (awayName ?? 'joueur 2') + ' · Vert = ' + (homeName ?? 'joueur 1') : 'Bleu = visiteur · Vert = domicile'}.
+      </div>
+      ${Object.entries(vars).map(([k, v]) => {
+        const interpret = _interpretVariable(k, v.value, v.quality);
+        const text = _interpretLabel(interpret, isTennis, homeName, awayName);
+        const color = interpret.winner === 'away' ? '#3b82f6'
+                    : interpret.winner === 'home' ? '#16a34a'
+                    : 'var(--color-muted)';
+        const rawNum = v.value != null ? _fmtVal(k, v.value) : '—';
+        return `<div class="bot-detail-row" style="align-items:center">
           <span>${_shortSignalLabel(k)}</span>
-          <span class="bot-detail-row__val">
-            ${v.value != null ? _fmtVal(k, v.value) : '—'}
-            <span style="font-size:10px;color:var(--color-muted);font-weight:400"> ${_qualityFr(v.quality)}</span>
+          <span class="bot-detail-row__val" style="display:flex;align-items:center;gap:8px;font-weight:500">
+            <span>${_interpretBar(interpret)}</span>
+            <span style="color:${color};font-size:12px;min-width:155px;text-align:right">${text}</span>
+            <span style="font-size:10px;color:var(--color-muted);font-weight:400;min-width:50px;text-align:right">${rawNum}</span>
           </span>
-        </div>`).join('')}
+        </div>`;
+      }).join('')}
     </div>
 
     ${missing.length ? `<div class="bot-detail-section">
@@ -1120,6 +1136,80 @@ function _scoreMethodFr(method) {
     HEURISTIC:    'heuristique',
     BASELINE:     'baseline',
   }[method] ?? method ?? '—';
+}
+
+// v6.91 : interprète une variable en mots clairs (qui est favorisé + à quel point)
+// Convention : value = home - away (sauf invertSign appliqué côté engine).
+// Direction du favori : value > 0 → home · value < 0 → away · value ≈ 0 → égal
+// Magnitude : seuils par type de variable (pourcentage vs points vs Elo)
+function _interpretVariable(variable, value, quality) {
+  if (quality === 'MISSING' || value == null) {
+    return { winner: 'missing', magnitude: 'aucune', label: 'Donnée manquante', strength: 0 };
+  }
+
+  const abs = Math.abs(value);
+  // Seuils calibrés par type de variable pour magnitude
+  const thresholds = {
+    // pourcentages 0-1 ou 0-100 (le code emet -1 à +1 pour absences/win_pct/efg/split)
+    absences_impact:      [0.05, 0.15, 0.35],   // 5%/15%/35%
+    efg_diff:             [0.005, 0.015, 0.03],
+    ts_diff:              [0.005, 0.015, 0.03],
+    win_pct_diff:         [0.025, 0.075, 0.15],
+    home_away_split:      [0.025, 0.075, 0.15],
+    // points/rating
+    net_rating_diff:      [1, 3, 6],
+    defensive_diff:       [1, 3, 6],
+    avg_pts_diff:         [1, 3, 6],
+    pace_diff:            [1, 3, 6],
+    recent_form_ema:      [1, 3, 6],
+    rest_days_diff:       [1, 2, 4],
+    back_to_back:         [0.5, 1, 2],
+    b2b_cumul_diff:       [0.5, 1, 2],
+    travel_load_diff:     [1, 3, 6],
+    // tennis (valeurs normalisées -1..+1)
+    ranking_elo_diff:     [0.05, 0.15, 0.35],
+    surface_winrate_diff: [0.05, 0.15, 0.35],
+    h2h_surface:          [0.2, 0.5, 0.8],
+    service_dominance:    [0.05, 0.15, 0.35],
+    pressure_dominance:   [0.05, 0.15, 0.35],
+    physical_load_diff:   [0.1, 0.3, 0.6],
+    market_steam_diff:    [0.1, 0.3, 0.6],
+    fatigue_index:        [0.1, 0.3, 0.6],
+  };
+  const [t1, t2, t3] = thresholds[variable] ?? [0.1, 0.3, 0.6];
+
+  if (abs < t1) return { winner: 'neutral', magnitude: 'égal', label: 'Égal entre les deux', strength: 0 };
+
+  // Tennis : signal positif favorise p1 (= home équivalent), négatif favorise p2
+  const winner = value > 0 ? 'home' : 'away';
+  const strength = abs >= t3 ? 3 : abs >= t2 ? 2 : 1;
+  const magnitude = strength === 3 ? 'très fort' : strength === 2 ? 'fort' : 'modéré';
+  return { winner, magnitude, label: '', strength };
+}
+
+function _interpretLabel(interpret, isTennis, homeName, awayName) {
+  if (interpret.winner === 'missing') return interpret.label;
+  if (interpret.winner === 'neutral') return interpret.label;
+  const sideName = interpret.winner === 'home'
+    ? (isTennis ? (homeName ?? 'Joueur 1') : 'Domicile')
+    : (isTennis ? (awayName ?? 'Joueur 2') : 'Visiteur');
+  return `favorise ${sideName} · ${interpret.magnitude}`;
+}
+
+function _interpretBar(interpret) {
+  // Mini barre visuelle 7 segments centrée · indique sens + magnitude
+  if (interpret.winner === 'missing') return '<span style="color:var(--color-muted);font-size:10px">—</span>';
+  if (interpret.winner === 'neutral') return '<span style="display:inline-block;width:60px;text-align:center;font-size:10px;color:var(--color-muted)">═══</span>';
+  const filled = interpret.strength; // 1, 2 ou 3
+  const seg = (active, color) => `<span style="display:inline-block;width:7px;height:9px;background:${active ? color : 'var(--color-border)'};border-radius:1px;margin:0 1px;vertical-align:middle"></span>`;
+  const blueColor = '#3b82f6';
+  const greenColor = '#16a34a';
+  if (interpret.winner === 'away') {
+    // remplit de droite vers la gauche
+    return `${seg(filled >= 3, blueColor)}${seg(filled >= 2, blueColor)}${seg(filled >= 1, blueColor)}<span style="display:inline-block;width:1px"></span>${seg(false)}${seg(false)}${seg(false)}`;
+  } else {
+    return `${seg(false)}${seg(false)}${seg(false)}<span style="display:inline-block;width:1px"></span>${seg(filled >= 1, greenColor)}${seg(filled >= 2, greenColor)}${seg(filled >= 3, greenColor)}`;
+  }
 }
 
 function _fmtVal(variable, value) {
