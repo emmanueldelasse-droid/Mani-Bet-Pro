@@ -123,7 +123,7 @@ const QUOTA_KV_KEY        = 'odds_quota_state';
 const TANK01_KV_KEY       = 'tank01_teams_stats';
 const TANK01_INJURIES_KEY = 'tank01_injuries_impact';
 const TANK01_ROSTER_KEY   = 'tank01_roster_injuries_v1';
-const TENNIS_CSV_KEY      = 'tennis_csv_stats_v8';   // v8 : api-tennis chunked par 30j (free tier limite la plage)
+const TENNIS_CSV_KEY      = 'tennis_csv_stats_v9';   // v9 : dates par match estimées via round offset · api-tennis fixtures désactivé
 const TENNIS_ODDS_KEY     = 'tennis_odds_cache_v2';   // v2 : whitelist books fiables (exclut Matchbook/Smarkets)
 const TENNIS_API_BASE     = 'https://api.api-tennis.com/tennis';
 const TENNIS_API_KEYMAP   = 'tennis_api_keymap_v1';   // KV cache name → player_key
@@ -371,6 +371,9 @@ export default {
 
       if (path === '/tennis/api-tennis-debug' && request.method === 'GET')
         return await handleApiTennisDebug(url, env, origin);
+
+      if (path === '/tennis/espn-test' && request.method === 'GET')
+        return await handleEspnTennisTest(url, env, origin);
       if (path === '/tennis/bot/run' && request.method === 'POST')
         return await handleTennisBotRun(request, env, origin);
       if (path === '/tennis/bot/logs' && request.method === 'GET')
@@ -6636,8 +6639,14 @@ function _apiTennisResolveKey(keymap, playerName) {
 // Récupère les matchs récents d'un joueur via get_fixtures · convertit en lignes
 // au format Sackmann pour fusion transparente avec _computeTennisPlayerStats.
 // Limite : pas de stats service détaillées (pas dispo sur free tier api-tennis).
+//
+// v6.87 : désactivé tant que l'abonnement api-tennis n'est pas payé.
+// L'API renvoie cod=1006 "Please make the payment for your account!" sur
+// tous les endpoints sauf get_standings. Inutile de consommer le quota.
+// Réactiver via env.TENNIS_API_FIXTURES_ENABLED='1' une fois l'abonnement payé.
 async function _apiTennisFetchRecentMatches(playerInfo, env, daysBack = 60) {
   if (!playerInfo || !env.TENNIS_API_KEY) return [];
+  if (env.TENNIS_API_FIXTURES_ENABLED !== '1') return [];
   // api-tennis free tier limite get_fixtures à ~30j par requête.
   // Pour daysBack > 30, on boucle par tranches de 30 jours.
   const CHUNK_DAYS = 30;
@@ -6827,6 +6836,37 @@ async function handleApiTennisDebug(url, env, origin) {
     result.error = err.message;
   }
   return jsonResponse(result, 200, origin);
+}
+
+// Test ESPN tennis API (free, sans clé). 3 endpoints typiques :
+// - scoreboard ATP/WTA (matchs récents)
+// - teams (joueurs · ESPN les considère comme teams)
+// - athletes (profil joueur · peut inclure recent results)
+async function handleEspnTennisTest(url, env, origin) {
+  const player = url.searchParams.get('player') ?? 'sorana cirstea';
+  const endpoints = [
+    { label: 'scoreboard_atp', url: 'https://site.api.espn.com/apis/site/v2/sports/tennis/atp/scoreboard' },
+    { label: 'scoreboard_wta', url: 'https://site.api.espn.com/apis/site/v2/sports/tennis/wta/scoreboard' },
+    { label: 'rankings_wta',   url: 'https://site.api.espn.com/apis/site/v2/sports/tennis/wta/rankings' },
+    { label: 'search_athlete', url: `https://site.api.espn.com/apis/common/v3/search?query=${encodeURIComponent(player)}&type=player&sport=tennis&limit=5` },
+  ];
+  const out = { player_query: player, results: {} };
+  for (const ep of endpoints) {
+    try {
+      const resp = await fetchTimeout(ep.url, {}, 10000);
+      const text = await resp.text();
+      let parsed;
+      try { parsed = JSON.parse(text); } catch (_) { parsed = null; }
+      out.results[ep.label] = {
+        http_status:  resp.status,
+        top_keys:     parsed && typeof parsed === 'object' ? Object.keys(parsed).slice(0, 10) : null,
+        raw_excerpt:  text.slice(0, 500),
+      };
+    } catch (err) {
+      out.results[ep.label] = { error: err.message };
+    }
+  }
+  return jsonResponse(out, 200, origin);
 }
 
 async function handleTennisStats(url, env, origin) {
@@ -7091,6 +7131,25 @@ function _resolveTennisPlayerName(rows, playerName) {
   return null;
 }
 
+// Offsets en jours depuis tourney_date selon le round.
+// Tournoi standard (1 semaine) : 1 round/jour. Grand Slam (2 semaines) : 2 jours entre rounds.
+// Best effort · pas exact mais sépare les matchs d'un même tournoi à l'affichage.
+function _estimateMatchDateIso(tourneyDate, round, tourneyName) {
+  if (!tourneyDate || tourneyDate.length !== 8) return null;
+  const y = tourneyDate.slice(0,4), mo = tourneyDate.slice(4,6), d = tourneyDate.slice(6,8);
+  const baseIso = `${y}-${mo}-${d}`;
+  if (!round) return baseIso;
+  const isSlam = /australian|roland|french open|wimbledon|us open/i.test(String(tourneyName ?? ''));
+  const standardOffsets = { 'Q1': 0, 'Q2': 0, 'Q3': 0, 'R128': 1, 'R64': 2, 'R32': 3, 'R16': 4, 'QF': 5, 'SF': 6, 'F': 7, 'BR': 7, 'RR': 2, 'ER': 0 };
+  const slamOffsets     = { 'Q1': 0, 'Q2': 1, 'Q3': 2, 'R128': 1, 'R64': 3, 'R32': 4, 'R16': 7, 'QF': 9, 'SF': 11, 'F': 13 };
+  const map = isSlam ? slamOffsets : standardOffsets;
+  const offset = map[round] ?? 0;
+  if (offset === 0) return baseIso;
+  const dt = new Date(`${baseIso}T12:00:00Z`);
+  dt.setUTCDate(dt.getUTCDate() + offset);
+  return dt.toISOString().slice(0, 10);
+}
+
 function _computeTennisPlayerStats(rows, playerName, surface, today) {
   const resolvedName = _resolveTennisPlayerName(rows, playerName);
   if (!resolvedName) return null;
@@ -7190,11 +7249,12 @@ function _computeTennisPlayerStats(rows, playerName, surface, today) {
   }
 
   // 5 derniers matchs pour affichage UI · date · adversaire · score · résultat · surface
+  // Sackmann tourney_date = début tournoi · on ajoute un offset selon le round pour
+  // une date estimée par match (sinon tous les matchs d'un tournoi partagent la même date).
   const last5_matches = last10.slice(0, 5).map(m => {
     const isWin = m.winner_name === resolvedName;
     const opponent = isWin ? m.loser_name : m.winner_name;
-    const d = m.tourney_date || '';
-    const dateIso = d.length === 8 ? `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}` : null;
+    const dateIso = _estimateMatchDateIso(m.tourney_date, m.round, m.tourney_name);
     return {
       date:        dateIso,
       opponent,
@@ -7248,14 +7308,19 @@ function _computeTennisH2H(rows, p1, p2, surface) {
   const weightedWins = (arr, name) => arr.reduce((acc, r) => acc + (r.winner_name === name ? recencyWeight(r.tourney_date) : 0), 0);
   const weightedTotal = (arr) => arr.reduce((acc, r) => acc + recencyWeight(r.tourney_date), 0);
   // v6.84 : détail matchs (date desc) pour affichage UI scores/dates/tournoi
-  const detail = (r) => ({
-    date:       r.tourney_date ?? null,
-    tournament: r.tourney_name ?? null,
-    round:      r.round ?? null,
-    surface:    r.surface ?? null,
-    score:      r.score ?? null,
-    winner:     r.winner_name === n1 ? 'p1' : 'p2',
-  });
+  // v6.87 : date estimée via round offset (sinon = début tournoi seulement)
+  const detail = (r) => {
+    const iso = _estimateMatchDateIso(r.tourney_date, r.round, r.tourney_name);
+    const dateYmd = iso ? iso.replace(/-/g, '') : (r.tourney_date ?? null);
+    return {
+      date:       dateYmd,
+      tournament: r.tourney_name ?? null,
+      round:      r.round ?? null,
+      surface:    r.surface ?? null,
+      score:      r.score ?? null,
+      winner:     r.winner_name === n1 ? 'p1' : 'p2',
+    };
+  };
   const sortByDateDesc = (a, b) => String(b.date ?? '').localeCompare(String(a.date ?? ''));
   const matchesDetail = allMatches.map(detail).sort(sortByDateDesc);
   return {
