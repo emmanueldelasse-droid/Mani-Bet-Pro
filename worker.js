@@ -9529,10 +9529,34 @@ async function _fetchTennisResultsESPN(dateStr, tour) {
     const results = [];
     for (const ev of events) {
       const comp = ev?.competitions?.[0];
-      if (!comp?.status?.type?.completed) continue;
+      if (!comp) continue;
+      // v6.96 : même fix que _fetchTennisDayMatchesESPNDetailed · ESPN n'expose pas
+      // toujours `completed: true` sur le scoreboard tennis.
+      const st = comp.status?.type ?? {};
+      const isFinished = st.completed === true
+        || st.state === 'post'
+        || st.name === 'STATUS_FINAL'
+        || /final/i.test(st.description ?? '');
+      if (!isFinished) continue;
       const competitors = comp.competitors ?? [];
-      const winner = competitors.find(c => c.winner === true);
-      const loser  = competitors.find(c => c.winner === false);
+      let winner = competitors.find(c => c.winner === true);
+      let loser  = competitors.find(c => c.winner === false);
+      if ((!winner || !loser) && competitors.length === 2) {
+        const [a, b] = competitors;
+        const sA = a.linescores ?? [];
+        const sB = b.linescores ?? [];
+        let setsA = 0, setsB = 0;
+        for (let i = 0; i < Math.max(sA.length, sB.length); i++) {
+          const va = Number(sA[i]?.value ?? -1);
+          const vb = Number(sB[i]?.value ?? -1);
+          if (va > vb && va >= 0) setsA++;
+          else if (vb > va && vb >= 0) setsB++;
+        }
+        if (setsA !== setsB) {
+          winner = setsA > setsB ? a : b;
+          loser  = setsA > setsB ? b : a;
+        }
+      }
       const wName = winner?.athlete?.displayName ?? winner?.athlete?.shortName;
       const lName = loser?.athlete?.displayName  ?? loser?.athlete?.shortName;
       if (!wName || !lName) continue;
@@ -9563,10 +9587,37 @@ async function _fetchTennisDayMatchesESPNDetailed(dateStr, tour) {
     const out = [];
     for (const ev of events) {
       const comp = ev?.competitions?.[0];
-      if (!comp?.status?.type?.completed) continue;
+      if (!comp) continue;
+      // v6.96 : ESPN tennis n'expose pas toujours `status.type.completed: true`.
+      // Marqueurs fiables d'un match terminé : state==='post' OU name==='STATUS_FINAL'
+      // OU description contient 'final'. Sans ça, on rejetait TOUS les events.
+      const st = comp.status?.type ?? {};
+      const isFinished = st.completed === true
+        || st.state === 'post'
+        || st.name === 'STATUS_FINAL'
+        || /final/i.test(st.description ?? '');
+      if (!isFinished) continue;
       const competitors = comp.competitors ?? [];
-      const winner = competitors.find(c => c.winner === true);
-      const loser  = competitors.find(c => c.winner === false);
+      let winner = competitors.find(c => c.winner === true);
+      let loser  = competitors.find(c => c.winner === false);
+      // v6.96 : fallback si winner pas tagué (cas courant juste après fin match).
+      // On déduit via comparaison des sets gagnés dans linescores.
+      if ((!winner || !loser) && competitors.length === 2) {
+        const [a, b] = competitors;
+        const sA = a.linescores ?? [];
+        const sB = b.linescores ?? [];
+        let setsA = 0, setsB = 0;
+        for (let i = 0; i < Math.max(sA.length, sB.length); i++) {
+          const va = Number(sA[i]?.value ?? -1);
+          const vb = Number(sB[i]?.value ?? -1);
+          if (va > vb && va >= 0) setsA++;
+          else if (vb > va && vb >= 0) setsB++;
+        }
+        if (setsA !== setsB) {
+          winner = setsA > setsB ? a : b;
+          loser  = setsA > setsB ? b : a;
+        }
+      }
       const wName = winner?.athlete?.displayName ?? winner?.athlete?.shortName;
       const lName = loser?.athlete?.displayName  ?? loser?.athlete?.shortName;
       if (!wName || !lName) continue;
@@ -9610,7 +9661,8 @@ async function _fetchTennisDayMatchesESPNDetailed(dateStr, tour) {
 }
 
 // Normalise un nom pour matching loose : lowercase, sans accents, tokens alpha.
-// v6.95 : conserve initiales (token 1 char) pour vérif prénom format Sackmann.
+// v6.96 : escape Unicode explicite ̀-ͯ (combining diacritical marks)
+// pour ne pas dépendre de l'encodage source du fichier.
 function _tennisNameTokens(name) {
   if (!name) return [];
   return String(name).toLowerCase()
@@ -9619,14 +9671,14 @@ function _tennisNameTokens(name) {
     .split(/[\s'-]+/).filter(t => t.length >= 1);
 }
 
-// v6.95 : matching loose plus robuste.
+// v6.95 : matching loose pour rapprocher noms format Sackmann ("Zverev A.")
+// et noms format ESPN ("Alexander Zverev"). Distinct de _tennisNamesMatch (ligne 6981)
+// qui est utilisée par settle/h2h et compare 2 noms même format.
 // Renvoie true si :
 //   1) Intersection non vide entre tokens de 3+ caractères (typiquement nom de famille)
 //   2) Si un côté a une initiale (Sackmann "Zverev A."), vérifier qu'elle correspond
 //      à la 1re lettre du prénom (token non partagé) de l'autre côté.
 // Évite faux positifs entre frères (Francisco/Juan Manuel Cerundolo, Mischa/Alexander Zverev).
-// NB : redéfinit le _tennisNamesMatch existant ligne ~6981. La version la plus récente
-// (celle-ci) gagne à runtime (hoisting + redéclaration).
 function _tennisNamesMatchEspn(a, b) {
   const ta = _tennisNameTokens(a);
   const tb = _tennisNameTokens(b);
