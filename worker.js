@@ -6784,6 +6784,7 @@ async function handleTennisStats(url, env, origin) {
           try {
             await _supplementLast5WithESPN(parsed.stats, players, tour, env, parsed.rank_map ?? {}, surface);
           } catch (err) { console.warn('Tennis ESPN supplement (cache):', err.message); }
+          _stripInternalTennisFields(parsed.stats);
           return jsonResponse({ available: true, source: 'cache', tour, surface,
             stats: parsed.stats, resolved: parsed.resolved ?? null,
             fetched_at: new Date(parsed.fetched_at).toISOString() }, 200, origin);
@@ -6949,6 +6950,7 @@ async function handleTennisStats(url, env, origin) {
           { expirationTtl: ttl });
       } catch (err) { console.warn('Tennis CSV cache write:', err.message); }
     }
+    _stripInternalTennisFields(stats);
     return jsonResponse({ available: true, source: `sackmann_${tour}_csv_github`, tour, surface, players, stats,
       resolved: resolvedMap, sources,
       fetched_at: new Date().toISOString(), rows_analyzed: allRows.length, api_tennis_added: apiTennisAdded }, 200, origin);
@@ -9995,6 +9997,15 @@ function _estimateEloFromRank(rank) {
   return Math.round(2200 - 230 * Math.log10(r));
 }
 
+// v7.01 — Strip champs internes (_espn_supp_baseline) avant retour JSON. Mute
+// l'objet en place : à appeler APRÈS KV.put (cache garde baseline pour cache-hit).
+function _stripInternalTennisFields(stats) {
+  if (!stats) return;
+  for (const k of Object.keys(stats)) {
+    if (stats[k] && typeof stats[k] === 'object') delete stats[k]._espn_supp_baseline;
+  }
+}
+
 // Complète stats[pName].last5_matches avec les matchs ESPN très récents.
 // Comble le retard Sackmann (2-7j) pendant les tournois en cours (Rome, RG, etc).
 // Cache ESPN séparé 2h pour rester réactif sans réinterroger ESPN à chaque requête.
@@ -10187,8 +10198,13 @@ async function _supplementLast5WithESPN(stats, players, tour, env, rankMap, surf
       // Itérer du plus ancien au plus récent (cohérent avec ordre temporel Sackmann).
       const espnSorted = [...espnAdded].sort((a, b) => (a.date ?? '').localeCompare(b.date ?? ''));
       for (const m of espnSorted) {
-        const oppElo = (eloTable && eloTable[m.opponent]?.elo_overall)
-          ?? _estimateEloFromRank(m.opponent_rank);
+        // v7.01 — Garde-fou : skip ce match si adversaire absent de la table Elo
+        // ET sans rang connu. Évite de sur-récompenser (oppElo défaut 1500 trompeur).
+        const tableElo = eloTable?.[m.opponent]?.elo_overall ?? null;
+        const hasRank  = m.opponent_rank != null && parseInt(m.opponent_rank) >= 1;
+        if (tableElo == null && !hasRank) continue;
+
+        const oppElo = tableElo ?? _estimateEloFromRank(m.opponent_rank);
         const isWin = m.result === 'W';
         const eW = expectScore(elo, oppElo);
         elo += K * ((isWin ? 1 : 0) - eW);
@@ -10196,7 +10212,7 @@ async function _supplementLast5WithESPN(stats, players, tour, env, rankMap, surf
 
         const surfGuess = m.surface ?? _guessSurfaceFromTourneyName(m.tourney);
         if (surfGuess && surfGuess === surface && eloSurf != null) {
-          const oppEloSurf = (eloTable && eloTable[m.opponent]?.elo_surface?.[surface])
+          const oppEloSurf = eloTable?.[m.opponent]?.elo_surface?.[surface]
             ?? _estimateEloFromRank(m.opponent_rank);
           const eWs = expectScore(eloSurf, oppEloSurf);
           eloSurf += K * ((isWin ? 1 : 0) - eWs);
