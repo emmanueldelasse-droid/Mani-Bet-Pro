@@ -234,8 +234,8 @@ function _renderMetricsCard(metrics, totalBets, pendingCount) {
 
     // Mise totale = clôturés seulement (les PENDING sont dans "engagés" de la bankroll)
     _metricCell('Mis\u00e9 (cl\u00f4tur\u00e9s)', totalStakedDisplay.toFixed(2) + ' \u20ac', 'var(--color-text)'),
-    _metricCell('CLV moyen', metrics.avg_clv !== null ? (metrics.avg_clv > 0 ? '+' : '') + metrics.avg_clv + '%' : '\u2014', metrics.avg_clv > 0 ? 'var(--color-success)' : 'var(--color-muted)'),
-    _metricCell('Score de Brier', metrics.brier_score !== null ? metrics.brier_score.toFixed(4) : '\u2014', 'var(--color-muted)', brierLabel),
+    _metricCell('Valeur prise vs cote finale', metrics.avg_clv !== null ? (metrics.avg_clv > 0 ? '+' : '') + metrics.avg_clv + '%' : '\u2014', metrics.avg_clv > 0 ? 'var(--color-success)' : 'var(--color-muted)', 'positif = pris bonne cote avant fermeture'),
+    _metricCell('Pr\u00e9cision pr\u00e9dictions', metrics.brier_score !== null ? metrics.brier_score.toFixed(4) : '\u2014', 'var(--color-muted)', brierLabel),
 
     '</div>',
     '<div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:var(--space-2)">Taux de réussite par niveau d\'avantage</div>',
@@ -370,7 +370,7 @@ function _renderBetRow(bet, isFirstInGroup, groupSize) {
     '<span style="color:var(--color-text-secondary)">Mise : ' + bet.stake.toFixed(2) + ' \u20ac</span>',
     '<span style="color:var(--color-text-secondary)">Avantage : ' + bet.edge + '%</span>',
     bet.pnl !== null ? '<span style="color:' + (bet.pnl >= 0 ? 'var(--color-success)' : 'var(--color-danger)') + '">P&L : ' + (bet.pnl >= 0 ? '+' : '') + bet.pnl.toFixed(2) + ' \u20ac</span>' : '',
-    bet.clv !== null ? '<span style="color:var(--color-text-secondary)">CLV : ' + (bet.clv > 0 ? '+' : '') + bet.clv + '%</span>' : '',
+    bet.clv !== null ? '<span style="color:var(--color-text-secondary)" title="Valeur prise vs cote finale · positif = pris bonne cote avant fermeture">Valeur cote : ' + (bet.clv > 0 ? '+' : '') + bet.clv + '%</span>' : '',
     '</div>',
 
     // Settler automatique actif — pas de boutons manuels sauf via modal
@@ -421,7 +421,7 @@ function _renderBetDetail(bet) {
   if (bet.ou_line != null)     rows.push(_detailRow('Ligne O/U', bet.ou_line + ' pts'));
 
   rows.push(_detailRow('Mise', bet.stake.toFixed(2) + ' \u20ac'));
-  rows.push(_detailRow('Avantage moteur', '+' + bet.edge + '%'));
+  rows.push(_detailRow('Cote sous-évaluée par bot', '+' + bet.edge + '%'));
 
   if (bet.motor_prob   != null) rows.push(_detailRow('Prob. moteur', bet.motor_prob + '%'));
   if (bet.implied_prob != null) rows.push(_detailRow('Prob. march\u00e9', bet.implied_prob + '%'));
@@ -431,7 +431,7 @@ function _renderBetDetail(bet) {
   rows.push(_detailRow('R\u00e9sultat', resultLabel[bet.result] || bet.result, resultColor));
 
   if (bet.pnl !== null) rows.push(_detailRow('P&L', (bet.pnl >= 0 ? '+' : '') + bet.pnl.toFixed(2) + ' \u20ac', bet.pnl >= 0 ? 'var(--color-success)' : 'var(--color-danger)'));
-  if (bet.clv !== null) rows.push(_detailRow('CLV', (bet.clv > 0 ? '+' : '') + bet.clv + '%'));
+  if (bet.clv !== null) rows.push(_detailRow('Valeur prise vs cote finale', (bet.clv > 0 ? '+' : '') + bet.clv + '%'));
   if (bet.decision_note) rows.push(_detailRow('Signal moteur', bet.decision_note));
   if (bet.placed_at)    rows.push(_detailRow('Plac\u00e9 le', new Date(bet.placed_at).toLocaleString('fr-FR')));
   if (bet.settled_at)   rows.push(_detailRow('Cl\u00f4tur\u00e9 le', new Date(bet.settled_at).toLocaleString('fr-FR')));

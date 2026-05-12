@@ -522,6 +522,7 @@ function _legacyDecision(analysis) {
 // 1) Conf. HIGH/MEDIUM · 2) edge 5-15% · 3) cote ≤3.50
 // 4) ranking_elo_diff VERIFIED/PARTIAL · 5) surface_winrate VERIFIED/PARTIAL
 // 6) ≥5 variables sur 9 avec valeur (couverture suffisante)
+// v6.92 : labels FR + description pour toast
 function _evaluateTennisCriteria(analysis) {
   const best = analysis?.betting_recommendations?.best ?? null;
   const conf = analysis?.confidence_level ?? null;
@@ -529,20 +530,25 @@ function _evaluateTennisCriteria(analysis) {
   const edge = best?.edge ?? null;
   const odds = best?.odds_decimal ?? null;
 
+  const confFr = conf === 'HIGH' ? 'élevée' : conf === 'MEDIUM' ? 'moyenne' : conf === 'LOW' ? 'faible' : '—';
   const items = [
-    { label: 'Conf.',     ok: conf === 'HIGH' || conf === 'MEDIUM', value: conf ?? '—' },
-    { label: 'Edge 5-15', ok: edge != null && edge >= 5 && edge <= 15, value: edge != null ? `${edge}%` : '—' },
-    { label: 'Cote ≤3.5', ok: odds != null && odds <= 3.50, value: odds != null ? Number(odds).toFixed(2) : '—' },
-    { label: 'Elo ok',    ok: ['VERIFIED','PARTIAL'].includes(vars?.ranking_elo_diff?.quality), value: vars?.ranking_elo_diff?.quality ?? 'MISSING' },
-    { label: 'Surface',   ok: ['VERIFIED','PARTIAL'].includes(vars?.surface_winrate_diff?.quality), value: vars?.surface_winrate_diff?.quality ?? 'MISSING' },
+    { label: 'Fiabilité bot',         desc: 'Confiance globale du bot dans sa prédiction', ok: conf === 'HIGH' || conf === 'MEDIUM', value: confFr },
+    { label: 'Cote sous-évaluée 5-15%', desc: 'Le bot voit un avantage entre 5% et 15% (zone optimale)', ok: edge != null && edge >= 5 && edge <= 15, value: edge != null ? `${edge}%` : '—' },
+    { label: 'Cote ≤ 3.50',           desc: 'Pari sur favori/équilibré (cote européenne ≤ 3.50)', ok: odds != null && odds <= 3.50, value: odds != null ? Number(odds).toFixed(2) : '—' },
+    { label: 'Niveau joueur fiable',  desc: 'Différentiel Elo/classement calculé sur assez de matchs', ok: ['VERIFIED','PARTIAL'].includes(vars?.ranking_elo_diff?.quality), value: _qualityLabel(vars?.ranking_elo_diff?.quality) },
+    { label: 'Stats surface fiables', desc: 'Win rate sur la surface basé sur ≥4 matchs', ok: ['VERIFIED','PARTIAL'].includes(vars?.surface_winrate_diff?.quality), value: _qualityLabel(vars?.surface_winrate_diff?.quality) },
   ];
 
   const definedCount = Object.values(vars).filter(v => v?.value != null && v?.quality !== 'MISSING').length;
-  items.push({ label: '≥5 vars', ok: definedCount >= 5, value: `${definedCount}/9` });
+  items.push({ label: '5+ données disponibles', desc: 'Au moins 5 variables d\'analyse sur 9 sont remplies', ok: definedCount >= 5, value: `${definedCount}/9` });
 
   const okCount = items.filter(i => i.ok).length;
   const verdict = okCount === 6 ? 'BET' : okCount >= 4 ? 'CAUTION' : 'SKIP';
   return { items, okCount, verdict };
+}
+
+function _qualityLabel(quality) {
+  return { VERIFIED: 'fiable', PARTIAL: 'partiel', LOW_SAMPLE: 'éch. faible', ESTIMATED: 'estimé', MISSING: 'manquant' }[quality] ?? (quality ? String(quality).toLowerCase() : 'manquant');
 }
 
 function _renderShell(selectedDate, selectedSport) {
@@ -1021,10 +1027,21 @@ function _updateMatchCard(list, matchId, analysis, match, ptState) {
 }
 
 // Toast détail des 6 critères pariable (mobile-friendly · tap au lieu de hover)
+// v6.92 : ajout description sous chaque critère pour expliquer ce qu'il vérifie
 function _showCriteriaToast(items, okCount, verdict) {
   const verdictLabel = verdict === 'BET' ? '✓ Pariable' : verdict === 'CAUTION' ? '⚠ Prudence' : '✗ Skip';
   const verdictColor = verdict === 'BET' ? '#22c55e' : verdict === 'CAUTION' ? '#f59e0b' : '#ef4444';
-  const list = items.map(it => `<div style="padding:4px 0;display:flex;gap:8px;font-size:13px"><span style="color:${it.ok ? '#22c55e' : '#ef4444'};font-weight:700;min-width:14px">${it.ok ? '✓' : '✗'}</span><span style="flex:1">${it.label}</span><span style="color:var(--color-text-secondary);font-family:monospace">${it.value}</span></div>`).join('');
+  const list = items.map(it => {
+    const descHtml = it.desc ? `<div style="font-size:11px;color:var(--color-text-secondary);margin-top:2px;line-height:1.35">${it.desc}</div>` : '';
+    return `<div style="padding:6px 0;border-bottom:1px solid var(--color-border)">
+      <div style="display:flex;gap:8px;font-size:13px;align-items:center">
+        <span style="color:${it.ok ? '#22c55e' : '#ef4444'};font-weight:700;min-width:14px">${it.ok ? '✓' : '✗'}</span>
+        <span style="flex:1;font-weight:600">${it.label}</span>
+        <span style="color:var(--color-text-secondary);font-size:12px">${it.value}</span>
+      </div>
+      ${descHtml}
+    </div>`;
+  }).join('');
   const toast = document.createElement('div');
   toast.style.cssText = `position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:var(--color-card);border:1px solid ${verdictColor};border-radius:10px;padding:14px 16px;z-index:9999;min-width:260px;max-width:90vw;box-shadow:0 8px 24px rgba(0,0,0,0.3);color:var(--color-text)`;
   toast.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-weight:700;color:${verdictColor}"><span>${okCount}/6 · ${verdictLabel}</span><span style="cursor:pointer;font-size:18px;line-height:1;color:var(--color-text-secondary)">×</span></div>${list}`;

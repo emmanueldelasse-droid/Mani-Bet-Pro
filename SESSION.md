@@ -7,49 +7,50 @@ Début → "En cours" 1/N · Fin étape → +1 · Merge → vider · User future
 néant
 
 ## Conventions
-3 sports même vocabulaire confiance : `Conf. HIGH/MEDIUM/LOW/INCONCLUSIVE` · jamais `Data quality` (MLB) · file:`ui.bot.js:264`
+3 sports même vocabulaire confiance : `Conf. HIGH/MEDIUM/LOW/INCONCLUSIVE` · jamais `Data quality`
+UI user-facing FR (v6.90+) : helpers `_qualityFr` `_betTypeFr` `_fmtOdds` `_confidenceFr` `_interpretVariable` (ui.bot.js:1090-1215) · cotes décimales européennes jamais US
 
 ## TODO
 - [ ] P1 surveiller hit rate MLB+tennis 50 paris post-v6.81 (PR #123 #124) · revert isolé si baisse
 - [ ] P2 NBA recheck calib à 80+ logs (actuel 53 hit 67.9% v6.79 valide) · `travel_load` inversé n=22 ignoré
 - [ ] P2 gate `confidence=INCONCLUSIVE` si `data_quality<0.55` (worker.js:5185)
-- [ ] P2 `/bot/calibration/analyze?sport=tennis` après 30+ logs settlés
+- [ ] P2 `/bot/calibration/analyze?sport=tennis` après 30+ logs settlés v6.85+
 - [ ] P3 calibrer `-4.5` playoff par round après 100+ logs · Alon 50+ logs
 - [ ] P3 réactiver paris contrarian après 200+ logs · cotes≥3
+- [ ] P3 réactiver api-tennis fixtures si compte payé → `env.TENNIS_API_FIXTURES_ENABLED=1`
 
 ## État
 Worker `manibetpro.emmanueldelasse.workers.dev` · Front GH Pages · KV `PAPER_TRADING` `17eb7ddc41a949dd99bd840142832cfd`
 
 ## Routes
-- `/nba/{matches,odds,injuries,standings,results,team-detail,teams/stats,roster-injuries,ai-injuries[-batch],ai-player-props,player-points}` · debug `/nba/{roster,boxscore}-debug`
-- `/mlb/{matches,odds,pitchers,standings,team-stats,bullpen-stats,weather,bot/{run,logs,settle-logs}}`
-- `/tennis/{sports-list,tournaments,odds,stats,bot/{run POST,logs,settle-logs POST}}` · ATP+WTA
-- `/bot/{run,logs,settle-logs,logs/export.csv?sport=,odds-history,calibration/analyze?sport=nba|mlb|tennis}`
-- Cron `0 * * * *` · bots NBA+MLB+tennis · 10-11h UTC nightly-settle · 22h UTC AI props
+- `/nba/*` `/mlb/*` `/tennis/*` `/bot/*` · détail via `git grep` worker.js:340-400
+- Cron `0 * * * *` · 10-11h nightly-settle UTC · 22h AI props
 
 ## Fichiers
-- `worker.js` ~8000L monolithe · `wrangler.jsonc`
+- `worker.js` ~8500L · `wrangler.jsonc`
 - `src/ui/match-detail.{js,teamdetail,tennis,helpers}` · dashboard · bot · history
-- `src/engine/engine.tennis.js` front · bot tennis backend worker.js (phases: grand_slam/masters_1000/tour_500/regular/challenger)
-- `src/utils/utils.odds.js` source conversions cotes
+- `src/engine/engine.tennis.js` front · backend bot dans worker.js
+- `src/utils/utils.odds.js` conversions cotes
 
 ## Pièges Tank01
-`team.Roster` R maj · `statsToGet=averages` · `teamAbv.trim().toUpperCase()` · cache rosters 6h · `?bust=1`
+`team.Roster` R maj · `statsToGet=averages` · `teamAbv.trim().toUpperCase()` · cache 6h · `?bust=1`
 
 ## Pièges TheOddsAPI
 `player_points` sans `bookmakers=` → books dispo · filtre → 422 si absent (worker.js:2450)
 
 ## Pièges MLB
-`_mlbSeason()` dynamique · IP `X.Y` = X innings + Y outs (`parseFloat` faux) · ESPN `YYYYMMDD` aligné logs
+`_mlbSeason()` dynamique · IP `X.Y` = X innings + Y outs · ESPN `YYYYMMDD` aligné logs
 
 ## Pièges Tennis
-Sackmann CSV lag 2-3j · api-tennis 60j fallback · CSV qual_chall/qual_itf hors tour principal
-9 vars : ranking_elo · surface_wr · recent_form · pressure_dom · h2h · service · physical_load_14d · market_steam · fatigue
-Elo K=32 init 1500 · log TTL 90j · odds_snap 7j · steam opener [4h, 48h] bruit <3% → 0
-Garde-fous (worker.js:8935 + engine.tennis.js:499) : edge>18% / cote≥5+edge>15% / matchs<15 drop
+Sackmann CSV lag 2-3j · api-tennis désactivé (cod=1006 non payé) · CSV qual hors tour
+9 vars : ranking_elo · surface_wr · recent_form · pressure_dom · h2h_pondéré · service · physical_load_14d · market_steam · fatigue
+Elo K=32 · log 90j · odds_snap 7j · steam<3% bruit · Garde-fous edge>18% / cote≥5+edge>15% / matchs<15 drop
+H2H pondéré récence (v6.85 worker.js:7270 engine.tennis.js:217) : ≤12m×1 24m×0.5 36m×0.25 >36×0.1 · fallback global si surfWT<1.5
+Dates estimées round offset (v6.87 worker.js:7080) R128+1j..F+7j · slam ×2 · `opponent_rank` last5 (v6.92)
+Modal stats adversaire clic nom (ui.match-detail.tennis.js:570)
 
 ## Pièges Timezone
-`_botFormatDate` Intl · DST auto · nightly 10-11h UTC idempotent
+`_botFormatDate` Intl · DST auto · nightly idempotent
 
 ## Sécu
 Debug `_denyIfNoDebugAuth()` · params user regex avant KV key · innerHTML → `escapeHtml`

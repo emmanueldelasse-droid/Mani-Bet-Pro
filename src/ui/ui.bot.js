@@ -803,7 +803,7 @@ function _renderLogCard(log) {
         <div class="bot-log-badges">
           ${phase ? `<span class="bot-badge bot-badge--phase">${phase}</span>` : ''}
           ${_renderConfBadge(conf)}
-          ${hasEdge ? `<span class="bot-badge bot-badge--edge">+${log.best_edge}% avantage</span>` : ''}
+          ${hasEdge ? `<span class="bot-badge bot-badge--edge" title="Le bot estime que la cote sous-évalue cette prédiction">+${log.best_edge}% cote sous-évaluée</span>` : ''}
           ${isSettled
             ? log.motor_was_right
               ? `<span class="bot-badge bot-badge--right">✓ Correct</span>`
