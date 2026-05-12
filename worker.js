@@ -6782,7 +6782,7 @@ async function handleTennisStats(url, env, origin) {
           // v6.94 : supplément ESPN sur cache-hit pour rester réactif pendant les
           // tournois en cours (Sackmann lag 2-7j). Cache ESPN propre 2h interne.
           try {
-            await _supplementLast5WithESPN(parsed.stats, players, tour, env, parsed.rank_map ?? {});
+            await _supplementLast5WithESPN(parsed.stats, players, tour, env, parsed.rank_map ?? {}, surface);
           } catch (err) { console.warn('Tennis ESPN supplement (cache):', err.message); }
           return jsonResponse({ available: true, source: 'cache', tour, surface,
             stats: parsed.stats, resolved: parsed.resolved ?? null,
@@ -6932,7 +6932,7 @@ async function handleTennisStats(url, env, origin) {
     // (cache-hit reload inclus). Construit AVANT le supplément ESPN et stocké dans le cache.
     const rankMap = _buildSackmannRankMap(allRows);
     try {
-      await _supplementLast5WithESPN(stats, players, tour, env, rankMap);
+      await _supplementLast5WithESPN(stats, players, tour, env, rankMap, surface);
     } catch (err) { console.warn('Tennis ESPN supplement (fresh):', err.message); }
 
     // Ne pas cacher (ou cacher court) si toutes les résolutions ont échoué.
@@ -7159,7 +7159,8 @@ function _computeTennisPlayerStats(rows, playerName, surface, today) {
   // Sackmann tourney_date = début tournoi · on ajoute un offset selon le round pour
   // une date estimée par match (sinon tous les matchs d'un tournoi partagent la même date).
   // v6.92 : ajout opponent_rank (classement ATP/WTA de l'adversaire au moment du match)
-  const last5_matches = last10.slice(0, 5).map(m => {
+  // v6.99 : expose last10_matches (utile au recalcul EMA après merge ESPN)
+  const last10_matches = last10.map(m => {
     const isWin = m.winner_name === resolvedName;
     const opponent = isWin ? m.loser_name : m.winner_name;
     const opponentRank = parseInt(isWin ? m.loser_rank : m.winner_rank) || null;
@@ -7175,6 +7176,7 @@ function _computeTennisPlayerStats(rows, playerName, surface, today) {
       round:          m.round || null,
     };
   });
+  const last5_matches = last10_matches.slice(0, 5);
 
   return {
     name: playerName,
@@ -7186,6 +7188,7 @@ function _computeTennisPlayerStats(rows, playerName, surface, today) {
     recent_form_ema_surface: surfaceEma != null ? Math.round(surfaceEma * 100) / 100 : null,
     surface_form_sample:     surfaceLast10.length,
     last5_matches,
+    last10_matches,
     service_stats:      svcStats,
     break_point_stats:  bpStats,
     load_14d:           load14d,
@@ -9958,10 +9961,36 @@ function _findRankForName(rankMap, opponentName) {
   return null;
 }
 
+// v6.99 — Devinette surface depuis le nom du tournoi ESPN. ESPN ne renvoie
+// pas de champ surface ; on heuristique via le nom court/long du tournoi.
+// Retour : 'Hard' | 'Clay' | 'Grass' | null. Conservateur : null si doute.
+function _guessSurfaceFromTourneyName(name) {
+  if (!name) return null;
+  const s = String(name).toLowerCase();
+  // Grass
+  if (/wimbledon|queen'?s|halle|eastbourne|s-hertogenbosch|stuttgart open|newport|mallorca|nottingham|birmingham|berlin.*open|bad homburg/.test(s)) return 'Grass';
+  // Clay (terre battue) — gros marqueurs
+  if (/roland|french open|monte.?carlo|madrid|rome|italian open|barcelona|hamburg|estoril|munich|bucharest|kitzbuhel|umag|gstaad|bastad|houston|rio open|buenos aires|cordoba|santiago|charleston|stuttgart.*porsche/.test(s)) return 'Clay';
+  // Hard — gros marqueurs (par défaut beaucoup de tournois sont sur dur)
+  if (/australian open|us open|indian wells|miami open|cincinnati|canadian open|rogers cup|national bank|shanghai|paris masters|atp finals|wta finals|dubai|doha|acapulco|delray|tokyo|beijing|china open|tel aviv|astana|nur.?sultan|chengdu|zhuhai|antwerp|sofia|metz|atlanta|winston.?salem|los cabos|adelaide|brisbane|auckland|sydney|hong kong|montpellier|marseille|rotterdam|memphis|san diego|guadalajara|monterrey/.test(s)) return 'Hard';
+  return null;
+}
+
+// v6.99 — Parse score type "6-3 7-5" ou "6-4 6-7(7) 7-6(3)" → nb de sets joués (1-5).
+function _countSetsFromScore(score) {
+  const s = String(score ?? '').trim();
+  if (!s) return 2; // fallback moyenne
+  const sets = s.split(/\s+/).filter(x => /\d/.test(x)).length;
+  return Math.max(1, Math.min(5, sets));
+}
+
 // Complète stats[pName].last5_matches avec les matchs ESPN très récents.
 // Comble le retard Sackmann (2-7j) pendant les tournois en cours (Rome, RG, etc).
 // Cache ESPN séparé 2h pour rester réactif sans réinterroger ESPN à chaque requête.
-async function _supplementLast5WithESPN(stats, players, tour, env, rankMap) {
+// v6.99 : recalcule aussi recent_form_ema, load_14d, days_since_last_match,
+//         surface_stats.win_rate à partir du merge ESPN+Sackmann. L'Elo reste
+//         basé sur Sackmann (recalcul table globale trop coûteux pour cette voie).
+async function _supplementLast5WithESPN(stats, players, tour, env, rankMap, surface) {
   const espnCacheKey = (p) => `espn_recent_v2_${tour}_${String(p).toLowerCase().replace(/[^a-z0-9]+/g, '_')}`.slice(0, 256);
 
   const espnPerPlayer = await Promise.allSettled(players.map(async (pName) => {
@@ -10009,7 +10038,8 @@ async function _supplementLast5WithESPN(stats, players, tour, env, rankMap) {
       };
     });
 
-    const existing = stats[pName].last5_matches ?? [];
+    // v6.99 : merge sur last10 (pas last5) pour avoir un échantillon EMA correct.
+    const existing = stats[pName].last10_matches ?? stats[pName].last5_matches ?? [];
     // Dédup par date (jour) + premier token du nom adversaire (insensible à la casse / variantes "Sinner J." vs "Jannik Sinner")
     const keyOf = (m) => {
       const d = (m.date ?? '').slice(0, 10);
@@ -10019,14 +10049,99 @@ async function _supplementLast5WithESPN(stats, players, tour, env, rankMap) {
     };
     const seen = new Set();
     const merged = [];
+    const espnAdded = []; // matchs ESPN réellement nouveaux (pas déjà dans Sackmann)
     for (const m of [...espnFormatted, ...existing]) {
       const k = keyOf(m);
       if (seen.has(k)) continue;
       seen.add(k);
       merged.push(m);
+      if (m.source === 'espn') espnAdded.push(m);
     }
     merged.sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
     stats[pName].last5_matches = merged.slice(0, 5);
+
+    // ─── v6.99 RECALCUL VARIABLES À PARTIR DU MERGE ESPN+SACKMANN ──────────
+    // Saute si aucun match ESPN nouveau — les valeurs Sackmann d'origine sont
+    // déjà bonnes, pas la peine de tout réécrire.
+    if (!espnAdded.length) return;
+
+    const last10Merged = merged.slice(0, 10);
+
+    // Recent form EMA global : itère du plus ancien au plus récent.
+    let ema = 0.5;
+    for (let i = last10Merged.length - 1; i >= 0; i--) {
+      ema = 0.3 * (last10Merged[i].result === 'W' ? 1 : 0) + 0.7 * ema;
+    }
+    stats[pName].recent_form_ema_global = Math.round(ema * 100) / 100;
+
+    // Recent form EMA surface (si surface connue · matchs ESPN reçoivent une
+    // surface devinée depuis le nom du tournoi).
+    let surfaceEma = stats[pName].recent_form_ema_surface;
+    let surfaceSample = stats[pName].surface_form_sample ?? 0;
+    if (surface) {
+      const surfaceMerged = merged
+        .map(m => ({ ...m, surface: m.surface ?? _guessSurfaceFromTourneyName(m.tourney) }))
+        .filter(m => m.surface === surface)
+        .slice(0, 10);
+      if (surfaceMerged.length >= 5) {
+        let se = 0.5;
+        for (let i = surfaceMerged.length - 1; i >= 0; i--) {
+          se = 0.3 * (surfaceMerged[i].result === 'W' ? 1 : 0) + 0.7 * se;
+        }
+        surfaceEma = Math.round(se * 100) / 100;
+        surfaceSample = surfaceMerged.length;
+      }
+    }
+    stats[pName].recent_form_ema_surface = surfaceEma;
+    stats[pName].surface_form_sample = surfaceSample;
+
+    // EMA finale (même formule que _computeTennisPlayerStats : 60% surface + 40% global).
+    stats[pName].recent_form_ema = Math.round(
+      ((surfaceEma != null ? 0.6 * surfaceEma + 0.4 * ema : ema)) * 100
+    ) / 100;
+
+    // Charge 14j : compte matchs + sets depuis le merge (matchs ESPN inclus).
+    const cutoff14 = new Date(Date.now() - 14 * 86400000);
+    const cutoff14Iso = cutoff14.toISOString().slice(0, 10);
+    const recent14 = merged.filter(m => (m.date ?? '').slice(0, 10) >= cutoff14Iso);
+    let setsPlayed14 = 0;
+    for (const m of recent14) setsPlayed14 += _countSetsFromScore(m.score);
+    stats[pName].load_14d = {
+      matches:     recent14.length,
+      sets_played: setsPlayed14,
+    };
+
+    // Days since last match : on prend le plus récent du merge (souvent ESPN).
+    const mostRecentIso = (merged[0]?.date ?? '').slice(0, 10);
+    if (mostRecentIso) {
+      const ms = Date.parse(mostRecentIso);
+      if (!isNaN(ms)) {
+        const days = Math.floor((Date.now() - ms) / 86400000);
+        stats[pName].days_since_last_match = days;
+        stats[pName].csv_lag_days = days;
+      }
+    }
+
+    // Surface win-rate : ajoute incrémentalement les matchs ESPN sur la surface
+    // demandée aux compteurs Sackmann existants. Évite de recalculer depuis zéro
+    // (on n'a pas l'historique 12 mois ici, juste les récents).
+    if (surface && stats[pName].surface_stats?.[surface]) {
+      const cur = stats[pName].surface_stats[surface];
+      const oldMatches = cur.matches ?? 0;
+      const oldWinRate = cur.win_rate;
+      const oldWins = (oldWinRate != null) ? Math.round(oldWinRate * oldMatches) : 0;
+      const espnOnSurface = espnAdded
+        .map(m => ({ ...m, surface: m.surface ?? _guessSurfaceFromTourneyName(m.tourney) }))
+        .filter(m => m.surface === surface);
+      const addMatches = espnOnSurface.length;
+      const addWins = espnOnSurface.filter(m => m.result === 'W').length;
+      const newMatches = oldMatches + addMatches;
+      const newWins = oldWins + addWins;
+      stats[pName].surface_stats[surface] = {
+        win_rate: newMatches > 0 ? Math.round((newWins / newMatches) * 100) / 100 : null,
+        matches: newMatches,
+      };
+    }
   });
 }
 
