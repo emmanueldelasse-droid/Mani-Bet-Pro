@@ -123,7 +123,7 @@ const QUOTA_KV_KEY        = 'odds_quota_state';
 const TANK01_KV_KEY       = 'tank01_teams_stats';
 const TANK01_INJURIES_KEY = 'tank01_injuries_impact';
 const TANK01_ROSTER_KEY   = 'tank01_roster_injuries_v1';
-const TENNIS_CSV_KEY      = 'tennis_csv_stats_v11';  // v11 : rank_map persisté pour supplément ESPN sur cache-hit
+const TENNIS_CSV_KEY      = 'tennis_csv_stats_v12';  // v12 : invalide caches pollués par faux positifs matching prénom (v6.98)
 const TENNIS_ODDS_KEY     = 'tennis_odds_cache_v2';   // v2 : whitelist books fiables (exclut Matchbook/Smarkets)
 const TENNIS_API_BASE     = 'https://api.api-tennis.com/tennis';
 const TENNIS_API_KEYMAP   = 'tennis_api_keymap_v1';   // KV cache name → player_key
@@ -9789,30 +9789,39 @@ function _tennisNameTokens(name) {
     .split(/[\s'-]+/).filter(t => t.length >= 1);
 }
 
-// v6.95 : matching loose pour rapprocher noms format Sackmann ("Zverev A.")
-// et noms format ESPN ("Alexander Zverev"). Distinct de _tennisNamesMatch (ligne 6981)
-// qui est utilisée par settle/h2h et compare 2 noms même format.
-// Renvoie true si :
-//   1) Intersection non vide entre tokens de 3+ caractères (typiquement nom de famille)
-//   2) Si un côté a une initiale (Sackmann "Zverev A."), vérifier qu'elle correspond
-//      à la 1re lettre du prénom (token non partagé) de l'autre côté.
-// Évite faux positifs entre frères (Francisco/Juan Manuel Cerundolo, Mischa/Alexander Zverev).
+// v6.98 : matching surname pour rapprocher noms format Sackmann ("Zverev A.")
+// et noms format ESPN ("Alexander Zverev"). Distinct de _tennisNamesMatch (ligne 6981).
+//
+// Cause révision : v6.95 comparait l'intersection des tokens 3+ chars → faux positifs
+// quand 2 joueurs partagent un prénom (Alexander Zverev faux-match Alexander Blockx).
+//
+// Nouvelle règle : extraire le SURNAME de chaque côté puis comparer.
+//   - Sackmann "Zverev A." → surname = premier token 3+ chars (= "zverev")
+//   - ESPN "Alexander Zverev" → surname = dernier token 3+ chars (= "zverev")
+// Vérification initiale prénom si format Sackmann détecté (un token de 1 char).
 function _tennisNamesMatchEspn(a, b) {
   const ta = _tennisNameTokens(a);
   const tb = _tennisNameTokens(b);
   if (!ta.length || !tb.length) return false;
-  const longTokensA = new Set(ta.filter(t => t.length >= 3));
-  const longTokensB = new Set(tb.filter(t => t.length >= 3));
-  const shared = [...longTokensA].filter(t => longTokensB.has(t));
-  if (!shared.length) return false;
-  // Vérif initiales : si "Zverev A." vs "Alexander Zverev", "a" doit correspondre à "alexander"[0].
+
+  const longA = ta.filter(t => t.length >= 3);
+  const longB = tb.filter(t => t.length >= 3);
+  if (!longA.length || !longB.length) return false;
+
   const initA = ta.find(t => t.length === 1);
   const initB = tb.find(t => t.length === 1);
+  // Sackmann "Zverev A." → surname = 1er token. ESPN "Alexander Zverev" → surname = dernier.
+  // On reconnaît Sackmann par la présence d'une initiale 1 char (typiquement après le surname).
+  const surnameA = initA ? longA[0] : longA[longA.length - 1];
+  const surnameB = initB ? longB[0] : longB[longB.length - 1];
+  if (surnameA !== surnameB) return false;
+
+  // Si un côté a une initiale, vérifier qu'elle matche la 1re lettre du prénom de l'autre.
   if (initA && !initB) {
-    const firstName = tb.find(t => !longTokensA.has(t) && t.length >= 2);
+    const firstName = longB.find(t => t !== surnameB);
     if (firstName && firstName[0] !== initA) return false;
   } else if (initB && !initA) {
-    const firstName = ta.find(t => !longTokensB.has(t) && t.length >= 2);
+    const firstName = longA.find(t => t !== surnameA);
     if (firstName && firstName[0] !== initB) return false;
   }
   return true;
@@ -9878,33 +9887,33 @@ async function handleTennisEspnProbe(url, origin) {
     }, 200, origin);
   }
 
-  const today = new Date();
-  const dates = [];
-  for (let i = 0; i <= days; i++) {
-    const d = new Date(today); d.setDate(d.getDate() - i);
-    dates.push(d.toISOString().slice(0, 10).replace(/-/g, ''));
-  }
-  const batches = await Promise.allSettled(dates.map(d => _fetchTennisDayMatchesESPNDetailed(d, tour)));
-  const perDay = batches.map((b, i) => ({
-    date: dates[i],
-    status: b.status,
-    count: b.status === 'fulfilled' ? b.value.length : 0,
-    sample_names: b.status === 'fulfilled' ? b.value.slice(0, 3).map(m => `${m.winner_name} d. ${m.loser_name}`) : [],
-  }));
-  const all = batches.flatMap(b => b.status === 'fulfilled' ? b.value : []);
+  // v6.98 : utilise la nouvelle exploration groupings/competitions (au lieu de l'ancien
+  // _fetchTennisDayMatchesESPNDetailed qui ne parsait pas la vraie structure ESPN).
+  const all = await _fetchTennisRecentMatchesESPN(tour, days);
   const tokensPlayer = _tennisNameTokens(player);
   const matches = all.filter(m => _tennisNamesMatchEspn(m.winner_name, player) || _tennisNamesMatchEspn(m.loser_name, player));
+  // Regroupement par date pour aperçu
+  const byDate = {};
+  for (const m of all) {
+    const d = (m.date ?? '').slice(0, 10);
+    if (!byDate[d]) byDate[d] = [];
+    byDate[d].push(`${m.winner_name} d. ${m.loser_name}`);
+  }
+  const perDay = Object.entries(byDate)
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .slice(0, 15)
+    .map(([date, names]) => ({ date, count: names.length, sample_names: names.slice(0, 3) }));
 
   return jsonResponse({
     ok: true,
     player,
     tour,
-    days_scanned: dates.length,
+    days_scanned: days + 1,
     espn_total_events: all.length,
     player_tokens: tokensPlayer,
     matches_found: matches.length,
     matches: matches.slice(0, 10),
-    per_day_summary: perDay.filter(d => d.count > 0).slice(0, 15),
+    per_day_summary: perDay,
     hint: 'Ajoute &verbose=1 pour sondage brut multi-URL ESPN. Si matches_found=0 mais espn_total_events>0 → souci matching noms. Si total=0 → vérifier endpoint ESPN via verbose.',
   }, 200, origin);
 }
@@ -9953,7 +9962,7 @@ function _findRankForName(rankMap, opponentName) {
 // Comble le retard Sackmann (2-7j) pendant les tournois en cours (Rome, RG, etc).
 // Cache ESPN séparé 2h pour rester réactif sans réinterroger ESPN à chaque requête.
 async function _supplementLast5WithESPN(stats, players, tour, env, rankMap) {
-  const espnCacheKey = (p) => `espn_recent_v1_${tour}_${String(p).toLowerCase().replace(/[^a-z0-9]+/g, '_')}`.slice(0, 256);
+  const espnCacheKey = (p) => `espn_recent_v2_${tour}_${String(p).toLowerCase().replace(/[^a-z0-9]+/g, '_')}`.slice(0, 256);
 
   const espnPerPlayer = await Promise.allSettled(players.map(async (pName) => {
     if (env?.PAPER_TRADING) {
