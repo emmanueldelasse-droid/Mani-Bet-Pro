@@ -6776,6 +6776,11 @@ async function handleTennisStats(url, env, origin) {
       if (cached) {
         const parsed = JSON.parse(cached);
         if (Date.now() - parsed.fetched_at < 12 * 3600 * 1000) {
+          // v6.94 : supplément ESPN sur cache-hit pour rester réactif pendant les
+          // tournois en cours (Sackmann lag 2-7j). Cache ESPN propre 2h interne.
+          try {
+            await _supplementLast5WithESPN(parsed.stats, players, tour, env, parsed.rank_map ?? {});
+          } catch (err) { console.warn('Tennis ESPN supplement (cache):', err.message); }
           return jsonResponse({ available: true, source: 'cache', tour, surface,
             stats: parsed.stats, resolved: parsed.resolved ?? null,
             fetched_at: new Date(parsed.fetched_at).toISOString() }, 200, origin);
@@ -6920,6 +6925,13 @@ async function handleTennisStats(url, env, origin) {
       } };
     }
 
+    // v6.94 : rank_map nom→rang Sackmann le plus récent · sert pour opponent_rank ESPN
+    // (cache-hit reload inclus). Construit AVANT le supplément ESPN et stocké dans le cache.
+    const rankMap = _buildSackmannRankMap(allRows);
+    try {
+      await _supplementLast5WithESPN(stats, players, tour, env, rankMap);
+    } catch (err) { console.warn('Tennis ESPN supplement (fresh):', err.message); }
+
     // Ne pas cacher (ou cacher court) si toutes les résolutions ont échoué.
     // Empêche le cache 12h de masquer un fix backend ultérieur.
     const allMissing = players.every(p => stats[p] == null);
@@ -6927,7 +6939,8 @@ async function handleTennisStats(url, env, origin) {
     if (env.PAPER_TRADING && !allMissing) {
       try {
         const ttl = someMissing ? 30 * 60 : 12 * 3600;   // 30 min si partiel, 12h sinon
-        await env.PAPER_TRADING.put(cacheKey, JSON.stringify({ fetched_at: Date.now(), stats, resolved: resolvedMap }),
+        await env.PAPER_TRADING.put(cacheKey,
+          JSON.stringify({ fetched_at: Date.now(), stats, resolved: resolvedMap, rank_map: rankMap }),
           { expirationTtl: ttl });
       } catch (err) { console.warn('Tennis CSV cache write:', err.message); }
     }
@@ -9532,6 +9545,201 @@ async function _fetchTennisResultsESPN(dateStr, tour) {
     console.warn(`[ESPN TENNIS] ${tour} ${dateStr}:`, err.message);
     return null;
   }
+}
+
+// v6.94 — Version enrichie : score par set, tournoi, round, date ISO du match.
+// Utilisée pour compléter last5_matches (tournois en cours non encore dans Sackmann).
+async function _fetchTennisDayMatchesESPNDetailed(dateStr, tour) {
+  const sport = tour === 'wta' ? 'wta' : 'atp';
+  const url = `https://site.api.espn.com/apis/site/v2/sports/tennis/${sport}/scoreboard?dates=${dateStr}`;
+  try {
+    const r = await fetchTimeout(url, {}, 8000);
+    if (!r.ok) return [];
+    const data = await r.json();
+    const events = data?.events ?? [];
+    const out = [];
+    for (const ev of events) {
+      const comp = ev?.competitions?.[0];
+      if (!comp?.status?.type?.completed) continue;
+      const competitors = comp.competitors ?? [];
+      const winner = competitors.find(c => c.winner === true);
+      const loser  = competitors.find(c => c.winner === false);
+      const wName = winner?.athlete?.displayName ?? winner?.athlete?.shortName;
+      const lName = loser?.athlete?.displayName  ?? loser?.athlete?.shortName;
+      if (!wName || !lName) continue;
+      // Score : linescores[].value par set, format "6-3 7-6"
+      const wSets = (winner.linescores ?? []).map(ls => ls.value ?? ls.displayValue ?? '');
+      const lSets = (loser.linescores  ?? []).map(ls => ls.value ?? ls.displayValue ?? '');
+      const sets  = [];
+      for (let i = 0; i < Math.max(wSets.length, lSets.length); i++) {
+        const w = wSets[i] ?? '';
+        const l = lSets[i] ?? '';
+        if (w === '' && l === '') continue;
+        sets.push(`${w}-${l}`);
+      }
+      const score = sets.length ? sets.join(' ') : null;
+      // Tournoi + round : ESPN met souvent ça dans notes[0].headline (ex "Italian Open - Round of 16")
+      // ou season.name. On extrait au mieux.
+      let tourney = null, round = null;
+      const noteHl = comp.notes?.[0]?.headline ?? null;
+      if (noteHl) {
+        const parts = String(noteHl).split(' - ');
+        tourney = parts[0]?.trim() ?? null;
+        round   = parts.slice(1).join(' - ').trim() || null;
+      }
+      if (!tourney) tourney = ev?.season?.name ?? ev?.shortName ?? null;
+      const dateIso = ev?.date ? String(ev.date).slice(0, 10)
+        : `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)}`;
+      out.push({
+        date:         dateIso,
+        winner_name:  wName,
+        loser_name:   lName,
+        score,
+        tourney,
+        round,
+      });
+    }
+    return out;
+  } catch (err) {
+    console.warn(`[ESPN DETAILED] ${tour} ${dateStr}:`, err.message);
+    return [];
+  }
+}
+
+// Normalise un nom pour matching loose : lowercase, sans accents, tokens alpha.
+function _tennisNameTokens(name) {
+  if (!name) return [];
+  return String(name).toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z\s'-]/g, ' ')
+    .split(/[\s'-]+/).filter(t => t.length >= 2);
+}
+
+// Match si tokens partagent au moins le plus long token (typiquement le nom de famille).
+// Sackmann "Sinner J." → ["sinner","j"] · ESPN "Jannik Sinner" → ["jannik","sinner"]
+// Plus long token commun = "sinner" → match.
+function _tennisNamesMatch(a, b) {
+  const ta = _tennisNameTokens(a);
+  const tb = _tennisNameTokens(b);
+  if (!ta.length || !tb.length) return false;
+  const longestA = ta.slice().sort((x,y) => y.length - x.length)[0];
+  const longestB = tb.slice().sort((x,y) => y.length - x.length)[0];
+  return longestA === longestB && longestA.length >= 3;
+}
+
+// Scan ESPN sur N jours en parallèle pour récupérer les matchs récents d'un joueur.
+async function _fetchEspnRecentMatchesForPlayer(playerName, tour, daysBack = 21) {
+  const today = new Date();
+  const dates = [];
+  for (let i = 0; i <= daysBack; i++) {
+    const d = new Date(today); d.setDate(d.getDate() - i);
+    dates.push(d.toISOString().slice(0, 10).replace(/-/g, ''));
+  }
+  const batches = await Promise.allSettled(dates.map(d => _fetchTennisDayMatchesESPNDetailed(d, tour)));
+  const all = batches.flatMap(b => b.status === 'fulfilled' ? b.value : []);
+  const filtered = all.filter(m => _tennisNamesMatch(m.winner_name, playerName) || _tennisNamesMatch(m.loser_name, playerName));
+  filtered.sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
+  return filtered;
+}
+
+// Construit une carte nom → rang ATP/WTA le plus récent connu via Sackmann.
+// Sert à retrouver le rang adversaire pour les matchs ESPN.
+function _buildSackmannRankMap(rows) {
+  const tmp = {};
+  for (const r of rows) {
+    const date = r.tourney_date ?? '0';
+    const wr = parseInt(r.winner_rank);
+    const lr = parseInt(r.loser_rank);
+    if (r.winner_name && wr) {
+      const p = tmp[r.winner_name];
+      if (!p || date > p.date) tmp[r.winner_name] = { rank: wr, date };
+    }
+    if (r.loser_name && lr) {
+      const p = tmp[r.loser_name];
+      if (!p || date > p.date) tmp[r.loser_name] = { rank: lr, date };
+    }
+  }
+  const out = {};
+  for (const [k, v] of Object.entries(tmp)) out[k] = v.rank;
+  return out;
+}
+
+function _findRankForName(rankMap, opponentName) {
+  if (!opponentName || !rankMap) return null;
+  if (rankMap[opponentName] != null) return rankMap[opponentName];
+  for (const [name, rank] of Object.entries(rankMap)) {
+    if (_tennisNamesMatch(name, opponentName)) return rank;
+  }
+  return null;
+}
+
+// Complète stats[pName].last5_matches avec les matchs ESPN très récents.
+// Comble le retard Sackmann (2-7j) pendant les tournois en cours (Rome, RG, etc).
+// Cache ESPN séparé 2h pour rester réactif sans réinterroger ESPN à chaque requête.
+async function _supplementLast5WithESPN(stats, players, tour, env, rankMap) {
+  const espnCacheKey = (p) => `espn_recent_v1_${tour}_${String(p).toLowerCase().replace(/[^a-z0-9]+/g, '_')}`.slice(0, 256);
+
+  const espnPerPlayer = await Promise.allSettled(players.map(async (pName) => {
+    if (env?.PAPER_TRADING) {
+      try {
+        const cached = await env.PAPER_TRADING.get(espnCacheKey(pName));
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Date.now() - parsed.fetched_at < 2 * 3600 * 1000) return parsed.matches;
+        }
+      } catch (_) {}
+    }
+    const matches = await _fetchEspnRecentMatchesForPlayer(pName, tour, 21);
+    if (env?.PAPER_TRADING) {
+      try {
+        await env.PAPER_TRADING.put(espnCacheKey(pName),
+          JSON.stringify({ fetched_at: Date.now(), matches }),
+          { expirationTtl: 2 * 3600 });
+      } catch (_) {}
+    }
+    return matches;
+  }));
+
+  players.forEach((pName, idx) => {
+    if (!stats[pName]) return;
+    const espnMatches = espnPerPlayer[idx].status === 'fulfilled' ? (espnPerPlayer[idx].value ?? []) : [];
+    if (!espnMatches.length) return;
+
+    const espnFormatted = espnMatches.map(m => {
+      const isWin = _tennisNamesMatch(m.winner_name, pName);
+      const opponent = isWin ? m.loser_name : m.winner_name;
+      return {
+        date:           m.date,
+        opponent,
+        opponent_rank:  _findRankForName(rankMap, opponent),
+        score:          m.score,
+        result:         isWin ? 'W' : 'L',
+        surface:        null,
+        tourney:        m.tourney,
+        round:          m.round,
+        source:         'espn',
+      };
+    });
+
+    const existing = stats[pName].last5_matches ?? [];
+    // Dédup par date (jour) + premier token du nom adversaire (insensible à la casse / variantes "Sinner J." vs "Jannik Sinner")
+    const keyOf = (m) => {
+      const d = (m.date ?? '').slice(0, 10);
+      const opTokens = _tennisNameTokens(m.opponent);
+      const opKey = opTokens.slice().sort((x,y) => y.length - x.length)[0] ?? '';
+      return `${d}|${opKey}`;
+    };
+    const seen = new Set();
+    const merged = [];
+    for (const m of [...espnFormatted, ...existing]) {
+      const k = keyOf(m);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      merged.push(m);
+    }
+    merged.sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
+    stats[pName].last5_matches = merged.slice(0, 5);
+  });
 }
 
 async function _tennisBotSettleDate(env, dateStr, options = {}) {
