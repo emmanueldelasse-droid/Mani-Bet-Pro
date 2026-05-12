@@ -9701,12 +9701,55 @@ function _tennisNamesMatchEspn(a, b) {
 }
 
 // v6.95 — Endpoint diagnostic pour voir exactement ce qu'ESPN renvoie pour un joueur.
-// Permet de débugger pourquoi un Top 30 ATP n'a pas ses matchs Rome ou similaires.
+// v6.96 — Enrichi : si player param est absent ou verbose=1, sonde brute (status HTTP,
+// sample body, test multi-URLs alternatives × avec/sans User-Agent).
 async function handleTennisEspnProbe(url, origin) {
   const player = url.searchParams.get('player');
   const tour   = (url.searchParams.get('tour') ?? 'atp').toLowerCase() === 'wta' ? 'wta' : 'atp';
   const days   = Math.min(parseInt(url.searchParams.get('days') ?? '21') || 21, 30);
-  if (!player) return jsonResponse({ ok: false, note: 'player parameter required' }, 400, origin);
+  const verbose = url.searchParams.get('verbose') === '1' || !player;
+
+  if (verbose) {
+    const today = new Date();
+    const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
+    const urls = [
+      `https://site.api.espn.com/apis/site/v2/sports/tennis/${tour}/scoreboard?dates=${dateStr}`,
+      `https://site.api.espn.com/apis/site/v2/sports/tennis/${tour}/scoreboard`,
+      `https://site.web.api.espn.com/apis/v2/sports/tennis/${tour}/scoreboard?dates=${dateStr}`,
+      `https://site.api.espn.com/apis/site/v2/sports/tennis/atp/scoreboard?dates=${dateStr}`,
+    ];
+    const probes = await Promise.allSettled(urls.map(async (u, idx) => {
+      const variants = [
+        { label: 'no_ua', headers: {} },
+        { label: 'with_ua', headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ManiBetPro/1.0)' } },
+      ];
+      const results = [];
+      for (const v of variants) {
+        try {
+          const r = await fetchTimeout(u, { headers: v.headers }, 8000);
+          let bodyHead = '';
+          let eventsCount = null;
+          try {
+            const text = await r.text();
+            bodyHead = text.slice(0, 200);
+            try { const j = JSON.parse(text); eventsCount = Array.isArray(j?.events) ? j.events.length : null; } catch {}
+          } catch {}
+          results.push({ variant: v.label, http: r.status, ok: r.ok, events_count: eventsCount, body_head: bodyHead });
+        } catch (err) {
+          results.push({ variant: v.label, error: err.message });
+        }
+      }
+      return { idx, url: u, results };
+    }));
+    return jsonResponse({
+      ok: true,
+      mode: 'raw_url_probe',
+      tour,
+      date_tested: dateStr,
+      probes: probes.map(p => p.status === 'fulfilled' ? p.value : { error: p.reason?.message }),
+      note: 'Compare http/events_count pour chaque URL × variant pour identifier ce qui marche.',
+    }, 200, origin);
+  }
 
   const today = new Date();
   const dates = [];
@@ -9735,7 +9778,7 @@ async function handleTennisEspnProbe(url, origin) {
     matches_found: matches.length,
     matches: matches.slice(0, 10),
     per_day_summary: perDay.filter(d => d.count > 0).slice(0, 15),
-    note: 'Diagnostic ESPN tennis. Si matches_found=0 mais espn_total_events>0 → souci de matching de noms. Si espn_total_events=0 → ESPN ne renvoie aucun event pour ces dates.',
+    hint: 'Ajoute &verbose=1 pour sondage brut multi-URL ESPN. Si matches_found=0 mais espn_total_events>0 → souci matching noms. Si total=0 → vérifier endpoint ESPN via verbose.',
   }, 200, origin);
 }
 
