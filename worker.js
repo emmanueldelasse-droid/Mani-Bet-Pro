@@ -7043,17 +7043,23 @@ function _resolveTennisPlayerName(rows, playerName) {
 }
 
 // Offsets en jours depuis tourney_date selon le round.
-// Tournoi standard (1 semaine) : 1 round/jour. Grand Slam (2 semaines) : 2 jours entre rounds.
-// Best effort · pas exact mais sépare les matchs d'un même tournoi à l'affichage.
+// 3 catégories : Grand Slam (2 semaines, ~2j/round) · Masters 1000 (8-13j) · ATP 250/500 (5-7j, 1j/round).
+// Best effort · sépare les matchs d'un même tournoi à l'affichage.
 function _estimateMatchDateIso(tourneyDate, round, tourneyName) {
   if (!tourneyDate || tourneyDate.length !== 8) return null;
   const y = tourneyDate.slice(0,4), mo = tourneyDate.slice(4,6), d = tourneyDate.slice(6,8);
   const baseIso = `${y}-${mo}-${d}`;
   if (!round) return baseIso;
-  const isSlam = /australian|roland|french open|wimbledon|us open/i.test(String(tourneyName ?? ''));
-  const standardOffsets = { 'Q1': 0, 'Q2': 0, 'Q3': 0, 'R128': 1, 'R64': 2, 'R32': 3, 'R16': 4, 'QF': 5, 'SF': 6, 'F': 7, 'BR': 7, 'RR': 2, 'ER': 0 };
-  const slamOffsets     = { 'Q1': 0, 'Q2': 1, 'Q3': 2, 'R128': 1, 'R64': 3, 'R32': 4, 'R16': 7, 'QF': 9, 'SF': 11, 'F': 13 };
-  const map = isSlam ? slamOffsets : standardOffsets;
+  const tn = String(tourneyName ?? '');
+  const isSlam    = /australian|roland|french open|wimbledon|us open/i.test(tn);
+  const isMasters = /masters|indian wells|miami open|cincinnati|canada|shanghai/i.test(tn);
+  // Slam corrigé v7.02 : 2j entre rounds principaux, R32 j5 entre R64 j3 et R16 j7.
+  const slamOffsets     = { 'Q1': 0, 'Q2': 1, 'Q3': 2, 'R128': 1, 'R64': 3, 'R32': 5, 'R16': 7, 'QF': 9, 'SF': 11, 'F': 13, 'BR': 13, 'RR': 4, 'ER': 0 };
+  // Masters 1000 (12-13j typiques, 96 draw) : démarrage Q lundi, finale dimanche j+10/11.
+  const mastersOffsets  = { 'Q1': 0, 'Q2': 1, 'Q3': 2, 'R128': 1, 'R64': 3, 'R32': 4, 'R16': 6, 'QF': 7, 'SF': 8, 'F': 10, 'BR': 10, 'RR': 3, 'ER': 0 };
+  // ATP 250/500 (5-7j, 32 draw majoritaire) : finale j+5 typique, compact.
+  const standardOffsets = { 'Q1': 0, 'Q2': 0, 'Q3': 0, 'R128': 0, 'R64': 0, 'R32': 1, 'R16': 2, 'QF': 3, 'SF': 4, 'F': 5, 'BR': 5, 'RR': 1, 'ER': 0 };
+  const map = isSlam ? slamOffsets : (isMasters ? mastersOffsets : standardOffsets);
   const offset = map[round] ?? 0;
   if (offset === 0) return baseIso;
   const dt = new Date(`${baseIso}T12:00:00Z`);
@@ -9406,6 +9412,14 @@ async function _runTennisBotCron(env, forceRun = false) {
       const dataQuality = _botTennisDataQuality(variables);
       const confidence  = _botTennisConfidence(score, dataQuality, missingVars.length);
 
+      // match_date (v7.02) : date réelle du match dérivée de commence_time (Europe/Paris),
+      // distincte de date (=date de génération du pick). Fallback dateStr si commence_time absent.
+      // Settle matche en priorité sur match_date pour gérer matchs nocturnes / décalés au lendemain.
+      let matchDate = dateStr;
+      if (m.commence_time) {
+        try { matchDate = _botFormatDate(new Date(m.commence_time)); } catch (_) {}
+      }
+
       const log = {
         logged_at:        new Date().toISOString(),
         match_id:         m.id,
@@ -9415,6 +9429,8 @@ async function _runTennisBotCron(env, forceRun = false) {
         tour:             tournament.tour,
         phase,
         date:             dateStr,
+        match_date:       matchDate,
+        commence_time:    m.commence_time ?? null,
         motor_prob:       score != null ? Math.round(score * 100) : null,
         score_raw:        score,
         score_method:     'CALIBRATED',
@@ -10233,7 +10249,8 @@ async function _tennisBotSettleDate(env, dateStr, options = {}) {
   if (!env.PAPER_TRADING) return { settled: 0, error: 'no KV', date: dateStr };
   const { force = false } = options;
 
-  // Lister les logs pending pour ce dateStr
+  // Lister les logs pending pour ce dateStr.
+  // v7.02 : on match sur log.match_date (date réelle match) si présente, sinon fallback log.date (date génération).
   const list = await env.PAPER_TRADING.list({ prefix: TENNIS_BOT_LOG_PREFIX });
   const keys = (list.keys ?? []).map(k => k.name);
   const pending = [];
@@ -10242,7 +10259,8 @@ async function _tennisBotSettleDate(env, dateStr, options = {}) {
       const raw = await env.PAPER_TRADING.get(key);
       if (!raw) return;
       const log = JSON.parse(raw);
-      if (log.date !== dateStr) return;
+      const logMatchDate = log.match_date ?? log.date;
+      if (logMatchDate !== dateStr) return;
       if (!force && log.motor_was_right !== null) return;
       pending.push({ key, log });
     } catch (_) {}
