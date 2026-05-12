@@ -9729,12 +9729,21 @@ async function handleTennisEspnProbe(url, origin) {
           const r = await fetchTimeout(u, { headers: v.headers }, 8000);
           let bodyHead = '';
           let eventsCount = null;
+          let firstEvent = null;
+          let leagues = null;
           try {
             const text = await r.text();
             bodyHead = text.slice(0, 200);
-            try { const j = JSON.parse(text); eventsCount = Array.isArray(j?.events) ? j.events.length : null; } catch {}
+            try {
+              const j = JSON.parse(text);
+              eventsCount = Array.isArray(j?.events) ? j.events.length : null;
+              // v6.97 : exposer le 1er event entièrement + leagues pour comprendre
+              // pourquoi ESPN ne renvoie qu'1 event/jour pour un Masters comme Rome.
+              firstEvent = j?.events?.[0] ?? null;
+              leagues = (j?.leagues ?? []).map(l => ({ id: l.id, name: l.name, slug: l.slug, season: l.season }));
+            } catch {}
           } catch {}
-          results.push({ variant: v.label, http: r.status, ok: r.ok, events_count: eventsCount, body_head: bodyHead });
+          results.push({ variant: v.label, http: r.status, ok: r.ok, events_count: eventsCount, leagues, first_event: firstEvent, body_head: bodyHead });
         } catch (err) {
           results.push({ variant: v.label, error: err.message });
         }
@@ -9747,7 +9756,7 @@ async function handleTennisEspnProbe(url, origin) {
       tour,
       date_tested: dateStr,
       probes: probes.map(p => p.status === 'fulfilled' ? p.value : { error: p.reason?.message }),
-      note: 'Compare http/events_count pour chaque URL × variant pour identifier ce qui marche.',
+      note: 'first_event expose la structure complète du 1er event ESPN du jour. Vérifier competitors, competitions, groupings éventuels.',
     }, 200, origin);
   }
 
