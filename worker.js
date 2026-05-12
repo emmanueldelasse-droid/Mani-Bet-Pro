@@ -123,7 +123,7 @@ const QUOTA_KV_KEY        = 'odds_quota_state';
 const TANK01_KV_KEY       = 'tank01_teams_stats';
 const TANK01_INJURIES_KEY = 'tank01_injuries_impact';
 const TANK01_ROSTER_KEY   = 'tank01_roster_injuries_v1';
-const TENNIS_CSV_KEY      = 'tennis_csv_stats_v9';   // v9 : dates par match estimées via round offset · api-tennis fixtures désactivé
+const TENNIS_CSV_KEY      = 'tennis_csv_stats_v10';  // v10 : ajout opponent_rank dans last5_matches
 const TENNIS_ODDS_KEY     = 'tennis_odds_cache_v2';   // v2 : whitelist books fiables (exclut Matchbook/Smarkets)
 const TENNIS_API_BASE     = 'https://api.api-tennis.com/tennis';
 const TENNIS_API_KEYMAP   = 'tennis_api_keymap_v1';   // KV cache name → player_key
@@ -7142,18 +7142,21 @@ function _computeTennisPlayerStats(rows, playerName, surface, today) {
   // 5 derniers matchs pour affichage UI · date · adversaire · score · résultat · surface
   // Sackmann tourney_date = début tournoi · on ajoute un offset selon le round pour
   // une date estimée par match (sinon tous les matchs d'un tournoi partagent la même date).
+  // v6.92 : ajout opponent_rank (classement ATP/WTA de l'adversaire au moment du match)
   const last5_matches = last10.slice(0, 5).map(m => {
     const isWin = m.winner_name === resolvedName;
     const opponent = isWin ? m.loser_name : m.winner_name;
+    const opponentRank = parseInt(isWin ? m.loser_rank : m.winner_rank) || null;
     const dateIso = _estimateMatchDateIso(m.tourney_date, m.round, m.tourney_name);
     return {
-      date:        dateIso,
+      date:           dateIso,
       opponent,
-      score:       m.score || null,
-      result:      isWin ? 'W' : 'L',
-      surface:     m.surface || null,
-      tourney:     m.tourney_name || null,
-      round:       m.round || null,
+      opponent_rank:  opponentRank,
+      score:          m.score || null,
+      result:         isWin ? 'W' : 'L',
+      surface:        m.surface || null,
+      tourney:        m.tourney_name || null,
+      round:          m.round || null,
     };
   });
 

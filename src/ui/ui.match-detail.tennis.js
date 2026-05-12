@@ -315,6 +315,10 @@ function _renderRecentForm(match, data) {
     const opp = m.opponent ?? '—';
     const score = m.score ?? '';
     const oppSafe = _escapeHtml(opp);
+    // v6.92 : rang ATP/WTA de l'adversaire (à la date du match)
+    const rankHtml = m.opponent_rank
+      ? `<span style="font-size:10px;color:var(--color-muted);font-weight:500;flex-shrink:0">#${m.opponent_rank}</span>`
+      : '';
     // v6.88 : opponent name cliquable → modal stats joueur
     const oppHtml = opp === '—'
       ? `<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--color-text)">${oppSafe}</span>`
@@ -323,6 +327,7 @@ function _renderRecentForm(match, data) {
       <span style="font-weight:700;color:${resultColor};width:14px;flex-shrink:0">${resultLabel}</span>
       <span style="width:34px;flex-shrink:0;font-variant-numeric:tabular-nums">${fmtDate(m.date)}</span>
       ${oppHtml}
+      ${rankHtml}
       <span style="font-variant-numeric:tabular-nums;color:var(--color-text-secondary)">${_escapeHtml(score)}</span>
     </div>`;
   };
@@ -613,10 +618,14 @@ function _renderOpponentStatsHtml(s, surface) {
         const resLabel = m.result === 'W' ? 'V' : 'D';
         const opp = _escapeHtml(m.opponent ?? '—');
         const score = _escapeHtml(m.score ?? '');
+        const rankBadge = m.opponent_rank
+          ? `<span style="font-size:10px;color:var(--color-muted);font-weight:500;flex-shrink:0">#${m.opponent_rank}</span>`
+          : '';
         return `<div style="display:flex;align-items:center;gap:6px;font-size:11px;padding:3px 0;color:var(--color-text-secondary)">
           <span style="font-weight:700;color:${resColor};width:14px;flex-shrink:0">${resLabel}</span>
           <span style="width:36px;flex-shrink:0;font-variant-numeric:tabular-nums">${fmtDate(m.date)}</span>
           <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--color-text)">${opp}</span>
+          ${rankBadge}
           <span style="font-variant-numeric:tabular-nums">${score}</span>
         </div>`;
       }).join('');
