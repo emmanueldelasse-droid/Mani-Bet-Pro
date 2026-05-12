@@ -611,6 +611,8 @@ function _renderOpponentStatsHtml(s, surface) {
     return `${d}/${mo}`;
   };
   const last5 = Array.isArray(s.last5_matches) ? s.last5_matches : [];
+  // v6.94 : marqueur "live" pour les matchs venant d'ESPN (tournois en cours non encore
+  // poussés sur le CSV Sackmann · cas typique Masters/Grand Chelem en cours).
   const last5Html = last5.length === 0
     ? '<div style="font-size:11px;color:var(--color-text-secondary);padding:6px 0">Aucun match récent recensé.</div>'
     : last5.map(m => {
@@ -621,10 +623,14 @@ function _renderOpponentStatsHtml(s, surface) {
         const rankBadge = m.opponent_rank
           ? `<span style="font-size:10px;color:var(--color-muted);font-weight:500;flex-shrink:0">#${m.opponent_rank}</span>`
           : '';
+        const liveBadge = m.source === 'espn'
+          ? `<span title="Donnée live ESPN · tournoi en cours" style="font-size:9px;color:var(--color-success);font-weight:700;flex-shrink:0;padding:1px 4px;border:1px solid var(--color-success);border-radius:3px;line-height:1">LIVE</span>`
+          : '';
         return `<div style="display:flex;align-items:center;gap:6px;font-size:11px;padding:3px 0;color:var(--color-text-secondary)">
           <span style="font-weight:700;color:${resColor};width:14px;flex-shrink:0">${resLabel}</span>
           <span style="width:36px;flex-shrink:0;font-variant-numeric:tabular-nums">${fmtDate(m.date)}</span>
           <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--color-text)">${opp}</span>
+          ${liveBadge}
           ${rankBadge}
           <span style="font-variant-numeric:tabular-nums">${score}</span>
         </div>`;
@@ -645,6 +651,6 @@ function _renderOpponentStatsHtml(s, surface) {
       ${last5Html}
     </div>
     <div style="margin-top:14px;padding:8px 10px;background:var(--color-bg-secondary);border-radius:6px;font-size:10px;color:var(--color-text-secondary);line-height:1.5">
-      Source : Jeff Sackmann CSV. Dates estimées via round du tournoi.
+      Source : Jeff Sackmann CSV (référence pro · lag 2-7j) + ESPN live (badge LIVE · tournois en cours).
     </div>`;
 }
