@@ -520,7 +520,7 @@ function _renderContext(match, data) {
         _int(lag1), _int(lag2),
         { better: 'low', raw1: lag1, raw2: lag2 })}
       <div style="margin-top:10px;padding:8px 10px;background:var(--color-bg);border-radius:8px;font-size:10px;color:var(--color-text-secondary);line-height:1.5">
-        Source : Jeff Sackmann CSV (GitHub, lag ~2-3j). Matchs du tournoi en cours pas encore recensés.
+        Source : Jeff Sackmann CSV (référence pro · lag 2-7j) complétée par ESPN live pour les tournois ATP/WTA en cours (badge LIVE dans la liste des 5 derniers matchs). Circuit challenger non couvert par ESPN.
       </div>
     </div>`;
 }
