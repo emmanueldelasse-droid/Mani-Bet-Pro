@@ -9701,15 +9701,14 @@ function _tennisNamesMatchEspn(a, b) {
 }
 
 // v6.95 — Endpoint diagnostic pour voir exactement ce qu'ESPN renvoie pour un joueur.
-// v6.96 — Enrichi : si player param est absent, sonde brute (status HTTP, sample body,
-// test multi-URLs alternatives). Permet de localiser la cause si espn_total_events=0.
+// v6.96 — Enrichi : si player param est absent ou verbose=1, sonde brute (status HTTP,
+// sample body, test multi-URLs alternatives × avec/sans User-Agent).
 async function handleTennisEspnProbe(url, origin) {
   const player = url.searchParams.get('player');
   const tour   = (url.searchParams.get('tour') ?? 'atp').toLowerCase() === 'wta' ? 'wta' : 'atp';
   const days   = Math.min(parseInt(url.searchParams.get('days') ?? '21') || 21, 30);
   const verbose = url.searchParams.get('verbose') === '1' || !player;
 
-  // Sonde brute multi-URL pour identifier le bon endpoint ESPN tennis 2026
   if (verbose) {
     const today = new Date();
     const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
@@ -9779,7 +9778,7 @@ async function handleTennisEspnProbe(url, origin) {
     matches_found: matches.length,
     matches: matches.slice(0, 10),
     per_day_summary: perDay.filter(d => d.count > 0).slice(0, 15),
-    hint: 'Ajoute &verbose=1 pour sondage brut multi-URL ESPN.',
+    hint: 'Ajoute &verbose=1 pour sondage brut multi-URL ESPN. Si matches_found=0 mais espn_total_events>0 → souci matching noms. Si total=0 → vérifier endpoint ESPN via verbose.',
   }, 200, origin);
 }
 
