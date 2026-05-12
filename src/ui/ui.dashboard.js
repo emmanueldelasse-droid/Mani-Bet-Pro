@@ -1153,6 +1153,14 @@ function _bindDateSelector(container, storeInstance, initialDate, onDateChange) 
   const picker   = container.querySelector('#date-picker');
   if (!selector) return;
 
+  const heroDate = container.querySelector('.dashboard-hero__date');
+  const updateHero = (newDate) => {
+    if (!heroDate) return;
+    heroDate.textContent = new Date(newDate + 'T12:00:00').toLocaleDateString('fr-FR', {
+      weekday: 'long', day: 'numeric', month: 'long',
+    });
+  };
+
   selector.addEventListener('click', (e) => {
     const chip = e.target.closest('.chip[data-date]');
     if (!chip) return;
@@ -1160,12 +1168,14 @@ function _bindDateSelector(container, storeInstance, initialDate, onDateChange) 
     selector.querySelectorAll('.chip[data-date]').forEach(c => c.classList.remove('chip--active'));
     chip.classList.add('chip--active');
     if (picker) picker.value = newDate;
+    updateHero(newDate);
     onDateChange(newDate);
   });
 
   if (picker) {
     picker.addEventListener('change', (e) => {
       selector.querySelectorAll('.chip[data-date]').forEach(c => c.classList.remove('chip--active'));
+      updateHero(e.target.value);
       onDateChange(e.target.value);
     });
   }
