@@ -1624,22 +1624,30 @@ function _buildSyntheseLines(analysis, match) {
 
   // Ligne 2 — pourquoi : top signaux, groupés par joueur favorisé (direction VRAIE).
   // POSITIVE → contribution>0 → favorise home · NEGATIVE → favorise away · NEUTRAL ignoré.
+  // v6.93 : marqueur "(peu de données)" si quality≠VERIFIED pour ne pas survendre un signal faible
   const topSignals = (analysis.key_signals ?? [])
     .slice()
     .sort((a, b) => Math.abs(b.contribution ?? 0) - Math.abs(a.contribution ?? 0))
     .slice(0, 3);
 
+  const formatSignal = (s) => {
+    const label = _simplifyLabel(s.label, s.variable);
+    if (!label) return null;
+    const isWeak = s.quality && s.quality !== 'VERIFIED' && s.quality !== 'WEIGHTED';
+    return isWeak ? `${label.toLowerCase()} <em style="color:var(--color-text-secondary);font-style:normal;font-size:11px">(peu de données)</em>` : label.toLowerCase();
+  };
+
   const homeFactors = [];
   const awayFactors = [];
   for (const s of topSignals) {
-    const label = _simplifyLabel(s.label, s.variable);
-    if (!label) continue;
-    if (s.direction === 'POSITIVE')      homeFactors.push(label.toLowerCase());
-    else if (s.direction === 'NEGATIVE') awayFactors.push(label.toLowerCase());
+    const item = formatSignal(s);
+    if (!item) continue;
+    if (s.direction === 'POSITIVE')      homeFactors.push(item);
+    else if (s.direction === 'NEGATIVE') awayFactors.push(item);
   }
 
   const fmtList = (arr, name) => {
-    const items = arr.map(f => `<strong>${escapeHtml(f)}</strong>`).join(' et ');
+    const items = arr.map(f => `<strong>${f}</strong>`).join(' et ');
     const verb  = arr.length > 1 ? 'favorisent' : 'favorise';
     return `${items} ${verb} <strong>${escapeHtml(name)}</strong>`;
   };
@@ -1649,6 +1657,31 @@ function _buildSyntheseLines(analysis, match) {
   if (awayFactors.length) parts.push(fmtList(awayFactors, away));
   if (parts.length) {
     lines.push(line('📊', `Pourquoi : ${parts.join(' ; ')}.`));
+  }
+
+  // v6.93 — Ligne 3 : confiance globale + couverture variables
+  const conf = analysis.confidence_level;
+  const vars = analysis.variables_used ?? {};
+  const totalVars  = Object.keys(vars).length;
+  const filledVars = Object.values(vars).filter(v => v?.value != null && v?.quality !== 'MISSING').length;
+  if (conf || totalVars > 0) {
+    const confFr = conf === 'HIGH' ? 'élevée' : conf === 'MEDIUM' ? 'moyenne' : conf === 'LOW' ? 'faible' : 'inconnue';
+    const confIcon = conf === 'HIGH' ? '🟢' : conf === 'MEDIUM' ? '🟡' : conf === 'LOW' ? '🟠' : '⚪';
+    const warning = conf === 'LOW' || filledVars < 5 ? ' <em style="color:var(--color-warning);font-style:normal;font-size:11px">— à prendre avec recul</em>' : '';
+    lines.push(line(confIcon, `Confiance : <strong>${confFr}</strong> · ${filledVars}/${totalVars || 9} variables présentes${warning}.`));
+  }
+
+  // v6.93 — Ligne 4 : contradiction entre top signaux et reco de pari
+  const best = analysis.betting_recommendations?.best;
+  if (best && (best.type === 'MONEYLINE' || !best.type)) {
+    const betFavorsHome = best.side === 'HOME';
+    const predictiveFavorsHome = predictive > 50;
+    if (betFavorsHome !== predictiveFavorsHome) {
+      const betSideName = betFavorsHome ? home : away;
+      const edge = best.edge ?? null;
+      const edgeStr = edge != null ? ` (cote sous-évaluée de +${edge}%)` : '';
+      lines.push(line('💡', `Note : malgré ces signaux, le bot recommande <strong>${escapeHtml(betSideName)}</strong> car le bookmaker la sous-évalue${edgeStr}.`));
+    }
   }
 
   return lines;
