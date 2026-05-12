@@ -6932,7 +6932,9 @@ async function handleTennisStats(url, env, origin) {
     // (cache-hit reload inclus). Construit AVANT le supplément ESPN et stocké dans le cache.
     const rankMap = _buildSackmannRankMap(allRows);
     try {
-      await _supplementLast5WithESPN(stats, players, tour, env, rankMap, surface);
+      // v7.00 : eloTable construit ligne 6842 (ou eloQual si fallback qual_chall).
+      // Permet d'appliquer l'Elo incrémental ESPN avec la vraie Elo adversaire.
+      await _supplementLast5WithESPN(stats, players, tour, env, rankMap, surface, eloTable);
     } catch (err) { console.warn('Tennis ESPN supplement (fresh):', err.message); }
 
     // Ne pas cacher (ou cacher court) si toutes les résolutions ont échoué.
@@ -9984,13 +9986,24 @@ function _countSetsFromScore(score) {
   return Math.max(1, Math.min(5, sets));
 }
 
+// v7.00 — Estime Elo d'un joueur depuis son rang ATP/WTA. Fallback quand l'Elo
+// de l'adversaire ESPN n'est pas dans la table Sackmann (jeune joueur, qualif).
+// Calibrage : rang 1≈2200 · rang 10≈1970 · rang 100≈1740 · rang 1000≈1510.
+function _estimateEloFromRank(rank) {
+  const r = parseInt(rank);
+  if (!r || r < 1) return 1500;
+  return Math.round(2200 - 230 * Math.log10(r));
+}
+
 // Complète stats[pName].last5_matches avec les matchs ESPN très récents.
 // Comble le retard Sackmann (2-7j) pendant les tournois en cours (Rome, RG, etc).
 // Cache ESPN séparé 2h pour rester réactif sans réinterroger ESPN à chaque requête.
 // v6.99 : recalcule aussi recent_form_ema, load_14d, days_since_last_match,
-//         surface_stats.win_rate à partir du merge ESPN+Sackmann. L'Elo reste
-//         basé sur Sackmann (recalcul table globale trop coûteux pour cette voie).
-async function _supplementLast5WithESPN(stats, players, tour, env, rankMap, surface) {
+//         surface_stats.win_rate à partir du merge ESPN+Sackmann.
+// v7.00 : recalcul Elo incrémental (overall + surface) par-dessus baseline
+//         Sackmann. eloTable optionnel pour récupérer la vraie Elo adversaire ;
+//         sinon estimation depuis le rang.
+async function _supplementLast5WithESPN(stats, players, tour, env, rankMap, surface, eloTable = null) {
   const espnCacheKey = (p) => `espn_recent_v2_${tour}_${String(p).toLowerCase().replace(/[^a-z0-9]+/g, '_')}`.slice(0, 256);
 
   const espnPerPlayer = await Promise.allSettled(players.map(async (pName) => {
@@ -10122,11 +10135,27 @@ async function _supplementLast5WithESPN(stats, players, tour, env, rankMap, surf
       }
     }
 
-    // Surface win-rate : ajoute incrémentalement les matchs ESPN sur la surface
-    // demandée aux compteurs Sackmann existants. Évite de recalculer depuis zéro
+    // v7.00 — Snapshot baseline (valeurs Sackmann pures) pour éviter double-application
+    // au cache-hit. Lazy : créé au premier passage, relu ensuite. Recouvre les valeurs
+    // dont la mise à jour est incrémentale (surface_stats matches, Elo). Pour EMA/load/
+    // days_since on recalcule complètement depuis le merge donc pas besoin de baseline.
+    if (!stats[pName]._espn_supp_baseline) {
+      const ss = stats[pName].surface_stats;
+      stats[pName]._espn_supp_baseline = {
+        elo_overall:         stats[pName].elo_overall ?? null,
+        elo_surface:         stats[pName].elo_surface ?? null,
+        elo_matches:         stats[pName].elo_matches ?? 0,
+        elo_surface_matches: stats[pName].elo_surface_matches ?? 0,
+        surface_stats:       ss ? JSON.parse(JSON.stringify(ss)) : null,
+      };
+    }
+    const baseline = stats[pName]._espn_supp_baseline;
+
+    // Surface win-rate : ajoute les matchs ESPN sur la surface demandée par-dessus
+    // les compteurs Sackmann d'origine (baseline). Évite de recalculer depuis zéro
     // (on n'a pas l'historique 12 mois ici, juste les récents).
-    if (surface && stats[pName].surface_stats?.[surface]) {
-      const cur = stats[pName].surface_stats[surface];
+    if (surface && baseline.surface_stats?.[surface]) {
+      const cur = baseline.surface_stats[surface];
       const oldMatches = cur.matches ?? 0;
       const oldWinRate = cur.win_rate;
       const oldWins = (oldWinRate != null) ? Math.round(oldWinRate * oldMatches) : 0;
@@ -10137,10 +10166,49 @@ async function _supplementLast5WithESPN(stats, players, tour, env, rankMap, surf
       const addWins = espnOnSurface.filter(m => m.result === 'W').length;
       const newMatches = oldMatches + addMatches;
       const newWins = oldWins + addWins;
+      stats[pName].surface_stats = stats[pName].surface_stats || {};
       stats[pName].surface_stats[surface] = {
         win_rate: newMatches > 0 ? Math.round((newWins / newMatches) * 100) / 100 : null,
         matches: newMatches,
       };
+    }
+
+    // v7.00 — Elo incrémental (overall + surface) à partir des matchs ESPN nouveaux.
+    // Repart du baseline Sackmann à chaque appel pour éviter une double-application
+    // au cache-hit. Elo adversaire : table Sackmann si dispo, sinon estimé par rang.
+    if (baseline.elo_overall != null) {
+      const K = 32;
+      const expectScore = (a, b) => 1 / (1 + Math.pow(10, (b - a) / 400));
+      let elo = baseline.elo_overall;
+      let eloMatches = baseline.elo_matches;
+      let eloSurf = baseline.elo_surface;
+      let eloSurfMatches = baseline.elo_surface_matches;
+
+      // Itérer du plus ancien au plus récent (cohérent avec ordre temporel Sackmann).
+      const espnSorted = [...espnAdded].sort((a, b) => (a.date ?? '').localeCompare(b.date ?? ''));
+      for (const m of espnSorted) {
+        const oppElo = (eloTable && eloTable[m.opponent]?.elo_overall)
+          ?? _estimateEloFromRank(m.opponent_rank);
+        const isWin = m.result === 'W';
+        const eW = expectScore(elo, oppElo);
+        elo += K * ((isWin ? 1 : 0) - eW);
+        eloMatches += 1;
+
+        const surfGuess = m.surface ?? _guessSurfaceFromTourneyName(m.tourney);
+        if (surfGuess && surfGuess === surface && eloSurf != null) {
+          const oppEloSurf = (eloTable && eloTable[m.opponent]?.elo_surface?.[surface])
+            ?? _estimateEloFromRank(m.opponent_rank);
+          const eWs = expectScore(eloSurf, oppEloSurf);
+          eloSurf += K * ((isWin ? 1 : 0) - eWs);
+          eloSurfMatches += 1;
+        }
+      }
+      stats[pName].elo_overall = Math.round(elo);
+      stats[pName].elo_matches = eloMatches;
+      if (eloSurf != null) {
+        stats[pName].elo_surface = Math.round(eloSurf);
+        stats[pName].elo_surface_matches = eloSurfMatches;
+      }
     }
   });
 }
