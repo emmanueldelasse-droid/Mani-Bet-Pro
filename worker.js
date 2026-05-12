@@ -9518,7 +9518,21 @@ async function _fetchTennisResultsApiTennis(dateStr, env) {
   }
 }
 
+// v6.97 — Settle bot tennis : utilise _fetchTennisRecentMatchesESPN puis filtre
+// par date exacte. ESPN tennis renvoie 1 event=tournoi avec competitions imbriqués
+// dans groupings, l'ancienne lecture event.competitions[0] échouait.
 async function _fetchTennisResultsESPN(dateStr, tour) {
+  const iso = `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)}`;
+  const recent = await _fetchTennisRecentMatchesESPN(tour, 21);
+  if (!recent) return null;
+  return recent
+    .filter(m => m.date === iso)
+    .map(m => ({ winner_name: m.winner_name, loser_name: m.loser_name, tourney_date: dateStr, source: 'espn' }));
+}
+
+// v6.96 — Conservée pour le probe diagnostic uniquement. Logique legacy qui
+// parsait event.competitions[0] (ne reflète pas la vraie structure ESPN).
+async function _fetchTennisResultsESPN_legacy(dateStr, tour) {
   const sport = tour === 'wta' ? 'wta' : 'atp';
   const url = `https://site.api.espn.com/apis/site/v2/sports/tennis/${sport}/scoreboard?dates=${dateStr}`;
   try {
@@ -9574,8 +9588,112 @@ async function _fetchTennisResultsESPN(dateStr, tour) {
   }
 }
 
-// v6.94 — Version enrichie : score par set, tournoi, round, date ISO du match.
-// Utilisée pour compléter last5_matches (tournois en cours non encore dans Sackmann).
+// v6.97 — Récupère les matchs ESPN tennis sur une fenêtre récente.
+// DÉCOUVERTE clé via probe : ESPN renvoie 1 event = le tournoi entier
+// ("Internazionali BNL d'Italia" pour Rome), et tous les matchs du tournoi sont
+// dans event.groupings[].competitions[]. Donc 1-2 appels ESPN suffisent pour
+// récupérer 100+ matchs d'un Masters au lieu de scanner 22 jours.
+//
+// Stratégie : tape la date du jour ET J-14, fusionne les events (tournois
+// précédent + en cours), filtre competitions par date dans la fenêtre.
+// Skip groupings doubles (slug contient 'doubles').
+async function _fetchTennisRecentMatchesESPN(tour, daysBack = 21) {
+  const sport = tour === 'wta' ? 'wta' : 'atp';
+  const today = new Date();
+  const cutoff = new Date(today); cutoff.setDate(cutoff.getDate() - daysBack);
+  const dates = [];
+  for (const offset of [0, 14]) {
+    const d = new Date(today); d.setDate(d.getDate() - offset);
+    dates.push(d.toISOString().slice(0, 10).replace(/-/g, ''));
+  }
+  const batches = await Promise.allSettled(dates.map(async (d) => {
+    const url = `https://site.api.espn.com/apis/site/v2/sports/tennis/${sport}/scoreboard?dates=${d}`;
+    try {
+      const r = await fetchTimeout(url, {}, 10000);
+      if (!r.ok) return null;
+      return await r.json();
+    } catch { return null; }
+  }));
+
+  const seen = new Set();
+  const out = [];
+  for (const b of batches) {
+    if (b.status !== 'fulfilled' || !b.value) continue;
+    const events = b.value?.events ?? [];
+    for (const ev of events) {
+      const tourneyName = ev?.shortName ?? ev?.name ?? null;
+      const groupings = ev?.groupings ?? [];
+      for (const g of groupings) {
+        const slug = (g?.grouping?.slug ?? '').toLowerCase();
+        if (slug.includes('doubles')) continue;   // skip doubles
+        const competitions = g?.competitions ?? [];
+        for (const comp of competitions) {
+          if (!comp?.id || seen.has(comp.id)) continue;
+          // Fenêtre temporelle
+          const compDateRaw = comp.date ?? comp.startDate ?? null;
+          if (!compDateRaw) continue;
+          const compDate = new Date(compDateRaw);
+          if (isNaN(compDate.getTime()) || compDate < cutoff || compDate > today) continue;
+          // Match terminé · même logique de fallback qu'avant
+          const st = comp.status?.type ?? {};
+          const isFinished = st.completed === true
+            || st.state === 'post'
+            || st.name === 'STATUS_FINAL'
+            || /final/i.test(st.description ?? '');
+          if (!isFinished) continue;
+          const competitors = comp.competitors ?? [];
+          let winner = competitors.find(c => c.winner === true);
+          let loser  = competitors.find(c => c.winner === false);
+          if ((!winner || !loser) && competitors.length === 2) {
+            const [a, c] = competitors;
+            const sA = a.linescores ?? [];
+            const sB = c.linescores ?? [];
+            let setsA = 0, setsB = 0;
+            for (let i = 0; i < Math.max(sA.length, sB.length); i++) {
+              const va = Number(sA[i]?.value ?? -1);
+              const vb = Number(sB[i]?.value ?? -1);
+              if (va > vb && va >= 0) setsA++;
+              else if (vb > va && vb >= 0) setsB++;
+            }
+            if (setsA !== setsB) { winner = setsA > setsB ? a : c; loser = setsA > setsB ? c : a; }
+          }
+          const wName = winner?.athlete?.displayName ?? winner?.athlete?.fullName ?? winner?.athlete?.shortName;
+          const lName = loser?.athlete?.displayName  ?? loser?.athlete?.fullName  ?? loser?.athlete?.shortName;
+          if (!wName || !lName) continue;
+          // Score · linescores[].value par set + tiebreak éventuel
+          const wLs = winner.linescores ?? [];
+          const lLs = loser.linescores  ?? [];
+          const sets = [];
+          for (let i = 0; i < Math.max(wLs.length, lLs.length); i++) {
+            const wv = wLs[i]?.value;
+            const lv = lLs[i]?.value;
+            if (wv == null && lv == null) continue;
+            let cell = `${wv ?? ''}-${lv ?? ''}`;
+            const tbVal = lLs[i]?.tiebreak ?? wLs[i]?.tiebreak ?? null;
+            if (tbVal != null) cell += `(${tbVal})`;
+            sets.push(cell);
+          }
+          const score = sets.length ? sets.join(' ') : null;
+          const round = comp.round?.displayName ?? null;
+          seen.add(comp.id);
+          out.push({
+            date:         String(compDateRaw).slice(0, 10),
+            winner_name:  wName,
+            loser_name:   lName,
+            score,
+            tourney:      tourneyName,
+            round,
+          });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// v6.94 — Conservée pour le probe diagnostic uniquement (legacy parse direct
+// event.competitions, ne fonctionnait pas avec la vraie structure ESPN
+// événement=tournoi · v6.97 utilise _fetchTennisRecentMatchesESPN à la place).
 async function _fetchTennisDayMatchesESPNDetailed(dateStr, tour) {
   const sport = tour === 'wta' ? 'wta' : 'atp';
   const url = `https://site.api.espn.com/apis/site/v2/sports/tennis/${sport}/scoreboard?dates=${dateStr}`;
@@ -9791,16 +9909,10 @@ async function handleTennisEspnProbe(url, origin) {
   }, 200, origin);
 }
 
-// Scan ESPN sur N jours en parallèle pour récupérer les matchs récents d'un joueur.
+// v6.97 — Récupère les matchs ESPN récents d'un joueur via la nouvelle exploration
+// groupings/competitions (1-2 fetches ESPN au lieu de 22).
 async function _fetchEspnRecentMatchesForPlayer(playerName, tour, daysBack = 21) {
-  const today = new Date();
-  const dates = [];
-  for (let i = 0; i <= daysBack; i++) {
-    const d = new Date(today); d.setDate(d.getDate() - i);
-    dates.push(d.toISOString().slice(0, 10).replace(/-/g, ''));
-  }
-  const batches = await Promise.allSettled(dates.map(d => _fetchTennisDayMatchesESPNDetailed(d, tour)));
-  const all = batches.flatMap(b => b.status === 'fulfilled' ? b.value : []);
+  const all = await _fetchTennisRecentMatchesESPN(tour, daysBack);
   const filtered = all.filter(m => _tennisNamesMatchEspn(m.winner_name, playerName) || _tennisNamesMatchEspn(m.loser_name, playerName));
   filtered.sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
   return filtered;
