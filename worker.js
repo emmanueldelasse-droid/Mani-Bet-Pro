@@ -9088,19 +9088,21 @@ function _tennisTournamentPhase(label) {
 
 // Poids par phase — plus le tier est élevé, plus Elo/surface/BP dominent (moins bruit forme)
 // 9 variables · somme = 1.00 · market_steam_diff ajouté v6.80
-// v6.93 recalibrage : Elo dilué (28%→38% masters) après 4 matchs Rome 13/05/26 →
-// compression vers 50/50 quand Elo tranché diverge des contrarian inversés.
-// Ruud-Khachanov : Elo 72% · moteur 54% · Pinnacle 79%. Pegula-Swiatek : Elo 33% ·
-// moteur 51% · Pinnacle 29%. Réduit poids 3 inversions v6.81 (physical_load
-// market_steam fatigue · 142-155 logs · effect_size 0.16-0.29 marginalement sig)
-// sans les supprimer. Challenger inchangé (Elo moins fiable bas niveau).
+// v6.95 recalibrage data-driven sur 273 logs (hit 61.2%) après revert v6.93 :
+// v6.93 reposait sur 4 cas visuels Rome → ranking_elo augmenté à 0.38 alors que
+// effect_size=0.15 + mean_diff=-0.065 (signe douteux). Inversion totale du raisonnement :
+// h2h_surface (effect 0.26) · fatigue_index (0.25) · physical_load_diff (0.22) ·
+// recent_form_ema (0.21) deviennent dominantes · ranking_elo réduit à 0.10 ·
+// pressure_dominance + surface_winrate (bruit pur) réduits.
+// Inversions v6.81 (fatigue/physical_load/market_steam) confirmées valides à n=198-212.
+// Challenger inchangé (Elo + form prime sur bas niveau · pas de recalib séparée).
 function _botTennisWeights(phase) {
   switch (phase) {
-    case 'grand_slam':   return { ranking_elo_diff: 0.36, surface_winrate_diff: 0.20, recent_form_ema: 0.10, pressure_dominance: 0.16, h2h_surface: 0.06, service_dominance: 0.04, physical_load_diff: 0.03, market_steam_diff: 0.03, fatigue_index: 0.02 };
-    case 'masters_1000': return { ranking_elo_diff: 0.38, surface_winrate_diff: 0.18, recent_form_ema: 0.12, pressure_dominance: 0.14, h2h_surface: 0.05, service_dominance: 0.05, physical_load_diff: 0.03, market_steam_diff: 0.03, fatigue_index: 0.02 };
-    case 'tour_500':     return { ranking_elo_diff: 0.32, surface_winrate_diff: 0.18, recent_form_ema: 0.14, pressure_dominance: 0.14, h2h_surface: 0.05, service_dominance: 0.07, physical_load_diff: 0.04, market_steam_diff: 0.03, fatigue_index: 0.03 };
+    case 'grand_slam':   return { ranking_elo_diff: 0.10, surface_winrate_diff: 0.07, recent_form_ema: 0.18, pressure_dominance: 0.06, h2h_surface: 0.18, service_dominance: 0.05, physical_load_diff: 0.13, market_steam_diff: 0.10, fatigue_index: 0.13 };
+    case 'masters_1000': return { ranking_elo_diff: 0.10, surface_winrate_diff: 0.07, recent_form_ema: 0.15, pressure_dominance: 0.05, h2h_surface: 0.18, service_dominance: 0.05, physical_load_diff: 0.15, market_steam_diff: 0.10, fatigue_index: 0.15 };
+    case 'tour_500':     return { ranking_elo_diff: 0.08, surface_winrate_diff: 0.08, recent_form_ema: 0.17, pressure_dominance: 0.05, h2h_surface: 0.16, service_dominance: 0.07, physical_load_diff: 0.15, market_steam_diff: 0.10, fatigue_index: 0.14 };
     case 'challenger':   return { ranking_elo_diff: 0.22, surface_winrate_diff: 0.19, recent_form_ema: 0.17, pressure_dominance: 0.12, h2h_surface: 0.06, service_dominance: 0.08, physical_load_diff: 0.06, market_steam_diff: 0.05, fatigue_index: 0.05 };
-    default:             return { ranking_elo_diff: 0.38, surface_winrate_diff: 0.18, recent_form_ema: 0.12, pressure_dominance: 0.14, h2h_surface: 0.05, service_dominance: 0.05, physical_load_diff: 0.03, market_steam_diff: 0.03, fatigue_index: 0.02 };
+    default:             return { ranking_elo_diff: 0.10, surface_winrate_diff: 0.07, recent_form_ema: 0.15, pressure_dominance: 0.05, h2h_surface: 0.18, service_dominance: 0.05, physical_load_diff: 0.15, market_steam_diff: 0.10, fatigue_index: 0.15 };
   }
 }
 
