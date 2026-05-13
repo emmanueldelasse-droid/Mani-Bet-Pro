@@ -183,20 +183,21 @@ export const SPORTS_CONFIG = {
       { id: 'fatigue_index',        label: 'Indice de fatigue',           critical: false },
     ],
 
-    // v6.93 recalibrage : Elo 0.28→0.38 · réduit dilution sur favoris écrasants.
+    // v6.95 recalibrage data-driven sur 273 logs (hit 61.2%) après revert v6.93.
     // Front utilise default_weights pour tous tournois (pas de logique phase) →
     // miroir masters_1000 dans worker.js _botTennisWeights. Sync requise si change.
-    // Somme = 0.38+0.18+0.12+0.14+0.05+0.05+0.03+0.03+0.02 = 1.00
+    // Top 4 signaux : h2h_surface 0.26 · fatigue 0.25 · physical_load 0.22 · recent_form 0.21
+    // Somme = 0.10+0.07+0.15+0.05+0.18+0.05+0.15+0.10+0.15 = 1.00
     default_weights: {
-      ranking_elo_diff:     0.38,
-      surface_winrate_diff: 0.18,
-      recent_form_ema:      0.12,
-      pressure_dominance:   0.14,
-      h2h_surface:          0.05,
+      ranking_elo_diff:     0.10,
+      surface_winrate_diff: 0.07,
+      recent_form_ema:      0.15,
+      pressure_dominance:   0.05,
+      h2h_surface:          0.18,
       service_dominance:    0.05,
-      physical_load_diff:   0.03,
-      market_steam_diff:    0.03,
-      fatigue_index:        0.02,
+      physical_load_diff:   0.15,
+      market_steam_diff:    0.10,
+      fatigue_index:        0.15,
     },
 
     ema_lambda:  0.3,   // EMA plus réactive que NBA (matchs moins fréquents)
