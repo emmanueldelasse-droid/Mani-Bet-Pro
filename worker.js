@@ -8330,74 +8330,81 @@ function _mlbGetMarketOdds(oddsData, homeName, awayName) {
 function _mlbEngineCompute(matchData) {
   const { home_pitcher, away_pitcher, home_season, away_season, venue, market_odds, weather } = matchData;
 
-  // 1. Starting pitcher FIP edge · poids 0.20 → 0.10 (calib v6.81 : effect_size 0.04 ne justifie pas le poids #1)
+  // v6.94 recalibrage MLB après 315 logs settlés · hit_rate 49.8% (pile-ou-face)
+  // brier 0.2757 (pire que random) · edge_10_plus 49.3% (215 paris piège).
+  // Calibration `/bot/calibration/analyze?sport=mlb` : 9/11 vars classées "bruit"
+  // (effect_size < 0.15) · seule last10_form_pct atteint "faible" (0.22).
+  // 3 signes inversés v6.81 (bullpen/babip/team_era) ne tiennent pas à n=315 →
+  // suppression poids (laisser math en place pour réversibilité).
+  // Garde-fou edge resserré [5, 10] · zone seule profitable (54.7% sur 64 paris).
+
+  // 1. Starting pitcher FIP edge · poids 0.10 → 0.18 (signe + valide, effect 0.11,
+  // sabermétriquement le facteur #1 baseball, augmentation modérée)
   const hFIP = home_pitcher?.fip ?? home_pitcher?.era ?? 4.20;
   const aFIP = away_pitcher?.fip ?? away_pitcher?.era ?? 4.20;
   const fipDiff    = aFIP - hFIP;
-  const pitcherAdv = Math.tanh(fipDiff / 2) * 0.10;
+  const pitcherAdv = Math.tanh(fipDiff / 2) * 0.18;
 
-  // 2. Rest days starter — calib v6.81 : neutralisé (effect_size 0 sur 225 logs)
+  // 2. Rest days starter — neutralisé v6.81 (effect_size 0)
   const hRest  = home_pitcher?.rest_days ?? 4;
   const aRest  = away_pitcher?.rest_days ?? 4;
   const restAdv = 0;
 
-  // 3. Run differential saison · poids 0.07 → 0.05 (calib v6.81 : effect_size 0.08)
+  // 3. Run differential saison · poids 0.05 → 0 (v6.94 effect_size 0.08 bruit)
   const hRunDiff   = home_season?.run_diff ?? 0;
   const aRunDiff   = away_season?.run_diff ?? 0;
-  const runDiffAdv = Math.tanh((hRunDiff - aRunDiff) / 50) * 0.05;
+  const runDiffAdv = Math.tanh((hRunDiff - aRunDiff) / 50) * 0;
 
-  // 4. Team OPS différentiel · poids 0.08 → 0.14 (calib v6.81 : effect_size 0.19, 2e meilleur signal)
+  // 4. Team OPS différentiel · poids 0.14 inchangé (effect_size 0.14 signe + valide)
   let opsAdv = 0;
   if (home_season?.ops != null && away_season?.ops != null) {
     opsAdv = Math.tanh((home_season.ops - away_season.ops) / 0.050) * 0.14;
   }
 
-  // 5. Team ERA différentiel — calib v6.81 : supprimé (effect inversé mean_diff -0.161, redondant FIP+bullpen)
+  // 5. Team ERA différentiel — supprimé v6.81 (effect inversé, redondant FIP+bullpen)
   let teamEraAdv = 0;
 
-  // 6. Home/away split · poids 0.05 → 0.03 (calib v6.81 : effect_size 0.13)
+  // 6. Home/away split · poids 0.03 → 0 (v6.94 mean_diff -0.046 signe inverse à n=275)
   let splitAdv = 0;
   const hHomeGames = (home_season?.home_wins ?? 0) + (home_season?.home_losses ?? 0);
   const aAwayGames = (away_season?.away_wins ?? 0) + (away_season?.away_losses ?? 0);
   if (hHomeGames >= 20 && aAwayGames >= 20) {
     const hHomePct = home_season.home_wins / hHomeGames;
     const aAwayPct = away_season.away_wins / aAwayGames;
-    splitAdv = Math.tanh((hHomePct - aAwayPct) / 0.200) * 0.03;
+    splitAdv = Math.tanh((hHomePct - aAwayPct) / 0.200) * 0;
   }
 
-  // 7. Forme récente last10 · poids 0.04 → 0.10 (calib v6.81 : effect_size 0.26, MEILLEUR signal MLB)
+  // 7. Forme récente last10 · poids 0.10 → 0.20 (v6.94 MEILLEUR signal effect 0.22 signe +)
   let formAdv = 0;
   const hLast10Games = (home_season?.last10_wins ?? 0) + (home_season?.last10_losses ?? 0);
   const aLast10Games = (away_season?.last10_wins ?? 0) + (away_season?.last10_losses ?? 0);
   if (hLast10Games >= 5 && aLast10Games >= 5) {
     const hLast10Pct = home_season.last10_wins / hLast10Games;
     const aLast10Pct = away_season.last10_wins / aLast10Games;
-    formAdv = Math.tanh((hLast10Pct - aLast10Pct) / 0.300) * 0.10;
+    formAdv = Math.tanh((hLast10Pct - aLast10Pct) / 0.300) * 0.20;
   }
 
-  // 8. Bullpen ERA · calib v6.81 : signe inversé (mean_diff -0.273) + 0.05 → 0.04
-  // Hypothèse : équipes au bullpen ERA récente haute = jouent matchs serrés (sélection)
+  // 8. Bullpen ERA · poids 0.04 → 0 (v6.94 mean_diff -0.044 effect 0.02 inversion ne tient pas)
   let bullpenAdv = 0;
   if (home_season?.bullpen_era != null && away_season?.bullpen_era != null) {
-    bullpenAdv = Math.tanh((home_season.bullpen_era - away_season.bullpen_era) / 1.0) * 0.04;
+    bullpenAdv = Math.tanh((home_season.bullpen_era - away_season.bullpen_era) / 1.0) * 0;
   }
 
-  // 9. Park factor — calib v6.81 : neutralisé sur ML (effet inversé mean_diff -0.048)
+  // 9. Park factor — neutralisé v6.81 (effet inversé)
   // parkFact toujours utilisé pour O/U via L8152
   let parkAdv = 0;
   const pf = MLB_PARK_FACTORS_W[venue] ?? 100;
 
-  // 10. BABIP regression · calib v6.81 : signe inversé (mean_diff -0.179)
-  // Hypothèse "régression" fausse à court terme · BABIP haut = équipe en feu, momentum
+  // 10. BABIP regression · poids 0.02 → 0 (v6.94 mean_diff -0.163 signe inverse fragile)
   let babipAdv = 0;
   if (home_season?.babip != null && away_season?.babip != null) {
     const LEAGUE_BABIP = 0.295;
     const hDiff = home_season.babip - LEAGUE_BABIP;
     const aDiff = away_season.babip - LEAGUE_BABIP;
-    babipAdv = Math.tanh((hDiff - aDiff) / 0.030) * 0.02;
+    babipAdv = Math.tanh((hDiff - aDiff) / 0.030) * 0;
   }
 
-  // 11. Météo · poids 0.04 → 0.02 (calib v6.81 : effect_size 0.12)
+  // 11. Météo · poids 0.02 → 0.03 (v6.94 effect 0.14 signe + valide, légère hausse)
   let weatherAdv = 0;
   if (weather && !weather.indoor && !weather.error && weather.wind_speed_mps != null) {
     let score = 0;
@@ -8407,7 +8414,7 @@ function _mlbEngineCompute(matchData) {
     if (weather.temp_celsius   < 10) score -= 0.3;
     if (home_season?.ops != null && away_season?.ops != null && score !== 0) {
       const opsDiffSign = Math.sign(home_season.ops - away_season.ops);
-      weatherAdv = Math.tanh(score) * 0.02 * opsDiffSign;
+      weatherAdv = Math.tanh(score) * 0.03 * opsDiffSign;
     }
   }
 
@@ -8445,12 +8452,17 @@ function _mlbEngineCompute(matchData) {
   const _decToAm = (d) => d >= 2 ? Math.round((d-1)*100) : Math.round(-100/(d-1));
   const _amToProb = (a) => a > 0 ? 100/(a+100) : Math.abs(a)/(Math.abs(a)+100);
 
+  // v6.94 garde-fou edge MLB : zone [5, 10] uniquement profitable sur 315 logs
+  // edge_10_plus : 215 paris · 49.3% hit (piège surconfiance)
+  // edge_7_10    :  64 paris · 54.7% hit (zone profitable)
+  // edge_5_7     :  21 paris · 52.4% hit (break-even)
+  // edge_0_5     :  15 paris · 33.3% hit (bruit)
   for (const [side, prob] of [['HOME', homeProb], ['AWAY', 1 - homeProb]]) {
     const best = _getBest(side);
     if (!best) continue;
     const impliedProb = _amToProb(best.odds);
     const edge = Math.round((prob - impliedProb) * 100);
-    if (edge >= 5) {
+    if (edge >= 5 && edge <= 10) {
       recommendations.push({
         type: 'MONEYLINE', label: 'Vainqueur', side,
         odds_line: best.odds, odds_decimal: best.decimalOdds, odds_source: best.bookmaker,
@@ -8472,13 +8484,14 @@ function _mlbEngineCompute(matchData) {
   if (ouLine) {
     const diff     = estTotal - ouLine;
     const overProb = 0.50 + Math.tanh(diff / 2) * 0.15;
+    // v6.94 garde-fou edge MLB O/U : même fenêtre [5, 10] que ML (cohérence + prudence)
     for (const [side, prob] of [['OVER', overProb], ['UNDER', 1 - overProb]]) {
       const bk = market_odds?.bookmakers?.find(b => b.key === 'pinnacle') ?? ouBk;
       const oddsVal = side === 'OVER' ? bk?.over_total : bk?.under_total;
       if (!oddsVal) continue;
       const impliedProb = 1 / oddsVal;
       const edge = Math.round((prob - impliedProb) * 100);
-      if (edge >= 5) {
+      if (edge >= 5 && edge <= 10) {
         recommendations.push({
           type: 'OVER_UNDER', label: `Total (${ouLine} runs)`, side, ou_line: ouLine,
           odds_line: _decToAm(oddsVal), odds_decimal: oddsVal, odds_source: 'Pinnacle',

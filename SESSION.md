@@ -11,7 +11,8 @@ néant
 UI user-facing FR (v6.90+) : helpers `_qualityFr` `_betTypeFr` `_fmtOdds` `_confidenceFr` `_interpretVariable` (ui.bot.js:1090-1215) · cotes décimales européennes jamais US
 
 ## TODO
-- [ ] P1 surveiller hit rate MLB+tennis 50 paris post-v6.81 (PR #123 #124) · revert isolé si baisse
+- [ ] P1 surveiller hit rate MLB v6.94 post 50 paris · si <52% désactiver bot (Option C)
+- [ ] P1 surveiller hit rate tennis v6.93 post 50 paris · revert isolé si baisse
 - [ ] P2 NBA recheck calib à 80+ logs (actuel 53 hit 67.9% v6.79 valide) · `travel_load` inversé n=22 ignoré
 - [ ] P2 gate `confidence=INCONCLUSIVE` si `data_quality<0.55` (worker.js:5185)
 - [ ] P2 `/bot/calibration/analyze?sport=tennis` après 30+ logs settlés v6.85+
@@ -40,6 +41,7 @@ Worker `manibetpro.emmanueldelasse.workers.dev` · Front GH Pages · KV `PAPER_T
 
 ## Pièges MLB
 `_mlbSeason()` dynamique · IP `X.Y` = X innings + Y outs · ESPN `YYYYMMDD` aligné logs
+v6.94 (worker.js:8330) après 315 logs hit 49.8% : 4 vars supprimées (run_diff/split/bullpen/babip) · pitcher_fip 0.10→0.18 · last10 0.10→0.20 · garde-fou edge MLB [5, 10] (zone seule profitable 54.7% sur 64 paris)
 
 ## Pièges Tennis
 Sackmann CSV lag 2-3j · api-tennis désactivé (cod=1006 non payé) · CSV qual hors tour
