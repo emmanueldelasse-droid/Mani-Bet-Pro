@@ -48,6 +48,7 @@ Elo K=32 · log 90j · odds_snap 7j · steam<3% bruit · Garde-fous edge>18% / c
 H2H pondéré récence (v6.85 worker.js:7270 engine.tennis.js:217) : ≤12m×1 24m×0.5 36m×0.25 >36×0.1 · fallback global si surfWT<1.5
 Dates estimées round offset (v6.87 worker.js:7080) R128+1j..F+7j · slam ×2 · `opponent_rank` last5 (v6.92)
 Modal stats adversaire clic nom (ui.match-detail.tennis.js:570)
+Poids v6.93 (worker.js:9078 sports.config.js:190) : Elo 0.28→0.38 masters · réduit dilution favoris écrasants · challenger inchangé
 
 ## Pièges Timezone
 `_botFormatDate` Intl · DST auto · nightly idempotent
