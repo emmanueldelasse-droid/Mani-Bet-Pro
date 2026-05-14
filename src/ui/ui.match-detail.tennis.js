@@ -209,9 +209,12 @@ function _renderEloRanking(match, data) {
   const quality   = useSurf ? 'VERIFIED' : (eAll1 != null && eAll2 != null ? 'PARTIAL' : 'MISSING');
   const eloLabel  = useSurf ? `Elo ${_surfaceFr(surface)}` : 'Elo global';
 
+  // v6.96 M2 : note clarifie que c'est un signal isolé, pas le score moteur final.
+  // Évite confusion user quand Elo dit 67% Swiatek et synthèse affiche 49% (cas Pegula-Swiatek 13/05).
   const diffDisplay = expectedP1 != null
     ? `<div style="font-size:20px;font-weight:800;color:var(--color-signal)">${Math.round(expectedP1 * 100)}% — ${Math.round((1 - expectedP1) * 100)}%</div>
-       <div style="font-size:10px;color:var(--color-text-secondary);margin-top:2px">proba victoire dérivée ${eloLabel}</div>`
+       <div style="font-size:10px;color:var(--color-text-secondary);margin-top:2px">proba victoire dérivée ${eloLabel}</div>
+       <div style="font-size:9px;color:var(--color-muted);margin-top:4px;font-style:italic">Signal isolé · le score moteur en haut intègre 9 variables pondérées</div>`
     : `<div style="font-size:12px;color:var(--color-muted)">proba non dérivable (data insuffisante)</div>`;
 
   return `

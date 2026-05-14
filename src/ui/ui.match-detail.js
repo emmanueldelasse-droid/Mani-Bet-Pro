@@ -1238,13 +1238,49 @@ function renderBlocTousLesParis(analysis, match) {
   const getOddsSource = () => marketOdds?.best_book ?? (marketOdds ? 'Pinnacle' : 'DraftKings');
   const findRec = (type, side) => betting?.recommendations?.find(r => r.type === type && r.side === side) ?? null;
 
-  const buildRow = (label, type, side, prob, oddsDec, rec, spreadLine, ouLine) => {
+  // v6.96 C2 : prob bookmaker devigée si la cote opposée est connue (marché binaire),
+  // sinon fallback prob brute avec marqueur "(brut)". Vig tennis ~5% → prob brute
+  // gonflée de ~2-3 pts par côté, écart cumulé jusqu'à 5 pts sur l'edge affiché.
+  const _devigImpliedProb = (oddsDec, oppositeOddsDec) => {
     if (!oddsDec) return null;
-    const impliedProb = Math.round((1 / oddsDec) * 100);
-    const edge        = prob !== null ? prob - impliedProb : null;
-    const kellyEuros  = rec?.kelly_stake > 0 ? Math.round(rec.kelly_stake * bankroll * 100) / 100 : null;
-    const isBest      = betting?.best?.type === type && betting?.best?.side === side;
-    const betData     = `data-market="${type}" data-side="${side}" data-side-label="${label}" data-odds="${_decimalToAmerican(oddsDec) ?? 0}" data-edge="${edge ?? 0}" data-motor-prob="${prob ?? 0}" data-implied-prob="${impliedProb}" data-kelly="${rec?.kelly_stake ?? 0}" data-spread-line="${spreadLine ?? ''}" data-ou-line="${ouLine ?? ''}"`;
+    const raw = 1 / oddsDec;
+    if (!oppositeOddsDec) return { value: Math.round(raw * 100), devigged: false };
+    const rawOpp = 1 / oppositeOddsDec;
+    const vigSum = raw + rawOpp;
+    return { value: Math.round((raw / vigSum) * 100), devigged: true };
+  };
+
+  // v6.96 C3 : edge fantôme · si pas de reco émise par moteur ET edge >= seuils
+  // garde-fous (EDGE_MAX_ML 18% / longshot >5 + edge >15%) → reco silencieusement
+  // supprimée. On grise l'edge et ajoute label pour ne pas tromper l'user.
+  const EDGE_MAX_ML       = 18;
+  const LONGSHOT_THRESH   = 5.0;
+  const LONGSHOT_EDGE_MAX = 15;
+
+  const buildRow = (label, type, side, prob, oddsDec, rec, spreadLine, ouLine, oppositeOddsDec) => {
+    if (!oddsDec) return null;
+    const implied      = _devigImpliedProb(oddsDec, oppositeOddsDec);
+    const impliedProb  = implied?.value ?? Math.round((1 / oddsDec) * 100);
+    const isDevigged   = implied?.devigged ?? false;
+    const edge         = prob !== null ? prob - impliedProb : null;
+    const kellyEuros   = rec?.kelly_stake > 0 ? Math.round(rec.kelly_stake * bankroll * 100) / 100 : null;
+    const isBest       = betting?.best?.type === type && betting?.best?.side === side;
+
+    // Détection edge fantôme (reco supprimée par garde-fou moteur)
+    const absEdge      = edge != null ? Math.abs(edge) : 0;
+    const isPhantomTooHigh   = !rec && absEdge > EDGE_MAX_ML;
+    const isPhantomLongshot  = !rec && oddsDec >= LONGSHOT_THRESH && absEdge > LONGSHOT_EDGE_MAX;
+    const isPhantom    = type === 'MONEYLINE' && (isPhantomTooHigh || isPhantomLongshot);
+
+    const betData      = `data-market="${type}" data-side="${side}" data-side-label="${label}" data-odds="${_decimalToAmerican(oddsDec) ?? 0}" data-edge="${edge ?? 0}" data-motor-prob="${prob ?? 0}" data-implied-prob="${impliedProb}" data-kelly="${rec?.kelly_stake ?? 0}" data-spread-line="${spreadLine ?? ''}" data-ou-line="${ouLine ?? ''}"`;
+
+    const bookLabel    = isDevigged ? `book ${impliedProb}%` : `book ${impliedProb}%<span style="opacity:0.5"> (brut)</span>`;
+    const edgeDisplay  = edge !== null
+      ? (isPhantom
+          ? `<div style="font-size:13px;font-weight:600;color:var(--color-muted);letter-spacing:-0.01em;text-decoration:line-through" title="Edge supprimé par garde-fou moteur (edge>18% ou longshot)">${edge > 0 ? '+' : ''}${edge}%</div>
+             <div style="font-size:9px;color:var(--color-muted)">non joué</div>`
+          : `<div style="font-size:15px;font-weight:800;color:${_edgeColor(edge)};letter-spacing:-0.01em">${edge > 0 ? '+' : ''}${edge}%</div>`)
+      : '<div style="color:var(--color-muted);font-size:11px">—</div>';
 
     return `
       <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:8px;align-items:center;padding:9px 10px;background:${isBest ? 'rgba(34,197,94,0.06)' : 'var(--color-bg)'};border-radius:8px;border:1px solid ${isBest ? 'rgba(34,197,94,0.3)' : 'transparent'};margin-bottom:6px">
@@ -1252,7 +1288,7 @@ function renderBlocTousLesParis(analysis, match) {
           ${_probPill(prob, rec)}
           <div style="min-width:0">
             <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${label}</div>
-            <div style="font-size:10px;color:var(--color-text-secondary)">${prob !== null ? prob + '% analyse' : '—'} · book ${impliedProb}%</div>
+            <div style="font-size:10px;color:var(--color-text-secondary)">${prob !== null ? prob + '% analyse' : '—'} · ${bookLabel}</div>
           </div>
         </div>
         <div style="text-align:center;min-width:42px">
@@ -1260,8 +1296,8 @@ function renderBlocTousLesParis(analysis, match) {
           <div style="font-size:9px;color:var(--color-text-secondary)">${getOddsSource()}</div>
         </div>
         <div style="text-align:center;min-width:52px">
-          ${edge !== null ? `<div style="font-size:15px;font-weight:800;color:${_edgeColor(edge)};letter-spacing:-0.01em">${edge > 0 ? '+' : ''}${edge}%</div>` : '<div style="color:var(--color-muted);font-size:11px">—</div>'}
-          ${kellyEuros ? `<div style="font-size:9px;color:var(--color-text-secondary)">${kellyEuros}€</div>` : ''}
+          ${edgeDisplay}
+          ${kellyEuros && !isPhantom ? `<div style="font-size:9px;color:var(--color-text-secondary)">${kellyEuros}€</div>` : ''}
         </div>
         <div>
           <button class="paper-bet-btn" ${betData} style="font-size:12px;padding:8px 12px;border-radius:8px;border:1px solid var(--color-border);background:var(--color-card);color:var(--color-text);cursor:pointer;white-space:nowrap;min-width:40px">📋</button>
@@ -1271,8 +1307,9 @@ function renderBlocTousLesParis(analysis, match) {
 
   const rows = [];
   const homeMLOdds = getOdds('ML', 'HOME'), awayMLOdds = getOdds('ML', 'AWAY');
-  if (homeMLOdds) rows.push(buildRow(`${homeAbbr} vainqueur`, 'MONEYLINE', 'HOME', homeProb, homeMLOdds, findRec('MONEYLINE', 'HOME'), null, null));
-  if (awayMLOdds) rows.push(buildRow(`${awayAbbr} vainqueur`, 'MONEYLINE', 'AWAY', awayProb, awayMLOdds, findRec('MONEYLINE', 'AWAY'), null, null));
+  // v6.96 C2 : passer la cote opposée pour deviger la prob bookmaker
+  if (homeMLOdds) rows.push(buildRow(`${homeAbbr} vainqueur`, 'MONEYLINE', 'HOME', homeProb, homeMLOdds, findRec('MONEYLINE', 'HOME'), null, null, awayMLOdds));
+  if (awayMLOdds) rows.push(buildRow(`${awayAbbr} vainqueur`, 'MONEYLINE', 'AWAY', awayProb, awayMLOdds, findRec('MONEYLINE', 'AWAY'), null, null, homeMLOdds));
 
   const spread = odds?.spread ?? marketOdds?.spread_line;
   if (spread != null) {
@@ -1281,8 +1318,8 @@ function renderBlocTousLesParis(analysis, match) {
     const recSprdHome  = findRec('SPREAD', 'HOME');
     const recSprdAway  = findRec('SPREAD', 'AWAY');
     // Utiliser motor_prob depuis les recs du moteur (toujours calculé maintenant)
-    if (homeSprdOdds) rows.push(buildRow(`${homeAbbr} ${spreadDisp} pts`,               'SPREAD', 'HOME', recSprdHome?.motor_prob ?? homeProb, homeSprdOdds, recSprdHome, spread,  null));
-    if (awaySprdOdds) rows.push(buildRow(`${awayAbbr} ${spread > 0 ? '-' : '+'}${Math.abs(spread)} pts`, 'SPREAD', 'AWAY', recSprdAway?.motor_prob ?? awayProb, awaySprdOdds, recSprdAway, -spread, null));
+    if (homeSprdOdds) rows.push(buildRow(`${homeAbbr} ${spreadDisp} pts`,               'SPREAD', 'HOME', recSprdHome?.motor_prob ?? homeProb, homeSprdOdds, recSprdHome, spread,  null, awaySprdOdds));
+    if (awaySprdOdds) rows.push(buildRow(`${awayAbbr} ${spread > 0 ? '-' : '+'}${Math.abs(spread)} pts`, 'SPREAD', 'AWAY', recSprdAway?.motor_prob ?? awayProb, awaySprdOdds, recSprdAway, -spread, null, homeSprdOdds));
   }
 
   const ou = odds?.over_under ?? marketOdds?.ou_line;
@@ -1291,8 +1328,8 @@ function renderBlocTousLesParis(analysis, match) {
     const overOdds   = getOdds('OVER', 'OVER'), underOdds = getOdds('UNDR', 'UNDER');
     const recOver    = findRec('OVER_UNDER', 'OVER');
     const recUnder   = findRec('OVER_UNDER', 'UNDER');
-    if (overOdds)  rows.push(buildRow(`Plus de ${ou} pts`,  'OVER_UNDER', 'OVER',  recOver?.motor_prob  ?? null, overOdds,  recOver,  null, ou));
-    if (underOdds) rows.push(buildRow(`Moins de ${ou} pts`, 'OVER_UNDER', 'UNDER', recUnder?.motor_prob ?? null, underOdds, recUnder, null, ou));
+    if (overOdds)  rows.push(buildRow(`Plus de ${ou} pts`,  'OVER_UNDER', 'OVER',  recOver?.motor_prob  ?? null, overOdds,  recOver,  null, ou, underOdds));
+    if (underOdds) rows.push(buildRow(`Moins de ${ou} pts`, 'OVER_UNDER', 'UNDER', recUnder?.motor_prob ?? null, underOdds, recUnder, null, ou, overOdds));
   }
 
   // ── Props joueur (v6.56) · ligne marché via TheOddsAPI ou cache AI ─────
@@ -1322,8 +1359,8 @@ function renderBlocTousLesParis(analysis, match) {
     const recOver  = betting?.recommendations?.find(r => r.type === 'PLAYER_POINTS' && r.player === p.name && r.side === 'OVER');
     const recUnder = betting?.recommendations?.find(r => r.type === 'PLAYER_POINTS' && r.player === p.name && r.side === 'UNDER');
 
-    if (overOdds)  ppRows.push(buildRow(`${p.name} plus de ${line}`,  'PLAYER_POINTS', 'OVER',  overProb,  overOdds,  recOver,  null, line));
-    if (underOdds) ppRows.push(buildRow(`${p.name} moins de ${line}`, 'PLAYER_POINTS', 'UNDER', underProb, underOdds, recUnder, null, line));
+    if (overOdds)  ppRows.push(buildRow(`${p.name} plus de ${line}`,  'PLAYER_POINTS', 'OVER',  overProb,  overOdds,  recOver,  null, line, underOdds));
+    if (underOdds) ppRows.push(buildRow(`${p.name} moins de ${line}`, 'PLAYER_POINTS', 'UNDER', underProb, underOdds, recUnder, null, line, overOdds));
   }
 
   const validRows = rows.filter(Boolean);
