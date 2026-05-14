@@ -203,8 +203,10 @@ function _renderEloRanking(match, data) {
   const rank1 = data.p1?.current_rank;
   const rank2 = data.p2?.current_rank;
 
+  // v6.96 M3 : seuil 10→8 pour aligner sur engine.tennis.js MIN_ELO_SURFACE.
+  // Avant : un match avec n=9 affichait Elo global alors que l'engine utilisait Elo surface.
   // Proba surface (si assez de matchs), sinon overall
-  const useSurf = eSurf1 != null && eSurf2 != null && nSurf1 >= 10 && nSurf2 >= 10;
+  const useSurf = eSurf1 != null && eSurf2 != null && nSurf1 >= 8 && nSurf2 >= 8;
   const expectedP1 = useSurf ? _eloExpected(eSurf1, eSurf2) : _eloExpected(eAll1, eAll2);
   const quality   = useSurf ? 'VERIFIED' : (eAll1 != null && eAll2 != null ? 'PARTIAL' : 'MISSING');
   const eloLabel  = useSurf ? `Elo ${_surfaceFr(surface)}` : 'Elo global';
@@ -260,9 +262,14 @@ function _renderSurface(match, data) {
   const n1  = s1?.matches ?? 0;
   const n2  = s2?.matches ?? 0;
 
-  const MIN_SAMPLE = 8;
-  const quality = (n1 >= MIN_SAMPLE && n2 >= MIN_SAMPLE) ? 'VERIFIED'
-                : (n1 >= 4 && n2 >= 4) ? 'PARTIAL' : 'LOW_SAMPLE';
+  // v6.96 M3 : seuil "fiable" relevé 8→15 sur l'UI · marge erreur à n=8 ≈ ±17 pts
+  // sur win rate, "fiable" survendait. Engine garde son seuil n=8 (MIN_SURFACE_MATCHES)
+  // car ses calculs sont relatifs (diff), pas absolus.
+  const MIN_VERIFIED = 15;  // ±13 pts à 95% CI sur win rate
+  const MIN_PARTIAL  = 8;
+  const quality = (n1 >= MIN_VERIFIED && n2 >= MIN_VERIFIED) ? 'VERIFIED'
+                : (n1 >= MIN_PARTIAL && n2 >= MIN_PARTIAL) ? 'PARTIAL'
+                : (n1 >= 4 && n2 >= 4) ? 'LOW_SAMPLE' : 'MISSING';
 
   return `
     <div class="card match-detail__bloc">
