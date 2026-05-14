@@ -1052,12 +1052,21 @@ function _buildTennisAnalysis(engineResult, matchObj) {
     : null;
 
   const robustnessScore = cappedScore != null ? dataQualityScore : null;
+  // v6.96 : miroir worker.js:9363 _botTennisConfidence. Avant : ne dépendait que de
+  // dataQuality → 9/9 vars VERIFIED avec signaux contradictoires (score 51%) = HIGH.
+  // Maintenant : deviation = |score - 0.5| pondère la confiance (signaux convergents
+  // proche 50% = LOW), évite "Confiance élevée" trompeuse quand bot est indécis.
+  const missingCount = Object.values(variables).filter(v => v?.value == null).length;
   let confidenceLevel;
-  if (cappedScore == null || dataQualityScore == null) {
+  if (cappedScore == null || dataQualityScore == null || dataQualityScore < 0.30) {
     confidenceLevel = 'INCONCLUSIVE';
+  } else if (missingCount >= 3) {
+    confidenceLevel = 'LOW';
   } else {
-    const minScore = Math.min(robustnessScore, dataQualityScore);
-    confidenceLevel = minScore >= 0.75 ? 'HIGH' : minScore >= 0.50 ? 'MEDIUM' : 'LOW';
+    const deviation = Math.abs(cappedScore - 0.5);
+    if      (deviation >= 0.20 && dataQualityScore >= 0.70) confidenceLevel = 'HIGH';
+    else if (deviation >= 0.10 && dataQualityScore >= 0.50) confidenceLevel = 'MEDIUM';
+    else                                                     confidenceLevel = 'LOW';
   }
 
   const best    = engineResult.betting_recommendations?.best ?? null;

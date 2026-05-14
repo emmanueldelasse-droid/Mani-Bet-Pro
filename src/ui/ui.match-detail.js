@@ -1067,10 +1067,28 @@ function _getSignalDetail(signal, vars, match, isHome, homeName, awayName) {
       return `${favTeam} domine davantage sur son service (<strong>${fav}/100</strong>) que ${othTeam} (${oth}/100).`;
     }
     case 'fatigue_index': {
+      // v6.96 : inversion v6.81 → favTeam a MOINS de jours depuis dernier match (= en rythme).
+      // Ancien texte "plus reposé·e" était directionnellement faux post-inversion.
       const d1 = v?.p1_days, d2 = v?.p2_days;
       if (d1 == null || d2 == null) return null;
       const favD = isHome ? d1 : d2, othD = isHome ? d2 : d1;
-      return `${favTeam} est plus reposé·e (<strong>${favD} jours</strong> depuis le dernier match) que ${othTeam} (${othD} jours).`;
+      return `${favTeam} est plus en rythme (<strong>${favD} jours</strong> depuis le dernier match contre ${othD} pour ${othTeam} — pause plus longue).`;
+    }
+    case 'physical_load_diff': {
+      // v6.96 : inversion v6.81 → favTeam a joué PLUS de sets sur 14j = momentum tournoi.
+      const s1 = v?.p1_sets, s2 = v?.p2_sets;
+      if (s1 == null || s2 == null) return null;
+      const favS = isHome ? s1 : s2, othS = isHome ? s2 : s1;
+      return `${favTeam} a accumulé plus de sets récents (<strong>${favS} sets</strong> sur 14 jours vs ${othS} pour ${othTeam}) — momentum tournoi.`;
+    }
+    case 'market_steam_diff': {
+      // v6.96 : inversion v6.81 contrarian → mouvement de cote vers othTeam, historiquement
+      // on fade ces sur-réactions du marché tennis.
+      const d1 = v?.p1_drop, d2 = v?.p2_drop;
+      if (d1 == null || d2 == null) return null;
+      const movedTo = isHome ? othTeam : favTeam;  // celui dont la cote a baissé est le côté faded
+      const drop = isHome ? Math.abs(d2) : Math.abs(d1);
+      return `Le marché s'est déplacé vers <strong>${movedTo}</strong> (cote baissée de ~${drop.toFixed(1)}%) — le bot fade cette sur-réaction.`;
     }
     default: return null;
   }
