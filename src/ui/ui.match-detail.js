@@ -1677,9 +1677,11 @@ function _buildSyntheseLines(analysis, match) {
     lines.push(line('🎯', `Favori : <strong>${escapeHtml(favName)}</strong> (${favProb}%).`));
   }
 
-  // Ligne 2 — pourquoi : top signaux, groupés par joueur favorisé (direction VRAIE).
-  // POSITIVE → contribution>0 → favorise home · NEGATIVE → favorise away · NEUTRAL ignoré.
-  // v6.93 : marqueur "(peu de données)" si quality≠VERIFIED pour ne pas survendre un signal faible
+  // Ligne 2 — pourquoi : top signaux groupés par joueur favorisé.
+  // v6.96 M4 : ordonné par MAGNITUDE de contribution cumulée par côté,
+  // évite la fausse symétrie 1-vs-2 quand un signal fort domine plusieurs faibles.
+  // Avant : "h2h favorise A ; recent_form, fatigue favorisent B" → user lit "2 vs 1, B"
+  // alors que h2h (poids 0.18) peut dominer recent_form+fatigue (0.15+0.15) en magnitude.
   const topSignals = (analysis.key_signals ?? [])
     .slice()
     .sort((a, b) => Math.abs(b.contribution ?? 0) - Math.abs(a.contribution ?? 0))
@@ -1692,13 +1694,14 @@ function _buildSyntheseLines(analysis, match) {
     return isWeak ? `${label.toLowerCase()} <em style="color:var(--color-text-secondary);font-style:normal;font-size:11px">(peu de données)</em>` : label.toLowerCase();
   };
 
-  const homeFactors = [];
-  const awayFactors = [];
+  const homeFactors = []; let homeMagn = 0;
+  const awayFactors = []; let awayMagn = 0;
   for (const s of topSignals) {
     const item = formatSignal(s);
     if (!item) continue;
-    if (s.direction === 'POSITIVE')      homeFactors.push(item);
-    else if (s.direction === 'NEGATIVE') awayFactors.push(item);
+    const c = Math.abs(s.contribution ?? 0);
+    if (s.direction === 'POSITIVE')      { homeFactors.push(item); homeMagn += c; }
+    else if (s.direction === 'NEGATIVE') { awayFactors.push(item); awayMagn += c; }
   }
 
   const fmtList = (arr, name) => {
@@ -1707,9 +1710,17 @@ function _buildSyntheseLines(analysis, match) {
     return `${items} ${verb} <strong>${escapeHtml(name)}</strong>`;
   };
 
+  // Ordonner par magnitude cumulée · côté dominant en premier, connecteur "mais"
+  // si l'autre côté existe pour signaler la nuance (et pas une simple liste).
   const parts = [];
-  if (homeFactors.length) parts.push(fmtList(homeFactors, home));
-  if (awayFactors.length) parts.push(fmtList(awayFactors, away));
+  if (homeFactors.length && awayFactors.length) {
+    if (homeMagn >= awayMagn) parts.push(fmtList(homeFactors, home), 'mais ' + fmtList(awayFactors, away));
+    else                       parts.push(fmtList(awayFactors, away), 'mais ' + fmtList(homeFactors, home));
+  } else if (homeFactors.length) {
+    parts.push(fmtList(homeFactors, home));
+  } else if (awayFactors.length) {
+    parts.push(fmtList(awayFactors, away));
+  }
   if (parts.length) {
     lines.push(line('📊', `Pourquoi : ${parts.join(' ; ')}.`));
   }

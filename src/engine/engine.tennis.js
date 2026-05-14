@@ -32,13 +32,17 @@ export class EngineTennis {
 
   /**
    * Point d'entrée principal.
-   * @param {object} match     — données du match (joueurs, tournoi, surface, odds)
+   * @param {object} match     — données du match (joueurs, tournoi, surface, odds, tournament_label)
    * @param {object} csvStats  — stats préprocessées depuis le CSV Sackmann
    * @returns {object}         — résultat compatible avec engine.core.js
    */
   static analyze(match, csvStats) {
     const config   = SPORTS_CONFIG['TENNIS'];
-    const weights  = config.default_weights;
+    // v6.96 M1 : détection phase pour aligner front sur worker.js:9080 _botTennisWeights.
+    // Avant : toujours default_weights → désync sur Grand Slam, Tour 500, Challenger.
+    // tournament_label injecté par data.orchestrator.js:983.
+    const phase    = this._detectPhase(match.tournament_label ?? '');
+    const weights  = this._weightsForPhase(phase, config);
     const surface  = match.surface ?? 'Hard';
     const p1Name   = match.home_player;   // conventionnellement le "home"
     const p2Name   = match.away_player;
@@ -73,7 +77,26 @@ export class EngineTennis {
       betting_recommendations: bettingRecs,
       score_method: 'CALIBRATED',
       volatility:   null,
+      phase,
     };
+  }
+
+  // v6.96 M1 : miroir worker.js:9080 _tennisTournamentPhase + _botTennisWeights.
+  // Phase regex doit matcher la version backend pour cohérence front/back.
+  static _detectPhase(label) {
+    const L = String(label ?? '').toLowerCase();
+    if (/australian open|french open|roland[- ]?garros|wimbledon|us open/.test(L)) return 'grand_slam';
+    if (/masters|atp 1000|wta 1000|indian wells|miami open|madrid open|rome|cincinnati|paris masters|shanghai|canadian open|atp finals|wta finals/.test(L)) return 'masters_1000';
+    if (/500|atp 500|wta 500/.test(L)) return 'tour_500';
+    if (/challenger/.test(L)) return 'challenger';
+    return 'regular';
+  }
+
+  static _weightsForPhase(phase, config) {
+    // Si config a un phase_weights pour cette phase, l'utiliser. Sinon default_weights
+    // (qui est masters_1000 par construction · sports.config.js:188).
+    const phaseWeights = config.phase_weights?.[phase];
+    return phaseWeights ?? config.default_weights;
   }
 
   // ── EXTRACTION DES VARIABLES ──────────────────────────────────────────

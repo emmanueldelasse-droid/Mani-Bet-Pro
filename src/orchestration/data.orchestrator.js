@@ -980,7 +980,10 @@ DataOrchestrator._loadAndAnalyzeTennis = async function(date, store) {
           const csvStats  = statsData?.available ? (statsData.stats ?? {}) : {};
 
           const engineResult = EngineTennis.analyze(
-            { ...m, surface: tournament.surface },
+            // v6.96 M1 : injecter tournament_label pour que EngineTennis détecte la phase
+            // et applique les bons poids (cf. engine.tennis.js:_detectPhase). Sans ça,
+            // front utilisait toujours default_weights → désync sur Grand Slam, Tour 500, Challenger.
+            { ...m, surface: tournament.surface, tournament_label: tournament.label },
             csvStats
           );
 

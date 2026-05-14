@@ -184,10 +184,10 @@ export const SPORTS_CONFIG = {
     ],
 
     // v6.95 recalibrage data-driven sur 273 logs (hit 61.2%) après revert v6.93.
-    // Front utilise default_weights pour tous tournois (pas de logique phase) →
-    // miroir masters_1000 dans worker.js _botTennisWeights. Sync requise si change.
+    // default_weights = masters_1000 par construction (fallback si phase inconnue).
+    // v6.96 M1 : phase_weights ajouté · miroir worker.js _botTennisWeights pour
+    // éliminer désync front/back sur Grand Slam, Tour 500, Challenger.
     // Top 4 signaux : h2h_surface 0.26 · fatigue 0.25 · physical_load 0.22 · recent_form 0.21
-    // Somme = 0.10+0.07+0.15+0.05+0.18+0.05+0.15+0.10+0.15 = 1.00
     default_weights: {
       ranking_elo_diff:     0.10,
       surface_winrate_diff: 0.07,
@@ -198,6 +198,15 @@ export const SPORTS_CONFIG = {
       physical_load_diff:   0.15,
       market_steam_diff:    0.10,
       fatigue_index:        0.15,
+    },
+
+    // v6.96 M1 : poids par phase tournoi · doivent rester strictement synchronisés
+    // avec worker.js:9097 _botTennisWeights. Toute modif doit toucher les 2 endroits.
+    phase_weights: {
+      grand_slam:   { ranking_elo_diff: 0.10, surface_winrate_diff: 0.07, recent_form_ema: 0.18, pressure_dominance: 0.06, h2h_surface: 0.18, service_dominance: 0.05, physical_load_diff: 0.13, market_steam_diff: 0.10, fatigue_index: 0.13 },
+      masters_1000: { ranking_elo_diff: 0.10, surface_winrate_diff: 0.07, recent_form_ema: 0.15, pressure_dominance: 0.05, h2h_surface: 0.18, service_dominance: 0.05, physical_load_diff: 0.15, market_steam_diff: 0.10, fatigue_index: 0.15 },
+      tour_500:     { ranking_elo_diff: 0.08, surface_winrate_diff: 0.08, recent_form_ema: 0.17, pressure_dominance: 0.05, h2h_surface: 0.16, service_dominance: 0.07, physical_load_diff: 0.15, market_steam_diff: 0.10, fatigue_index: 0.14 },
+      challenger:   { ranking_elo_diff: 0.22, surface_winrate_diff: 0.19, recent_form_ema: 0.17, pressure_dominance: 0.12, h2h_surface: 0.06, service_dominance: 0.08, physical_load_diff: 0.06, market_steam_diff: 0.05, fatigue_index: 0.05 },
     },
 
     ema_lambda:  0.3,   // EMA plus réactive que NBA (matchs moins fréquents)
