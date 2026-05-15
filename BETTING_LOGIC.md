@@ -7,14 +7,13 @@
 - Garde-fous : sample minimum · cote plafond · data_quality minimum
 - Confidence calculée → recommandation finale
 
-## ⚠ Confidence · 2 algorithmes distincts coexistent (MBP-A.2 CRIT-2)
+## Confidence NBA · backend = source canonique (MBP-FIX-A.2.1)
 
-| Côté | Fichier | Algorithme |
-|---|---|---|
-| Backend (cron · logs · calibration) | `worker.js:5888` `_botComputeConfidence` | distance-based · `dist + dq + pen` |
-| Frontend (UI utilisateur runtime) | `src/engine/engine.core.js:314` `_computeConfidenceLevel` | min-based · `min(robust_effective, dq)` |
+Le frontend NBA utilise désormais **strictement** le même algorithme que le backend (worker.js:5888 `_botComputeConfidence`). Décision ChatGPT validée · backend = référence métier (calibration · logs · audit trail).
 
-Cas extrêmes possibles · labels opposés. Voir `NBA_ENGINE_AUDIT.md` §5 pour détail. Décision ChatGPT requise pour aligner.
+Implémentation alignée · `src/engine/engine.core.js:314` `_computeConfidenceLevel(predictive, robustness, dataQuality, penaltyScore, sport)`. Si `sport === 'NBA'` · algorithme distance-based identique au backend. Autres sports (MLB · Tennis) · algorithme legacy min-based préservé (audit séparé prévu).
+
+Robustness reste calculée frontend (`EngineRobustness.compute`) et exposée dans `analysis.robustness_score` pour UI · futurs warnings · debug. Elle ne pilote plus la confidence NBA.
 
 ## Confidence HIGH / MEDIUM / LOW / INCONCLUSIVE · backend actuel
 

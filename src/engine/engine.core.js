@@ -132,6 +132,7 @@ export class EngineCore {
       robustness.score,
       dataQuality.score,
       engineResult.confidence_penalty?.score ?? 0,
+      sport,  // MBP-FIX-A.2.1 · NBA aligné backend · autres sports legacy
     );
 
     const noOdds  = !rawData?.odds && !rawData?.market_odds;
@@ -302,24 +303,37 @@ export class EngineCore {
   // ── NIVEAU DE CONFIANCE ───────────────────────────────────────────────
 
   /**
-   * Seuils non calibrés — placeholders à ajuster après 50+ paris.
+   * NBA · aligné strictement sur _botComputeConfidence backend (worker.js:5888).
+   * Décision MBP-FIX-A.2.1 · backend = source canonique métier (calibration · logs).
+   * Algorithme distance-based · `dist = |score - 0.5|` + dq + penalty.
    *
-   * CORRECTION v2 :
-   *   penaltyScore était passé en 4ème argument depuis engine.core v2 mais la
-   *   signature n'acceptait que 3 paramètres → pénalité silencieusement ignorée.
-   *   La pénalité (0–0.25) issue de _computeConfidencePenalty (blessures incertaines,
-   *   divergence marché élevée) n'affectait donc jamais le niveau de confiance final.
-   *   Désormais : robustesse effective = robustness − penaltyScore (plancher 0).
+   * Autres sports (MLB · Tennis · etc.) · algorithme legacy min-based préservé.
+   * Sera audité séparément avant alignement.
+   *
+   * penaltyScore actuellement toujours 0 (confidence_penalty.score backend toujours
+   * null · prévu pour future activation · ne pas inventer de système penalty ici).
+   *
+   * Robustness reste disponible dans analysis.robustness_score · pour UI · futurs
+   * warnings · debug. Ne pilote plus la confidence NBA.
    */
-  static _computeConfidenceLevel(predictive, robustness, dataQuality, penaltyScore = 0) {
-    if (predictive === null || robustness === null || dataQuality === null) {
+  static _computeConfidenceLevel(predictive, robustness, dataQuality, penaltyScore = 0, sport = null) {
+    if (predictive === null || dataQuality === null) {
       return 'INCONCLUSIVE';
     }
 
-    const HIGH_THRESHOLD   = 0.75;  // Non calibré
-    const MEDIUM_THRESHOLD = 0.50;  // Non calibré
+    // MBP-FIX-A.2.1 · NBA aligné backend distance-based
+    if (sport === 'NBA') {
+      const dist = Math.abs(predictive - 0.5);
+      if (dist >= 0.20 && dataQuality >= 0.70 && penaltyScore < 0.08) return 'HIGH';
+      if (dist >= 0.12 && dataQuality >= 0.50 && penaltyScore < 0.15) return 'MEDIUM';
+      if (dist >= 0.06) return 'LOW';
+      return 'INCONCLUSIVE';
+    }
 
-    // Appliquer la pénalité sur la robustesse (plancher 0)
+    // Legacy · MLB · Tennis · autres sports · audit séparé prévu
+    if (robustness === null) return 'INCONCLUSIVE';
+    const HIGH_THRESHOLD   = 0.75;
+    const MEDIUM_THRESHOLD = 0.50;
     const effectiveRobustness = Math.max(0, robustness - penaltyScore);
     const minScore = Math.min(effectiveRobustness, dataQuality);
 
