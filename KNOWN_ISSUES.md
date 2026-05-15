@@ -157,7 +157,113 @@ Source · SESSION.md + audit code + git log mai 2026.
 - Telegram notifications reçues (vérif user)
 
 ## À vérifier
-- BasketUSA scraper actif ou dead code
 - OpenWeather usage actuel · matchs MLB couverts %
 - Pinnacle disponibilité long terme (clé guest)
-- Worker.js taille réelle (SESSION.md dit ~8500L · audit dit ~9600L)
+- ✓ Worker.js taille réelle · **10533 lignes** (MBP-A.1 confirmé)
+- ✓ BasketUSA · code vivant (appelé team-detail) mais usage UI ambigu
+
+---
+
+# Écarts détectés · audit MBP-A.1 (router + routes + KV + providers)
+
+## Critique
+
+### MBP-A.1 · CRIT-1 · Guards debug optionnels → routes publiques fallback
+- 5 routes NBA debug + `/debug/basketusa` (worker.js:1937, 1973, 2487, 2545, 2345)
+- `_denyIfNoDebugAuth` (worker.js:881) requiert `env.DEBUG_SECRET`
+- Si secret absent → **routes publiquement accessibles** (note v6.33 "rétrocompatible")
+- Risque · scan ports Cloudflare expose info Tank01 raw + box scores + roster
+- Fix · forcer 401 si `DEBUG_SECRET` absent en prod
+
+### MBP-A.1 · CRIT-2 · Routes Paper sans auth HTTP
+- `/paper/state` `/paper/bet` `/paper/bet/:id` `/paper/reset` (worker.js:401-410)
+- Aucun JWT · clé API · token
+- Guard = binding KV `PAPER_TRADING` existant
+- N'importe quel client public peut placer · settle · reset bets
+- Risque · corruption état · vol bankroll · DoS
+- Fix · ajouter clé partagée header ou JWT (validation ChatGPT requise)
+
+### MBP-A.1 · CRIT-3 · Erreur globale fuite message brut
+- `worker.js:438` · `errorResponse(\`Internal error: ${err.message}\`, 500, origin)`
+- Stack traces · chemins internes · clés API potentiellement exposées si erreur format
+- Fix · sanitize avant retour user · log full côté Cloudflare uniquement
+
+## Moyen
+
+### MBP-A.1 · MED-1 · `ai_player_props_{date}` lu jamais écrit
+- Lu worker.js:1401, 4362, 4656
+- Aucun `PAPER_TRADING.put('ai_player_props_*'` trouvé en grep
+- Risque · feature props NBA toujours retourne cache vide
+- À vérifier · écriture dans `src/` ou autre cron · ou bug réel
+
+### MBP-A.1 · MED-2 · Cron 30h TTL idempotence trop large
+- `bot_last_run` 30h · `mlb_bot_last_run` 30h · `tennis_bot_last_run` 30h
+- Docs disent "skip si déjà tourné même jour"
+- 30h TTL · risque double-run sur transition UTC/Paris (DST · changement heure)
+- Fix · réduire à 23h ou utiliser date string
+
+### MBP-A.1 · MED-3 · Rate limiters Claude `_todayParisKey()` drift
+- Patterns `ai_*_rate_{YYYYMMDD}` 25h TTL
+- `_todayParisKey()` génère YYYYMMDD TZ Paris
+- Décalage minuit UTC vs Paris (1-2h selon DST)
+- Risque · double appel Claude à minuit UTC
+
+### MBP-A.1 · MED-4 · `/health` version hardcodée
+- `worker.js:419` · `version: '6.85.0'`
+- Actuel changelog v7.01 tennis-espn
+- Pas synced · maintenance manuelle oubliée
+
+### MBP-A.1 · MED-5 · Constante `MLB_PITCHER_KV_KEY` morte
+- `worker.js:7372` · `MLB_PITCHER_KV_KEY = 'mlb_pitchers_cache'`
+- Constante définie · jamais référencée par get/put
+- Suppression possible
+
+### MBP-A.1 · MED-6 · NBA injury report PDF constante morte
+- `worker.js:117` · `NBA_INJURY_BASE = 'https://ak-static.cms.nba.com/referee/injury/Injury-Report_'`
+- Aucun fetch détecté
+- Fallback actuel · ESPN + Claude AI (v6.30+)
+- Suppression possible · décision ChatGPT
+
+### MBP-A.1 · MED-7 · `mlb_team_recent_*` lu jamais écrit
+- worker.js:7822 lu
+- Aucune write trouvée
+- À vérifier · cache jamais populé ou écrit ailleurs
+
+## Faible
+
+### MBP-A.1 · LOW-1 · Pinnacle clé publique hardcodée
+- `worker.js:4523` · `CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R`
+- Pas mention risque révocation dans PROVIDERS_MATRIX.md
+- Pinnacle peut révoquer sans préavis · pas de fallback documenté
+- Note · documenté dans MED-3 PROVIDERS_MATRIX maintenant
+
+### MBP-A.1 · LOW-2 · OPTIONS handler hors try block
+- `worker.js:253-254` · 204 No Content + CORS
+- `corsHeaders(env)` à confirmer si requiert env
+
+### MBP-A.1 · LOW-3 · Documentation routes debug lacunaire
+- Routes `*-debug` mentionnées par catégorie mais sans détail individuel pré-MBP-A.1
+- ✓ Corrigé · `ROUTES_AUDIT.md` exhaustif
+
+### MBP-A.1 · LOW-4 · TTL `tennis_csv_stats_v12_*` `tennis_odds_cache_v2_*` non trouvés
+- Préfixes dynamiques · grep direct ne capture pas TTL
+- À investiguer manuellement worker.js:6775, 6477
+
+### MBP-A.1 · LOW-5 · Worker taille réelle vs SESSION.md
+- SESSION.md disait ~8500L
+- Audit MBP-A.1 confirme 10533 lignes
+- ✓ Corrigé `ARCHITECTURE.md`
+
+### MBP-A.1 · LOW-6 · BasketUSA usage UI ambigu
+- Code vivant · `handleNBATeamDetail` (worker.js:508 appelle `_findBestBasketUSAArticle`)
+- `article_type: 'preview_fallback'` (worker.js:2311) suggère secondaire
+- UI ne montre peut-être pas articles (à confirmer côté front)
+- Décision · garder · supprimer · valider ChatGPT
+
+## Statistiques audit MBP-A.1
+- 54 routes HTTP recensées (21 NBA · 11 MLB · 9 Tennis · 6 Bot · 4 Paper · 6 Debug · 2 Health)
+- 7 cron handlers
+- 50+ clés KV trackées
+- 10 providers actifs · 1 désactivé (api-tennis) · 1 ambigu (BasketUSA) · 1 mort (NBA PDF)
+- 3 clés KV mortes ou orphelines détectées
+- 19 variables d'environnement recensées

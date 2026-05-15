@@ -33,10 +33,13 @@ index.html + src/ui/*.js (GitHub Pages front)
 - `ui.loading.js` · spinners
 - `ui.theme-toggle.js` · dark/light
 
-## Worker (`worker.js` ~9600L)
+## Worker (`worker.js` 10533 lignes · MBP-A.1 audit)
 - Point d'entrée unique · Cloudflare Worker
-- Router lignes 259-415 (à vérifier · approx d'après audit)
-- Categories routes : NBA · MLB · Tennis · Bot · Paper · Debug · Cron · Health
+- Export default `worker.js:234` · `fetch` `worker.js:248` · `scheduled` `worker.js:238`
+- Router = if/else chain linéaire (pas de switch · pas de table) · lignes 248-432
+- Categories routes : 21 NBA · 11 MLB · 9 Tennis · 6 Bot · 4 Paper · 6 Debug · 2 Health → **54 routes HTTP total**
+- 7 cron handlers (scheduled)
+- Détail exhaustif · `ROUTES_AUDIT.md`
 
 ## Modules src/ (importés par worker.js)
 - `src/ai/` · client Claude · contexte · garde-fous · prompts
@@ -71,13 +74,13 @@ index.html + src/ui/*.js (GitHub Pages front)
 - `_runAIPlayerPropsCron` (worker.js:4350) · 22h UTC · Claude batch props
 - `_runCalibrationCron` (worker.js:4415) · lundi 7h UTC · Telegram résumé hebdo
 
-## Routes principales (extrait · détail PROVIDERS_MATRIX.md)
-- `/health` · status worker
-- `/nba/*` · matches · injuries · stats · odds · team-detail
-- `/mlb/*` · matches · pitchers · standings · bot
-- `/tennis/*` · tournaments · odds · stats · bot
-- `/bot/*` · logs · settle · calibration · run
-- `/paper/*` · state · bet · reset
+## Routes principales (extrait · détail `ROUTES_AUDIT.md`)
+- `/health` · status worker · version hardcodée `6.85.0` (worker.js:419 · non sync changelog)
+- `/nba/*` · 21 routes · matches · injuries · stats · odds · team-detail · 5 debug
+- `/mlb/*` · 11 routes · matches · pitchers · standings · weather · bot
+- `/tennis/*` · 9 routes · tournaments · odds · stats · bot · _espn_probe
+- `/bot/*` · 6 routes · logs · settle · calibration · run · odds-history
+- `/paper/*` · 4 routes · state · bet · reset · **aucune auth HTTP**
 
 ## Séparation front / backend
 - Front fetch worker via HTTPS · CORS `_headers`
@@ -116,7 +119,13 @@ index.html + src/ui/*.js (GitHub Pages front)
 - Versions `vX.YY` mentionnées commits + SESSION.md
 - Build chore commits `chore: bump build YYYYMMDD-HHMMSS-hash` post merge
 
-## Zones à vérifier
-- Exact router structure worker.js:259-415 (audit agent approximatif)
-- `engine.robustness.js` rôle exact
-- `provider.cache.js` / `provider.injuries.js` / `provider.nba.js` utilisation actuelle
+## Zones à vérifier (MBP-A.1 résolu pour routes)
+- ✓ Router worker.js confirmé · 54 routes HTTP · ROUTES_AUDIT.md
+- ✗ `engine.robustness.js` rôle exact · non audité MBP-A.1
+- ✗ `provider.cache.js` / `provider.injuries.js` / `provider.nba.js` utilisation actuelle · non audité
+- ✗ Handler `/mlb/weather` inline vs fonction nommée (worker.js:350)
+- ✗ Lignes exactes handlers MLB approximatives · ré-auditer si besoin
+
+## Audit MBP-A.1
+Voir `ROUTES_AUDIT.md` · routes + auth + provider + cache par ligne.
+Voir `KNOWN_ISSUES.md` section "Écarts MBP-A.1" · incohérences critiques.

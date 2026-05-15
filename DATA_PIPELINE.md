@@ -128,32 +128,75 @@ Alon agent (.claude/agents/alon.md) · proposition ajustements poids
 Edit sports.config.js · commit · merge
 ```
 
-## Caches KV (TTL)
+## Caches KV (TTL · MBP-A.1 vérifié)
 
-| Clé / pattern | TTL | Rôle |
+### Persistants (sans TTL)
+| Clé | Read | Write | Rôle |
+|---|---|---|---|
+| `paper_trading_state` | worker.js:5881,5910,5941 | 5923,5984,6004 | État bankroll + bets papier |
+| `paper_bets_index` | 5927,5988 | 5930,5991,6007 | Index léger bets |
+
+### Logs bot (90j · 7_776_000s)
+| Préfixe | Read | Write | Rôle |
+|---|---|---|---|
+| `bot_log_{matchId}` | 3787,3863,4049,4320 | 3610,3956 | Log NBA + résultat |
+| `mlb_bot_log_{matchId}` | 8829,8883 | 8144,8976 | Log MLB |
+| `tennis_bot_log_{matchId}` | 10280 | 9478,10419 | Log tennis |
+
+### Idempotence cron
+| Clé | TTL | Rôle |
 |---|---|---|
-| `paper_trading_state` | persistant | État bankroll + bets |
-| `paper_bets_index` | persistant | Index léger bets |
-| `bot_log_{matchId}` | 90j | Log NBA analyse + résultat |
-| `mlb_bot_log_{matchId}` | 90j | Log MLB |
-| `tennis_bot_log_{matchId}` | 90j | Log tennis |
-| `bot_last_run` | 30h | Idempotence cron NBA |
-| `mlb_bot_last_run` | 30h | Idempotence MLB |
-| `tennis_bot_last_run` | 30h | Idempotence tennis |
-| `bot_nightly_settle_last_run` | 48h | Idempotence settle 10-11h UTC |
-| `calibration_run_YYYY-Www` | 8j | Idempotence calib hebdo |
-| `odds_snap_{matchId}` | 72h | Snapshots cotes NBA/MLB |
-| `tennis_odds_snap_{matchId}` | 72h | Snapshots cotes tennis |
-| `tank01_teams_stats` | 6h read / 8h write | Rosters + stats Tank01 |
-| `tank01_injuries_impact` | cache | ESPN+Tank01 injuries merged |
-| `tank01_roster_injuries_v1` | 24h | Roster + status |
-| `tennis_csv_stats_v12` | (à vérifier) | Sackmann CSV |
-| `tennis_odds_cache_v2` | (à vérifier) | Tennis cotes |
-| `tennis_api_keymap_v1` | (à vérifier) | Map joueur → player_key api-tennis |
-| `odds_quota_state` | 35j | Quota TheOddsAPI |
-| `ai_player_props_{date}` | 20h | Cache Claude props batch |
-| `nba_rosters_teams_v3` | 24h | Rosters enrichis team-detail |
-| `pinnacle_pp_{date}` | 6h | Pinnacle player points |
+| `bot_last_run` | 30h (108_000s) | Cron NBA |
+| `mlb_bot_last_run` | 30h | Cron MLB |
+| `tennis_bot_last_run` | 30h | Cron tennis |
+| `bot_nightly_settle_last_run` | 48h (172_800s) | Settle 10-11h UTC |
+| `calibration_run_YYYY-Www` | 8j (691_200s) | Calib hebdo lundi 7h UTC |
+
+### Snapshots cotes
+| Préfixe | TTL | Rôle |
+|---|---|---|
+| `odds_snap_{matchId}` | 72h (259_200s) | Snapshots NBA/MLB |
+| `tennis_odds_snap_{matchId}` | 7j / 3h | Snapshots tennis (2 TTL distincts worker.js:6558, 6565) |
+
+### Caches providers
+| Clé / préfixe | TTL | Rôle |
+|---|---|---|
+| `tank01_teams_stats` | 24h (86_400s) | Rosters NBA + stats (audit MBP-A.1 corrigé · doc disait 6h/8h) |
+| `tank01_injuries_impact` | 90min (5_400s) | ESPN+Tank01 injuries merged |
+| `tank01_roster_injuries_v1` | 90min (5_400s) | Status joueurs par équipe (audit MBP-A.1 corrigé · doc disait 24h) |
+| `nba_rosters_teams_v3` | 6h (21_600s) | Rosters enrichis team-detail (audit corrigé · doc disait 24h) |
+| `team_detail_v7_{away}_{home}` | 6h / 8h | Last10 stats team-detail (worker.js:460-549) |
+| `box_score_v1_{gameID}` | 7j (604_800s) | Tank01 5 derniers matchs (worker.js:688-703) |
+| `bdl_recent_{teamId}_{season}` | 6h (21_600s) | BallDontLie recent matches |
+| `basketusa_best_v3_{home}_{away}` | 45min (2_700s) | BasketUSA scrape articles |
+| `pinnacle_pp_{date}` | 6h (21_600s) | Pinnacle player points NBA |
+| `pinnacle_mlb_so_{date}` | variable | Pinnacle MLB strikeouts |
+| `mlb_odds_cache` | 2h (7_200s) | MLB odds TheOddsAPI |
+| `mlb_team_stats_cache` | 6h (21_600s) | MLB team stats |
+| `mlb_bullpen_stats_cache` | 6h (21_600s) | MLB bullpen stats |
+| `mlb_weather_{venue}` | 1h (3_600s) | OpenWeather conditions match |
+| `espn_recent_v2_{tour}_{player}` | 2h / 5min | ESPN recent matches tennis (worker.js:10060-10073) |
+| `tennis_api_keymap_v1` | 7j (604_800s) | Map joueur → api-tennis key |
+| `tennis_csv_stats_v12_{tour}_{surface}_{players}` | (TTL non trouvé) | Sackmann CSV par requête (préfixe dynamique) |
+| `tennis_odds_cache_v2_{resolvedKey}` | (TTL non trouvé) | Tennis cotes par match |
+| `odds_quota_state` | 35j (3_024_000s) | Quota TheOddsAPI |
+
+### Rate limit Claude
+| Clé | TTL | Rôle |
+|---|---|---|
+| `ai_injuries_batch_v2_{date}_{games}` | 8h (28_800s) | Cache batch injuries |
+| `ai_injuries_batch_rate_{YYYYMMDD}` | 25h (90_000s) | Rate limit batch (1/jour) |
+| `ai_injuries_only_{date}_{away}_{home}` | 8h | Cache single injuries |
+| `ai_injuries_rate_{date}` | 25h | Rate limit single |
+| `ai_player_props_{date}` | ~20h | Cache Claude props batch (**lu mais write non trouvée par grep · à vérifier**) |
+| `ai_player_props_rate_{YYYYMMDD}` | 25h | Rate limit props |
+
+### Clés mortes / orphelines (audit MBP-A.1)
+| Clé | Statut | Note |
+|---|---|---|
+| `MLB_PITCHER_KV_KEY = 'mlb_pitchers_cache'` (worker.js:7372) | constante définie · **jamais référencée** | suppression possible |
+| `mlb_team_recent_{teamId}_{season}` (worker.js:7822) | lu · **write non trouvée** | à vérifier |
+| `ai_player_props_{date}` | lu (worker.js:1401, 4362, 4656) · **write non trouvée** | à vérifier dans `src/` ou cron AI |
 
 ## Idempotence cron
 - Chaque bot trackée par `{sport}_bot_last_run` KV
@@ -187,8 +230,12 @@ Edit sports.config.js · commit · merge
 - Nightly settle idempotent même si bord 24h
 - Tout heure UTC dans logs · UI convertit local user
 
-## À vérifier
-- TTL exact `tennis_csv_stats_v12` · `tennis_odds_cache_v2` · `tennis_api_keymap_v1`
-- Exact ligne `_runMLBBotCron` (audit dit 8066)
-- Exact ligne `_runTennisBotCron` (audit dit 9372)
-- Liste exhaustive routes débugage et leur guard
+## À vérifier (MBP-A.1)
+- TTL exact `tennis_csv_stats_v12_*` · `tennis_odds_cache_v2_*` (patterns dynamiques · pas trouvé en grep direct)
+- ✓ `_runMLBBotCron` worker.js:8066 (confirmé)
+- ✓ `_runTennisBotCron` worker.js:9372 (confirmé)
+- ✓ Liste routes debug → `ROUTES_AUDIT.md` (5 NBA + 1 BasketUSA)
+- Écriture `ai_player_props_{date}` · semble manquer (lu mais pas écrit par worker.js)
+- `mlb_team_recent_*` write inconnu
+- `_todayParisKey()` timezone Paris vs UTC · risque drift rate limiters minuit
+- Pas de locking sur `paper_trading_state` · risque corruption RW concurrent

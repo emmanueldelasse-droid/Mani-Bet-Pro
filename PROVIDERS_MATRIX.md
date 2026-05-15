@@ -142,12 +142,13 @@
 
 ---
 
-## Quotas / coûts à surveiller
-- Tank01 · quota plan RapidAPI (1000/j typique)
-- TheOddsAPI · plan mensuel · quota tracké KV `odds_quota_state`
-- Claude · pay-per-token · rate-limited 1/25h dans worker
-- BallDontLie · plan free très restrictif
-- api-tennis · payant · désactivé par défaut
+## Quotas / coûts à surveiller (MBP-A.1 vérifié)
+- Tank01 · 1000 appels/jour plan RapidAPI · tracking **console log uniquement** (pas KV)
+  - Correction MBP-A.1 · doc disait "tracking `odds_quota_state` (à confirmer)" · faux · `odds_quota_state` est TheOddsAPI
+- TheOddsAPI · plan mensuel · quota tracké KV `odds_quota_state` 35j · headers `x-requests-remaining` (worker.js:2742) · threshold 100 appels
+- Claude · pay-per-token · rate-limited 1/25h par feature · 2 features → 2 calls/jour max
+- BallDontLie · plan free très restrictif (limite exacte non documentée) · retry 3× exponential (worker.js:6027-6045)
+- api-tennis · payant · gate `TENNIS_API_KEY` ET `TENNIS_API_FIXTURES_ENABLED='1'` (audit MBP-A.1)
 
 ## Fallbacks documentés
 - Tank01 : rotation `_KEY1/2/3/`
@@ -164,8 +165,15 @@
 - Cache KV protège contre indispo temporaire
 - Logs Cloudflare observability tracent erreurs provider
 
-## À vérifier
+## À vérifier (MBP-A.1)
 - Coût exact plan Tank01 actuel
-- Quota TheOddsAPI restant
-- Clé Claude model à jour (sonnet-4 mai 2025 mentionné · vérifier mise à jour vers 4.6 ou 4.7)
-- BasketUSA · usage actuel actif ou dead code
+- Quota TheOddsAPI restant (peut être consulté en runtime via header)
+- Clé Claude model `claude-sonnet-4-20250514` (worker.js:195) · à upgrader vers sonnet-4-6 ou haiku-4-5
+- ✓ BasketUSA · **code vivant** (appelé dans `handleNBATeamDetail` worker.js:508) · `_findBestBasketUSAArticle` worker.js:2204 · cache `basketusa_best_v3_*` 45min · usage UI à confirmer (article_type `preview_fallback`)
+- ✗ NBA.com injury PDF · constante `NBA_INJURY_BASE` worker.js:117 définie · **jamais fetchée** · code mort
+
+## Confirmé MBP-A.1 (10/13 providers actifs)
+- ESPN · Tank01 · TheOddsAPI · Anthropic Claude · BDL · MLB Stats · Sackmann CSV · Pinnacle · Telegram · OpenWeather → actifs
+- api-tennis · **désactivé par défaut** (gate stricte)
+- BasketUSA · code vivant mais usage UI ambigu (preview_fallback)
+- NBA.com PDF · **code mort** (URL constante jamais utilisée)
