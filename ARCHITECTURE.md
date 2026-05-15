@@ -88,8 +88,15 @@ index.html + src/ui/*.js (GitHub Pages front)
 - Cron Cloudflare = scheduler · pas de serveur persistant
 - Pas de DB SQL · KV uniquement
 
+## 2 moteurs NBA coexistent (audit MBP-A.2 · `NBA_ENGINE_AUDIT.md`)
+- **Backend** · `_botEngineCompute` (worker.js:5211) · appelé uniquement par cron `_runBotCron` (worker.js:3528) · sortie logs KV `bot_log_*` → calibration Alon
+- **Frontend** · `EngineCore.compute('NBA', rawData)` (`data.orchestrator.js:857`) · appelé à chaque chargement utilisateur · sortie store · affichage UI
+- **Pas de route HTTP `/nba/analyze`** · l'UI ne consomme jamais le moteur backend
+- **3 divergences critiques** détectées · confidence algo · `home_away_split` · `back_to_back` (voir `KNOWN_ISSUES.md` MBP-A.2 CRIT-1/2/3)
+
 ## Zones sensibles
-- `_botEngineCompute` (worker.js:5128) · cœur calcul NBA
+- `_botEngineCompute` (worker.js:5211) · cœur calcul NBA backend (cron · logs · calibration)
+- `EngineCore.compute` `EngineNBA.compute` `EngineRobustness.compute` · cœur calcul NBA frontend (runtime user)
 - `_botComputeConfidence` (worker.js:5805) · gate HIGH/MEDIUM/LOW/INCONCLUSIVE
 - `_botComputeBettingRecs` (worker.js:5251) · génération recos · Kelly · edge
 - `_botSaveLog` (worker.js:3606) · persistance logs KV

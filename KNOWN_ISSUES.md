@@ -349,6 +349,62 @@ Détail complet · `SECURITY_AUDIT.md`. Résumé classification ici.
 | MBP-A.4 FAI-4 | Claude error text logged 200 chars |
 | MBP-A.4 FAI-5 | `paper_trading_state` floating point precision (millions bets) |
 
+---
+
+# Écarts détectés · audit MBP-A.2 moteur NBA
+
+Détail complet · `NBA_ENGINE_AUDIT.md`. Résumé classification ici.
+
+## Critique
+
+### MBP-A.2 · CRIT-1 · 2 moteurs NBA distincts coexistent
+- Backend `_botEngineCompute` (worker.js:5211) · appelé par cron `_runBotCron` uniquement
+- Frontend `EngineCore.compute('NBA', rawData)` (`data.orchestrator.js:857`) · appelé à chaque chargement utilisateur
+- Pas de garantie de synchronisation
+- Calibration Alon analyse les logs backend · UI affiche le frontend
+- Décision ChatGPT requise · supprimer un · ou aligner strictement
+
+### MBP-A.2 · CRIT-2 · Algorithme confidence backend ≠ frontend
+- Backend distance-based · `dist ≥ 0.20 + dq ≥ 0.7 + pen < 0.08 → HIGH` (worker.js:5888)
+- Frontend min-based · `min(robust_effective, dq) ≥ 0.75 → HIGH` (engine.core.js:314)
+- Cas extrême · score 0.95 + robust 0.40 + dq 0.85 → backend HIGH / frontend LOW
+- Décision ChatGPT requise · aligner algo
+
+### MBP-A.2 · CRIT-3 · `home_away_split` formule divergente
+- Backend `(h_home - h_away) - (a_away - a_home)` clamp [-0.5, 0.5]
+- Frontend `(home_pct - away_pct) × 2` clamp [-1, 1]
+- Amplification ×2 frontend · contribution score différente
+- Décision ChatGPT requise · valider formule canonique
+
+## Moyen
+
+| ID | Composant | Effort |
+|---|---|---|
+| MBP-A.2 MED-1 | `back_to_back` numérique différent (-0.6/+0.6 backend vs -1/+1 frontend) | 30 min |
+| MBP-A.2 MED-2 | `robustness_score` n'existe pas backend · confidence cron ignore cette dimension | 4-6h ou 1h selon stratégie |
+| MBP-A.2 MED-3 | `confidence_penalty.score` toujours `null` côté backend · code mort | 30 min |
+| MBP-A.2 MED-4 | Pill couleur UI requiert `quality ≥ 0.80` (seuil n'existe pas moteur) | 30 min |
+| MBP-A.2 MED-5 | `playoff_weights` somme = 0.91 ≠ 1.00 · normalisé downstream (fragile) | 15 min doc |
+| MBP-A.2 MED-6 | Kelly EUR UI bankroll hardcodé 500€ · pas sync paper state | 1h |
+
+## Faible
+
+| ID | Composant |
+|---|---|
+| MBP-A.2 FAI-1 | 5 variables backend orphelines (`home_back_to_back`, `away_back_to_back`, `home_last5_avg_pts`, `away_last5_avg_pts`, `confidence_penalty.score`) |
+| MBP-A.2 FAI-2 | `ts_diff` · `avg_pts_diff` extraites poids 0 (morts v5) |
+| MBP-A.2 FAI-3 | Quality statuts plus détaillés frontend (5 niveaux) vs backend (2) · pas dégrader |
+| MBP-A.2 FAI-4 | Strikethrough edge fantôme UI · message petit (user peut louper) |
+| MBP-A.2 FAI-5 | `__ema_lambda` magic field injecté par orchestrator · fragile sans guard |
+| MBP-A.2 FAI-6 | SIGNAL_LABELS UI hardcodé · pas synchro `sports.config.js` |
+
+## Statistiques audit MBP-A.2
+- 2 moteurs NBA distincts identifiés
+- 1 recalcul frontend critique (`EngineCore.compute` à chaque chargement) + 4 recalculs UI cosmétiques (edge · kelly EUR · implied_prob · Win %)
+- 5 variables backend orphelines + 2 morts (`ts_diff`, `avg_pts_diff`)
+- 3 incohérences critiques (CRIT-1, 2, 3) + 6 moyennes
+- 1 algo robustness inexistant côté backend
+
 ## Statistiques audit MBP-A.4
 - 6 critiques · 9 hauts · 6 moyens · 5 faibles
 - 1 MBP-A.1 fausse alerte reclassée (CRIT-1)
