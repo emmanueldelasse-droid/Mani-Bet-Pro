@@ -355,7 +355,18 @@ Effort total · **~2h** · risque régression très faible · pas de changement 
 - Fail-close · si secret absent OU header X-API-Key absent OU incorrect → 401 générique
 - Logs serveur · `Paper auth failed: secret not configured` ou `invalid or missing header` (jamais la clé reçue)
 - Routes protégées · GET `/paper/state` · POST `/paper/bet` · PUT `/paper/bet/:id` · POST `/paper/reset`
-- Front non encore adapté · prévoir MBP-S.2.1 si besoin saisie clé UI (localStorage + header injection fetch)
+- Hotfix CORS · `X-API-Key` ajouté à `Access-Control-Allow-Headers` (worker.js:213)
+
+### MBP-S.2.1 · Front Paper API key (UI)
+- Helper `src/utils/utils.paper-auth.js` · `PaperAuth.getKey/setKey/clearKey/hasKey/onKeyChanged` + `paperFetch(url, options)`
+- Stockage clé · `localStorage` clé `mbp_paper_api_key` · navigateur user uniquement
+- Réglages · champ password + boutons Enregistrer · Effacer · Tester (`ui.settings.js`)
+- `paper.engine.js` · 4 fetch refactorés en `paperFetch` · fallback localStorage si pas de clé
+- `paper.settler.js` · skip silencieux si pas de clé (évite spam erreurs settler polling)
+- `app.js` · skip settler polling au boot si pas de clé · toast informatif "Configurez votre clé Paper API dans Réglages" 1× max
+- `app.js` · settler relancé automatiquement quand l'user saisit une clé (`PaperAuth.onKeyChanged`)
+- Pas de spam · 1 log warning max par session si clé absente ou invalide
+- Aucune clé hardcodée · pas de valeur réelle dans le repo
 
 Effort total · **~4-6h** · décision stratégique requise.
 

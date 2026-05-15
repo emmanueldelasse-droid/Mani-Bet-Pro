@@ -34,6 +34,7 @@ import { Logger }        from './utils/utils.logger.js';
 import { APP_CONFIG }    from './config/sports.config.js';
 import { initThemeToggle } from './ui/ui.theme-toggle.js';
 import { startUpdateChecker } from './utils/utils.update-checker.js';
+import { PaperAuth }     from './utils/utils.paper-auth.js';
 
 // ── SETTLER POLLING ───────────────────────────────────────────────────────
 
@@ -51,6 +52,13 @@ let _pollerIntervalId = null;
  */
 function _startSettlerPolling(store) {
   if (_pollerActive) return; // déjà actif
+
+  // MBP-S.2.1 · skip silencieux si clé absente · évite spam fetch /paper/state.
+  if (!PaperAuth.hasKey()) {
+    Logger.info('SETTLER_POLL_SKIP', { reason: 'no_paper_api_key' });
+    return;
+  }
+
   _pollerActive = true;
 
   const poll = async () => {
@@ -279,6 +287,16 @@ async function init() {
 
   // 9. Redémarrer le polling si de nouveaux paris sont placés après arrêt
   store.subscribe('paperTradingVersion', () => _startSettlerPolling(store));
+
+  // 9.bis · MBP-S.2.1 · si l'user enregistre une clé Paper API, relancer le settler.
+  PaperAuth.onKeyChanged(() => _startSettlerPolling(store));
+
+  // 9.ter · MBP-S.2.1 · toast informatif au boot si clé absente · 1 fois max.
+  if (!PaperAuth.hasKey()) {
+    setTimeout(() => {
+      showToast('Configurez votre clé Paper API dans Réglages', 'info', 6000);
+    }, 1500);
+  }
 
   // 10. Détection nouvelle version (hash index.html, check toutes les 5 min)
   startUpdateChecker(_showUpdateToast);

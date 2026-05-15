@@ -16,9 +16,25 @@
 
 import { API_CONFIG }  from '../config/api.config.js';
 import { Logger }      from '../utils/utils.logger.js';
+import { PaperAuth, paperFetch } from '../utils/utils.paper-auth.js';
 
 const WORKER       = API_CONFIG.WORKER_BASE_URL;
 const LS_KEY       = 'mbp_paper_trading'; // fallback localStorage
+
+// MBP-S.2.1 · évite le spam de logs/toasts au polling settler.
+let _authWarningShown = false;
+function _notifyAuthIssue(reason) {
+  if (_authWarningShown) return;
+  _authWarningShown = true;
+  if (reason === 'no_key') {
+    Logger.warn('PAPER_AUTH_MISSING', { hint: 'Configurez la clé Paper API dans Réglages' });
+  } else if (reason === 'invalid_key') {
+    Logger.warn('PAPER_AUTH_INVALID', { hint: 'Clé Paper API invalide ou expirée' });
+  }
+}
+function _resetAuthWarning() { _authWarningShown = false; }
+// Reset le flag quand l'user change la clé · permet de revoir un éventuel warning.
+PaperAuth.onKeyChanged(_resetAuthWarning);
 
 // ── STRATÉGIES ────────────────────────────────────────────────────────────
 
@@ -35,16 +51,16 @@ export class PaperEngine {
   // ── CHARGEMENT ────────────────────────────────────────────────────────
 
   static async loadAsync() {
-    try {
-      const response = await fetch(`${WORKER}/paper/state`, {
-        headers: { 'Accept': 'application/json' },
-      });
-      if (response.ok) {
-        const state = await response.json();
-        _saveLocal(state);
-        return state;
-      }
-    } catch {}
+    const result = await paperFetch(`${WORKER}/paper/state`, {
+      headers: { 'Accept': 'application/json' },
+    });
+    if (result.ok && result.data) {
+      _saveLocal(result.data);
+      return result.data;
+    }
+    if (result.reason === 'no_key' || result.reason === 'invalid_key') {
+      _notifyAuthIssue(result.reason);
+    }
     return _loadLocal();
   }
 
@@ -79,20 +95,20 @@ export class PaperEngine {
 
   static async placeBet(betData) {
     // Plafond journalier désactivé v2.1
-    try {
-      const response = await fetch(WORKER + '/paper/bet', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(betData),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        _saveLocal(data.state);
-        Logger.info('PAPER_BET_PLACED', { stake: betData.stake, edge: betData.edge });
-        return data.state;
-      }
-    } catch (err) {
-      Logger.warn('PAPER_BET_FALLBACK', { message: err.message });
+    const result = await paperFetch(`${WORKER}/paper/bet`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(betData),
+    });
+    if (result.ok && result.data?.state) {
+      _saveLocal(result.data.state);
+      Logger.info('PAPER_BET_PLACED', { stake: betData.stake, edge: betData.edge });
+      return result.data.state;
+    }
+    if (result.reason === 'no_key' || result.reason === 'invalid_key') {
+      _notifyAuthIssue(result.reason);
+    } else {
+      Logger.warn('PAPER_BET_FALLBACK', { reason: result.reason, status: result.status });
     }
     return _placeBetLocal(betData);
   }
@@ -106,34 +122,34 @@ export class PaperEngine {
    * @returns {Promise<PaperState>}
    */
   static async settleBet(betId, result, closingOdds = null, extraFields = {}) {
-    try {
-      const response = await fetch(`${WORKER}/paper/bet/${betId}`, {
-        method:  'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ result, closing_odds: closingOdds, ...extraFields }),
-      });
-      if (response.ok) {
-        const { state } = await response.json();
-        _saveLocal(state);
-        return state;
-      }
-    } catch {}
+    const res = await paperFetch(`${WORKER}/paper/bet/${betId}`, {
+      method:  'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ result, closing_odds: closingOdds, ...extraFields }),
+    });
+    if (res.ok && res.data?.state) {
+      _saveLocal(res.data.state);
+      return res.data.state;
+    }
+    if (res.reason === 'no_key' || res.reason === 'invalid_key') {
+      _notifyAuthIssue(res.reason);
+    }
     return _settleBetLocal(betId, result, closingOdds, extraFields);
   }
 
   static async reset(initialBankroll = 1000) {
-    try {
-      const response = await fetch(`${WORKER}/paper/reset`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ initial_bankroll: initialBankroll }),
-      });
-      if (response.ok) {
-        const { state } = await response.json();
-        _saveLocal(state);
-        return state;
-      }
-    } catch {}
+    const result = await paperFetch(`${WORKER}/paper/reset`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ initial_bankroll: initialBankroll }),
+    });
+    if (result.ok && result.data?.state) {
+      _saveLocal(result.data.state);
+      return result.data.state;
+    }
+    if (result.reason === 'no_key' || result.reason === 'invalid_key') {
+      _notifyAuthIssue(result.reason);
+    }
     const state = _defaultState(initialBankroll);
     _saveLocal(state);
     return state;
