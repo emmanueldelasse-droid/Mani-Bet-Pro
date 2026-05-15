@@ -403,8 +403,9 @@ export default {
         return await handleBotRun(request, env, origin);
 
       // ── PAPER TRADING ─────────────────────────────────────────────────────
+      // MBP-S.2 · auth X-API-Key requise (guard appliqué dans chaque handler).
       if (path === '/paper/state' && request.method === 'GET')
-        return await handlePaperGet(env, origin);
+        return await handlePaperGet(request, env, origin);
 
       if (path === '/paper/bet' && request.method === 'POST')
         return await handlePaperPlaceBet(request, env, origin);
@@ -886,6 +887,22 @@ function _getTank01Key(env) {
 function _denyIfNoDebugAuth(url, env, origin) {
   const provided = url.searchParams.get('secret');
   if (!env.DEBUG_SECRET || !provided || provided !== env.DEBUG_SECRET) {
+    return errorResponse('Unauthorized', 401, origin);
+  }
+  return null;
+}
+
+// MBP-S.2 · guard Paper strict.
+// Fail-close si PAPER_API_KEY absent ou header X-API-Key incorrect.
+// Réponse client toujours générique (pas de fuite config).
+function requirePaperApiKey(request, env, origin) {
+  if (!env.PAPER_API_KEY) {
+    console.warn('Paper auth failed: secret not configured');
+    return errorResponse('Unauthorized', 401, origin);
+  }
+  const provided = request.headers.get('X-API-Key');
+  if (!provided || provided !== env.PAPER_API_KEY) {
+    console.warn('Paper auth failed: invalid or missing header');
     return errorResponse('Unauthorized', 401, origin);
   }
   return null;
@@ -5881,7 +5898,9 @@ function _botNowParis() { return new Date(); }
 
 // ── PAPER TRADING ─────────────────────────────────────────────────────────────
 
-async function handlePaperGet(env, origin) {
+async function handlePaperGet(request, env, origin) {
+  const authDeny = requirePaperApiKey(request, env, origin);
+  if (authDeny) return authDeny;
   if (!env.PAPER_TRADING) return jsonResponse({ error: 'KV not configured' }, 500, origin);
   try {
     const raw   = await env.PAPER_TRADING.get(PAPER_KV_KEY);
@@ -5891,6 +5910,8 @@ async function handlePaperGet(env, origin) {
 }
 
 async function handlePaperPlaceBet(request, env, origin) {
+  const authDeny = requirePaperApiKey(request, env, origin);
+  if (authDeny) return authDeny;
   if (!env.PAPER_TRADING) return jsonResponse({ error: 'KV not configured' }, 500, origin);
   try {
     const bet   = await request.json();
@@ -5941,6 +5962,8 @@ async function handlePaperPlaceBet(request, env, origin) {
 }
 
 async function handlePaperSettleBet(request, betId, env, origin) {
+  const authDeny = requirePaperApiKey(request, env, origin);
+  if (authDeny) return authDeny;
   if (!env.PAPER_TRADING) return jsonResponse({ error: 'KV not configured' }, 500, origin);
   try {
     const body  = await request.json();
@@ -6002,6 +6025,8 @@ async function handlePaperSettleBet(request, betId, env, origin) {
 }
 
 async function handlePaperReset(request, env, origin) {
+  const authDeny = requirePaperApiKey(request, env, origin);
+  if (authDeny) return authDeny;
   if (!env.PAPER_TRADING) return jsonResponse({ error: 'KV not configured' }, 500, origin);
   try {
     const body     = await request.json().catch(() => ({}));

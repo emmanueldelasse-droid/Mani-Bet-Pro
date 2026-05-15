@@ -32,8 +32,10 @@ néant
 - Front GH Pages · auto-deploy push main
 - KV `PAPER_TRADING` · id `17eb7ddc41a949dd99bd840142832cfd`
 - Cron `0 * * * *` · idempotent par sport
-- Dernière session · MBP-S.1 sécu Phase 1 · 4 fixes CRIT-B/C/E + HAUT-6
-- Audit MBP-A.4 sécurité complet mergée précédemment
+- Dernière session · MBP-S.2 auth Paper · helper `requirePaperApiKey` · 4 routes protégées
+- MBP-S.1 sécu Phase 1 · 4 fixes CRIT-B/C/E + HAUT-6 mergée
+- Audit MBP-A.4 sécurité complet mergée
+- Secret CF à configurer · `PAPER_API_KEY` via `wrangler secret put PAPER_API_KEY` ou CF Dashboard
 - MBP-A.1 router/routes/flux/providers/KV mergée
 - worker.js · **10533 lignes** (corrigé MBP-A.1)
 - 54 routes HTTP · 7 cron handlers · 10/13 providers actifs · 50+ clés KV
@@ -58,7 +60,8 @@ néant
 - [x] ~~P1 MBP-A.4 CRIT-C~~ · ✓ MBP-S.1 · CORS strict equality (`includes`) au lieu de `startsWith`
 - [x] ~~P1 MBP-A.4 CRIT-E~~ · ✓ MBP-S.1 · guard `_denyIfNoDebugAuth` ajouté à `/tennis/_espn_probe`
 - [x] ~~P1 MBP-A.4 HAUT-6~~ · ✓ MBP-S.1 · CSV error JSON cohérent (worker.js:4814)
-- [ ] P1 MBP-A.4 CRIT-A · auth HTTP routes `/paper/*` · stratégie à valider ChatGPT (6 options proposées)
+- [x] ~~P1 MBP-A.4 CRIT-A~~ · ✓ MBP-S.2 · auth `X-API-Key` Paper (helper `requirePaperApiKey`) · secret `PAPER_API_KEY` à configurer côté CF
+- [ ] P2 MBP-S.2.1 · adapter front pour saisir/envoyer `X-API-Key` (localStorage + fetch header injection)
 - [ ] P1 MBP-A.4 CRIT-D · auth `X-API-Key` routes `/bot/run` + `/{sport}/bot/run` · 30 min
 - [ ] P2 MBP-A.4 CRIT-F · rate limit Claude per-IP au lieu de global
 - [ ] P2 MBP-A.4 HAUT-1 à 9 · validations + ai.guard intégration + headers sécu

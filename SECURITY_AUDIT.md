@@ -289,7 +289,7 @@ Impact réel limité (pas de cookie ni credentials), mais permet cross-origin fe
 
 | ID | Titre | Composant | Ligne | Impact | Effort fix |
 |---|---|---|---|---|---|
-| **MBP-A.4 CRIT-A** | Paper routes sans auth HTTP | worker.js:401-410 | wipe / spam / lecture bankroll public | dépend stratégie (1h-1j) |
+| ~~MBP-A.4 CRIT-A~~ | ✓ **Résolu MBP-S.2** · auth `X-API-Key` (Option A · header partagé · fail-close si secret absent) | — | — |
 | **MBP-A.4 CRIT-B** | `errorResponse` fuite `err.message` × 14 | worker.js:438 + 13 handlers | reverse-engineering API · présence secrets inférable | 1h (1 fonction · loop replace) |
 | **MBP-A.4 CRIT-C** | CORS prefix matching | worker.js:206 `startsWith` | forge subdomain attacker.com | 5 min (`===` strict) |
 | **MBP-A.4 CRIT-D** | Routes bot/run sans auth | worker.js:352, 374, 397 | quota Tank01/Claude DoS · 25h blocage features AI | 30 min (auth header) |
@@ -345,9 +345,17 @@ Effort total · **~2h** · risque régression très faible · pas de changement 
 
 ### Phase 2 · auth ressources (à valider ChatGPT)
 5. CRIT-D · auth header `X-API-Key` partagé sur routes `/bot/run` `/{sport}/bot/run` `/bot/settle-logs`
-6. CRIT-A · stratégie auth Paper (voir section ci-dessous)
+6. ~~CRIT-A · stratégie auth Paper~~ · ✓ **résolu MBP-S.2** (Option A · header `X-API-Key`)
 7. CRIT-F · rate limit per-IP via `CF-Connecting-IP` header
 8. HAUT-8 · `DEBUG_SECRET` migré query → header `Authorization: Bearer`
+
+### MBP-S.2 · Auth Paper appliquée
+- Helper `requirePaperApiKey(request, env, origin)` worker.js:898
+- Secret env requis · `PAPER_API_KEY` (à ajouter via `wrangler secret put PAPER_API_KEY` ou CF dashboard)
+- Fail-close · si secret absent OU header X-API-Key absent OU incorrect → 401 générique
+- Logs serveur · `Paper auth failed: secret not configured` ou `invalid or missing header` (jamais la clé reçue)
+- Routes protégées · GET `/paper/state` · POST `/paper/bet` · PUT `/paper/bet/:id` · POST `/paper/reset`
+- Front non encore adapté · prévoir MBP-S.2.1 si besoin saisie clé UI (localStorage + header injection fetch)
 
 Effort total · **~4-6h** · décision stratégique requise.
 

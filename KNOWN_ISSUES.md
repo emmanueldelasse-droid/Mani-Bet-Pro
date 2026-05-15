@@ -276,12 +276,12 @@ Détail complet · `SECURITY_AUDIT.md`. Résumé classification ici.
 
 ## Critique (à corriger urgent)
 
-### MBP-A.4 · CRIT-A · Paper routes sans auth HTTP (confirme MBP-A.1 CRIT-2 · étendu)
-- `/paper/state` `/paper/bet` `/paper/bet/:id` `/paper/reset` (worker.js:401-410)
-- Aucune auth · pas de CSRF token · pas de rate limit
-- N'importe quel client peut · lire bankroll · placer bets · settle · **wipe complet illimité**
-- Stratégie auth · 6 options proposées dans `SECURITY_AUDIT.md` section 10
-- Recommandation Claude · Option A (header `X-API-Key`) court terme · Option E (CF Access) long terme
+### MBP-A.4 · CRIT-A · Paper routes sans auth HTTP (résolu MBP-S.2)
+- ✓ Résolu MBP-S.2 · helper `requirePaperApiKey` (worker.js:898) appliqué aux 4 handlers
+- Secret `PAPER_API_KEY` requis · fail-close si absent · 401 générique sinon
+- Routes protégées · GET `/paper/state` · POST `/paper/bet` · PUT `/paper/bet/:id` · POST `/paper/reset`
+- Logs serveur conservés (sans valeur clé)
+- Front non encore adapté · MBP-S.2.1 à prévoir pour saisie/envoi clé depuis l'app
 
 ### MBP-A.4 · CRIT-B · `errorResponse` fuite `err.message` (résolu MBP-S.1)
 - ✓ Résolu MBP-S.1 · constantes `SAFE_ERROR_MSG_500` · `SAFE_ERROR_MSG_UNAVAILABLE` ajoutées (worker.js:232)
