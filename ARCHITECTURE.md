@@ -97,12 +97,17 @@ index.html + src/ui/*.js (GitHub Pages front)
 - `_runNightlySettle` (worker.js:4237) · idempotence 48h
 - `handlePaperPlaceBet` · `handlePaperSettleBet` (worker.js:5887, 5937) · paper trading
 
-## Sécurité
-- `_denyIfNoDebugAuth(url, env, origin)` (worker.js:881) · guard routes debug
-- Secret `DEBUG_SECRET` requis sur routes `*-debug` · `/debug/*`
-- CORS `corsHeaders(origin)` (worker.js:206)
-- `escapeHtml` côté UI avant `innerHTML`
-- Regex validation params user avant clé KV
+## Sécurité (audit MBP-A.4 détail · `SECURITY_AUDIT.md`)
+- `_denyIfNoDebugAuth(url, env, origin)` (worker.js:881) · **fail-CLOSE** confirmé (401 si secret absent) · 5 routes guardées
+- ✗ `/tennis/_espn_probe` (worker.js:372) · **sans guard** · à corriger (MBP-A.4 CRIT-E)
+- Secret `DEBUG_SECRET` en URL query string · referer leak possible (MBP-A.4 HAUT-8)
+- CORS `corsHeaders(origin)` (worker.js:206) · whitelist 3 origins · pas wildcard
+- ✗ CORS `startsWith` vulnerability · subdomain forge possible (MBP-A.4 CRIT-C)
+- `escapeHtml` côté UI avant `innerHTML` · helpers ui.bot.js
+- Regex validation params user avant clé KV · OK pour la plupart
+- ✗ Auth utilisateur · **aucune sur Paper / Bot run** (MBP-A.4 CRIT-A · CRIT-D)
+- ✗ `err.message` fuit dans 14 occurrences (MBP-A.4 CRIT-B)
+- ✗ `ai.guard.js` défini mais **jamais appelé** dans worker.js (MBP-A.4 HAUT-1)
 
 ## Déploiement
 - Push `main` → Cloudflare auto-deploy worker

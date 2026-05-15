@@ -230,6 +230,15 @@ Edit sports.config.js · commit · merge
 - Nightly settle idempotent même si bord 24h
 - Tout heure UTC dans logs · UI convertit local user
 
+## Risques KV/cache (audit MBP-A.4)
+- `paper_trading_state` exposé via `/paper/state` sans auth · lecture bankroll publique
+- `bot_log_*` exposés via `/bot/logs` `/bot/logs/export.csv` · reverse-engineering moteur possible
+- `ai_injuries_*` 8h · `ai_player_props_*` 20h cache stale · pas de warning dans réponse
+- Pas d'isolation user · single-tenant
+- Pas de lock RW sur `paper_trading_state` · corruption concurrent possible
+- Clés `bot_log_{matchId}` prédictibles (matchId ESPN public) · énumération possible
+- Détail · `SECURITY_AUDIT.md` section 7
+
 ## À vérifier (MBP-A.1)
 - TTL exact `tennis_csv_stats_v12_*` · `tennis_odds_cache_v2_*` (patterns dynamiques · pas trouvé en grep direct)
 - ✓ `_runMLBBotCron` worker.js:8066 (confirmé)

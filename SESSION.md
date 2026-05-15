@@ -32,9 +32,12 @@ néant
 - Front GH Pages · auto-deploy push main
 - KV `PAPER_TRADING` · id `17eb7ddc41a949dd99bd840142832cfd`
 - Cron `0 * * * *` · idempotent par sport
-- Dernière session · audit MBP-A.1 router/routes/flux/providers/KV (PR docs only)
-- worker.js · **10533 lignes** (corrigé MBP-A.1 · pas ~8500L ni ~9600L)
+- Dernière session · audit MBP-A.4 sécurité complet (PR docs only)
+- MBP-A.1 router/routes/flux/providers/KV mergée
+- worker.js · **10533 lignes** (corrigé MBP-A.1)
 - 54 routes HTTP · 7 cron handlers · 10/13 providers actifs · 50+ clés KV
+- 6 critiques sécu identifiées · 9 hauts · 6 moyens · 5 faibles (`SECURITY_AUDIT.md`)
+- MBP-A.1 CRIT-1 reclassée fausse alerte · `_denyIfNoDebugAuth` est fail-CLOSE
 
 ## Routes majeures
 - `/nba/*` `/mlb/*` `/tennis/*` `/bot/*` `/paper/*` `/health`
@@ -49,9 +52,14 @@ néant
 - Style chat user · vocabulaire simple · exemples concrets · pas de jargon brut
 
 ## TODO prioritaires
-- [ ] P1 MBP-A.1 CRIT-1 · forcer 401 si `DEBUG_SECRET` absent · 5 routes NBA debug + `/debug/basketusa` actuellement publiques
-- [ ] P1 MBP-A.1 CRIT-2 · auth HTTP routes `/paper/*` · actuellement aucune protection
-- [ ] P1 MBP-A.1 CRIT-3 · sanitize `errorResponse` `Internal error: ${err.message}` (worker.js:438)
+- [x] ~~P1 MBP-A.1 CRIT-1~~ · **reclassée fausse alerte MBP-A.4** · `_denyIfNoDebugAuth` est fail-CLOSE OK
+- [ ] P1 MBP-A.4 CRIT-A · auth HTTP routes `/paper/*` · stratégie à valider ChatGPT (6 options proposées)
+- [ ] P1 MBP-A.4 CRIT-B · sanitize 14 occurrences `err.message` · fonction `safeError` centrale
+- [ ] P1 MBP-A.4 CRIT-C · CORS `startsWith` → `===` strict (worker.js:206) · 5 min
+- [ ] P1 MBP-A.4 CRIT-D · auth `X-API-Key` routes `/bot/run` + `/{sport}/bot/run` · 30 min
+- [ ] P1 MBP-A.4 CRIT-E · ajouter `_denyIfNoDebugAuth` à `/tennis/_espn_probe` · 5 min
+- [ ] P2 MBP-A.4 CRIT-F · rate limit Claude per-IP au lieu de global
+- [ ] P2 MBP-A.4 HAUT-1 à 9 · validations + ai.guard intégration + headers sécu
 - [ ] P1 surveiller hit rate MLB v6.94 post 50 paris · si <52% désactiver bot (Option C)
 - [ ] P1 surveiller hit rate tennis v6.93 post 50 paris · revert isolé si baisse
 - [ ] P1 gate `confidence=INCONCLUSIVE` si `data_quality<0.55` (worker.js:5185)
@@ -108,3 +116,4 @@ Détail TODO + dette technique · `KNOWN_ISSUES.md`
 - `PROJECT_RULES.md` · workflow ChatGPT/Claude/user
 - `BOT_OBJECTIVE.md` · mission projet
 - `ROUTES_AUDIT.md` · routes exhaustives + auth + provider + cache (MBP-A.1)
+- `SECURITY_AUDIT.md` · 6 CRIT · 9 HAUT · 6 MOY · 5 FAI · 6 stratégies auth Paper (MBP-A.4)
