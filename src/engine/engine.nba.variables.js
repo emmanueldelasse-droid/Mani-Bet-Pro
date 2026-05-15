@@ -260,13 +260,29 @@ function safeAdvancedDiff(advancedStats, homeStats, awayStats, field, invertSign
 }
 
 function computeHomeSplit(homeStats, awayStats) {
-  const h = homeStats?.home_win_pct;
-  const a = awayStats?.away_win_pct;
-  if (h == null || a == null) return { value: null, source: 'espn_scoreboard', quality: 'MISSING' };
+  // MBP-FIX-A.2.2 · aligné strict sur backend _botExtractVariables worker.js:5037-5043.
+  // Décision · backend = source canonique métier (calibration · logs).
+  // Formule · somme des avantages domicile/extérieur des 2 équipes ·
+  //   (hs.home_win_pct - hs.away_win_pct) - (as.away_win_pct - as.home_win_pct)
+  // Clamp [-0.50, 0.50] strictement (frontend précédent · ×2 puis clamp [-1, 1]).
+  const hsHome = homeStats?.home_win_pct;
+  const hsAway = homeStats?.away_win_pct;
+  const asHome = awayStats?.home_win_pct;
+  const asAway = awayStats?.away_win_pct;
+  if (hsHome == null || hsAway == null || asHome == null || asAway == null) {
+    return { value: null, source: 'espn_scoreboard', quality: 'MISSING' };
+  }
+  const rawValue = (hsHome - hsAway) - (asAway - asHome);
+  const clamped  = Math.max(-0.50, Math.min(0.50, rawValue));
   return {
-    value:   Math.max(-1, Math.min(1, (h - a) * 2)),
+    value:   clamped,
     source:  'espn_scoreboard', quality: 'VERIFIED',
-    raw:     { home_home_win_pct: h, away_away_win_pct: a },
+    raw:     {
+      home_home_win_pct: hsHome,
+      home_away_win_pct: hsAway,
+      away_home_win_pct: asHome,
+      away_away_win_pct: asAway,
+    },
   };
 }
 
