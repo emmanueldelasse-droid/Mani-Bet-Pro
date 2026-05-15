@@ -32,8 +32,9 @@ néant
 - Front GH Pages · auto-deploy push main
 - KV `PAPER_TRADING` · id `17eb7ddc41a949dd99bd840142832cfd`
 - Cron `0 * * * *` · idempotent par sport
-- Dernière session · MBP-S.2.1 front Paper API key · UI saisie + injection auto X-API-Key
-- MBP-S.2 + hotfix CORS Allow-Headers X-API-Key mergées · backend auth Paper OK
+- Dernière session · MBP-S.3 auth Bot Run · 8 routes POST protégées · header `X-Bot-Api-Key`
+- MBP-S.2.1 front Paper API key mergée
+- MBP-S.2 + hotfix CORS Allow-Headers mergées · backend auth Paper OK
 - MBP-S.2 auth Paper · helper `requirePaperApiKey` · 4 routes protégées
 - MBP-S.1 sécu Phase 1 · 4 fixes CRIT-B/C/E + HAUT-6 mergée
 - Audit MBP-A.4 sécurité complet mergée
@@ -64,7 +65,7 @@ néant
 - [x] ~~P1 MBP-A.4 HAUT-6~~ · ✓ MBP-S.1 · CSV error JSON cohérent (worker.js:4814)
 - [x] ~~P1 MBP-A.4 CRIT-A~~ · ✓ MBP-S.2 · auth `X-API-Key` Paper (helper `requirePaperApiKey`) · secret `PAPER_API_KEY` à configurer côté CF
 - [x] ~~P2 MBP-S.2.1~~ · ✓ adaptation front · `utils.paper-auth.js` + section Réglages + paper.engine.js refactor
-- [ ] P1 MBP-A.4 CRIT-D · auth `X-API-Key` routes `/bot/run` + `/{sport}/bot/run` · 30 min
+- [x] ~~P1 MBP-A.4 CRIT-D~~ · ✓ MBP-S.3 · auth `X-Bot-Api-Key` (secret `BOT_RUN_API_KEY`) · 8 routes POST protégées · cron exempté
 - [ ] P2 MBP-A.4 CRIT-F · rate limit Claude per-IP au lieu de global
 - [ ] P2 MBP-A.4 HAUT-1 à 9 · validations + ai.guard intégration + headers sécu
 - [ ] P1 surveiller hit rate MLB v6.94 post 50 paris · si <52% désactiver bot (Option C)

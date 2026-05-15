@@ -294,13 +294,13 @@ Détail complet · `SECURITY_AUDIT.md`. Résumé classification ici.
 - ✓ Résolu MBP-S.1 · `startsWith` → `ALLOWED_ORIGINS.includes(origin)` (worker.js:207)
 - Forge subdomain impossible · whitelist exacte 3 origins
 
-### MBP-A.4 · CRIT-D · Routes bot/run sans auth → quota DoS (nouveau)
-- `/bot/run` (worker.js:397) · `/nba/bot/run` · `/mlb/bot/run` (352) · `/tennis/bot/run` (374)
-- `/bot/settle-logs` (391) · `/{sport}/bot/settle-logs`
-- Chaque appel · ~20-30 Tank01 calls + 1-2 Claude tokens
-- Spam = épuisement quota Tank01 1000/j · épuisement Claude rate limit 25h
-- Fix · header `X-API-Key` partagé
-- Effort · 30 min
+### MBP-A.4 · CRIT-D · Routes bot/run sans auth → quota DoS (résolu MBP-S.3)
+- ✓ Résolu MBP-S.3 · helper `requireBotRunApiKey` (worker.js:914)
+- Secret `BOT_RUN_API_KEY` requis · header `X-Bot-Api-Key` · fail-close
+- 8 routes POST protégées · `/bot/run` · `/mlb/bot/run` · `/tennis/bot/run` · `/bot/settle-logs` · `/{sport}/bot/settle-logs` · `/nba/ai-injuries-batch` · `/nba/ai-player-props-batch`
+- Cron scheduled exempté (pas de request involved)
+- CORS Allow-Headers étendu · `X-Bot-Api-Key`
+- Note · `/nba/bot/run` n'existe pas comme route distincte · `/bot/run` global = NBA par historique
 
 ### MBP-A.4 · CRIT-E · `/tennis/_espn_probe` sans guard (résolu MBP-S.1)
 - ✓ Résolu MBP-S.1 · `_denyIfNoDebugAuth` ajouté · signature handler `(url, env, origin)`

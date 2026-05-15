@@ -292,7 +292,7 @@ Impact réel limité (pas de cookie ni credentials), mais permet cross-origin fe
 | ~~MBP-A.4 CRIT-A~~ | ✓ **Résolu MBP-S.2** · auth `X-API-Key` (Option A · header partagé · fail-close si secret absent) | — | — |
 | **MBP-A.4 CRIT-B** | `errorResponse` fuite `err.message` × 14 | worker.js:438 + 13 handlers | reverse-engineering API · présence secrets inférable | 1h (1 fonction · loop replace) |
 | **MBP-A.4 CRIT-C** | CORS prefix matching | worker.js:206 `startsWith` | forge subdomain attacker.com | 5 min (`===` strict) |
-| **MBP-A.4 CRIT-D** | Routes bot/run sans auth | worker.js:352, 374, 397 | quota Tank01/Claude DoS · 25h blocage features AI | 30 min (auth header) |
+| ~~MBP-A.4 CRIT-D~~ | ✓ **Résolu MBP-S.3** · auth `X-Bot-Api-Key` (secret `BOT_RUN_API_KEY`) · 8 routes POST protégées | — | — |
 | **MBP-A.4 CRIT-E** | `/tennis/_espn_probe` sans guard | worker.js:372, 9877 | matches ESPN bruts publics · pas rate limit | 5 min (`_denyIfNoDebugAuth`) |
 | **MBP-A.4 CRIT-F** | Rate limit Claude global cross-user | worker.js:1319, 1539, 1699 | user A spam = blocage user B 25h | 1-2h (per-IP) |
 
@@ -344,10 +344,28 @@ Impact réel limité (pas de cookie ni credentials), mais permet cross-origin fe
 Effort total · **~2h** · risque régression très faible · pas de changement design.
 
 ### Phase 2 · auth ressources (à valider ChatGPT)
-5. CRIT-D · auth header `X-API-Key` partagé sur routes `/bot/run` `/{sport}/bot/run` `/bot/settle-logs`
+5. ~~CRIT-D · auth header partagé bot run~~ · ✓ **résolu MBP-S.3** (header `X-Bot-Api-Key`)
 6. ~~CRIT-A · stratégie auth Paper~~ · ✓ **résolu MBP-S.2** (Option A · header `X-API-Key`)
 7. CRIT-F · rate limit per-IP via `CF-Connecting-IP` header
 8. HAUT-8 · `DEBUG_SECRET` migré query → header `Authorization: Bearer`
+
+### MBP-S.3 · Auth Bot Run appliquée
+- Helper `requireBotRunApiKey(request, env, origin)` worker.js:914
+- Secret env requis · `BOT_RUN_API_KEY` (à ajouter via `wrangler secret put BOT_RUN_API_KEY` ou CF Dashboard)
+- Header requis · `X-Bot-Api-Key`
+- Fail-close · si secret absent OU header absent OU incorrect → 401 générique
+- Logs serveur · `Bot run auth failed: secret not configured` ou `invalid or missing header` (jamais la clé reçue)
+- CORS · `X-Bot-Api-Key` ajouté à `Access-Control-Allow-Headers` (worker.js:213)
+- Cron scheduled · exempté (handlers `_run*Cron(env)` ne reçoivent pas de request · pas de guard)
+- 8 routes POST protégées :
+  - `/nba/ai-injuries-batch` (handler worker.js:1290)
+  - `/nba/ai-player-props-batch` (worker.js:1499)
+  - `/bot/settle-logs` (worker.js:4043)
+  - `/bot/run` (worker.js:4265)
+  - `/mlb/bot/run` (worker.js:8864)
+  - `/mlb/bot/settle-logs` (worker.js:9087)
+  - `/tennis/bot/run` (worker.js:10497)
+  - `/tennis/bot/settle-logs` (worker.js:10562)
 
 ### MBP-S.2 · Auth Paper appliquée
 - Helper `requirePaperApiKey(request, env, origin)` worker.js:898
