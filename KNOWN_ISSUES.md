@@ -283,18 +283,15 @@ Détail complet · `SECURITY_AUDIT.md`. Résumé classification ici.
 - Stratégie auth · 6 options proposées dans `SECURITY_AUDIT.md` section 10
 - Recommandation Claude · Option A (header `X-API-Key`) court terme · Option E (CF Access) long terme
 
-### MBP-A.4 · CRIT-B · `errorResponse` fuite `err.message` × 14 occurrences (confirme MBP-A.1 CRIT-3 · étendu)
-- worker.js:438 (catch global) + 13 handlers (worker.js:1170, 1380, 1419, 1454, 1651, 1800, 2667, 3849, 4026, 4814, 5934, 5995, 6010)
-- Fuite · stack interne · noms fonctions · présence secrets inférable · format providers
-- Fix · fonction `safeError(err, status, origin)` centrale · loop replace
-- Effort · ~1h · risque régression faible
+### MBP-A.4 · CRIT-B · `errorResponse` fuite `err.message` (résolu MBP-S.1)
+- ✓ Résolu MBP-S.1 · constantes `SAFE_ERROR_MSG_500` · `SAFE_ERROR_MSG_UNAVAILABLE` ajoutées (worker.js:232)
+- `replace_all` appliqué · 23 `error: err.message` + 17 `note: err.message` sanitizés
+- Catch global worker.js:438 · `Internal error: ${err.message}` → `SAFE_ERROR_MSG_500`
+- Stack/err.message conservés dans `console.error` (logs Cloudflare owner only)
 
-### MBP-A.4 · CRIT-C · CORS prefix matching vulnerability (nouveau)
-- worker.js:206 · `ALLOWED_ORIGINS.some(o => origin?.startsWith(o))`
-- Attaquant forge `emmanueldelasse-droid.github.io.attacker.com` → CORS match
-- Impact réel limité (pas de cookie) mais permet cross-origin fetch routes publiques
-- Fix · `===` strict equality
-- Effort · 5 min
+### MBP-A.4 · CRIT-C · CORS prefix matching vulnerability (résolu MBP-S.1)
+- ✓ Résolu MBP-S.1 · `startsWith` → `ALLOWED_ORIGINS.includes(origin)` (worker.js:207)
+- Forge subdomain impossible · whitelist exacte 3 origins
 
 ### MBP-A.4 · CRIT-D · Routes bot/run sans auth → quota DoS (nouveau)
 - `/bot/run` (worker.js:397) · `/nba/bot/run` · `/mlb/bot/run` (352) · `/tennis/bot/run` (374)
@@ -304,12 +301,10 @@ Détail complet · `SECURITY_AUDIT.md`. Résumé classification ici.
 - Fix · header `X-API-Key` partagé
 - Effort · 30 min
 
-### MBP-A.4 · CRIT-E · `/tennis/_espn_probe` sans guard (nouveau)
-- worker.js:372 → handler `handleTennisEspnProbe` worker.js:9877
-- Aucun `_denyIfNoDebugAuth` appliqué
-- Matches ESPN bruts publics · params `player`/`tour`/`days` non validés
-- Fix · ajouter guard · valider params
-- Effort · 5 min
+### MBP-A.4 · CRIT-E · `/tennis/_espn_probe` sans guard (résolu MBP-S.1)
+- ✓ Résolu MBP-S.1 · `_denyIfNoDebugAuth` ajouté · signature handler `(url, env, origin)`
+- Route worker.js:378 + handler worker.js:9883
+- Validation params `player`/`tour`/`days` reste à faire (HAUT-3/4 phase ultérieure)
 
 ### MBP-A.4 · CRIT-F · Rate limit Claude global cross-user (nouveau)
 - Clés rate KV partagées (worker.js:1319, 1539, 1699)
@@ -328,7 +323,7 @@ Détail complet · `SECURITY_AUDIT.md`. Résumé classification ici.
 | MBP-A.4 HAUT-3 | `request.json()` sans try/catch (worker.js:5890) | 10 min |
 | MBP-A.4 HAUT-4 | POST body size unbounded (tous handlers POST/PUT) | 30 min |
 | MBP-A.4 HAUT-5 | Paper `result` enum non strict (worker.js:5940) | 10 min |
-| MBP-A.4 HAUT-6 | CSV error response non-JSON (worker.js:4814) | 5 min |
+| ~~MBP-A.4 HAUT-6~~ | ✓ Résolu MBP-S.1 · CSV error response → JSON cohérent | — |
 | MBP-A.4 HAUT-7 | Race condition KV rate limit (worker.js:1319-1328) | 1h |
 | MBP-A.4 HAUT-8 | `DEBUG_SECRET` en URL query (referer leak · browser history) | 30 min |
 | MBP-A.4 HAUT-9 | Hallucinations joueurs Claude non bloquée (pas whitelist) | 3h |

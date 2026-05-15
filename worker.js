@@ -204,7 +204,8 @@ const ALLOWED_ORIGINS = [
 // ── CORS ──────────────────────────────────────────────────────────────────────
 
 function corsHeaders(origin) {
-  const allowed = ALLOWED_ORIGINS.some(o => origin?.startsWith(o))
+  // MBP-S.1 CRIT-C · strict equality au lieu de startsWith (évite forge subdomain).
+  const allowed = origin && ALLOWED_ORIGINS.includes(origin)
     ? origin : ALLOWED_ORIGINS[0];
   return {
     'Access-Control-Allow-Origin':  allowed,
@@ -228,6 +229,9 @@ function jsonResponse(data, status = 200, origin = '', extraHeaders = {}) {
 function errorResponse(message, status = 500, origin = '') {
   return jsonResponse({ error: message }, status, origin);
 }
+
+const SAFE_ERROR_MSG_500 = 'Erreur interne';
+const SAFE_ERROR_MSG_UNAVAILABLE = 'Service temporairement indisponible';
 
 // ── ROUTER PRINCIPAL ──────────────────────────────────────────────────────────
 
@@ -369,8 +373,9 @@ export default {
       if (path === '/tennis/stats' && request.method === 'GET')
         return await handleTennisStats(url, env, origin);
       // v6.95 : diagnostic ESPN · GET /tennis/_espn_probe?player=Alexander+Zverev&tour=atp&days=21
+      // MBP-S.1 CRIT-E · guard DEBUG_SECRET (route debug · pas usage UI).
       if (path === '/tennis/_espn_probe' && request.method === 'GET')
-        return await handleTennisEspnProbe(url, origin);
+        return await handleTennisEspnProbe(url, env, origin);
       if (path === '/tennis/bot/run' && request.method === 'POST')
         return await handleTennisBotRun(request, env, origin);
       if (path === '/tennis/bot/logs' && request.method === 'GET')
@@ -434,8 +439,8 @@ export default {
       return errorResponse('Route not found', 404, origin);
 
     } catch (err) {
-      console.error('Worker error:', err);
-      return errorResponse(`Internal error: ${err.message}`, 500, origin);
+      console.error('Worker error:', err, err?.stack);
+      return errorResponse(SAFE_ERROR_MSG_500, 500, origin);
     }
   },
 };
@@ -1167,7 +1172,7 @@ async function handleNBARosterInjuries(env, origin) {
 
   } catch (err) {
     console.error('RosterInjuries fetch error:', err.message);
-    return jsonResponse({ available: false, note: err.message, data: {} }, 200, origin);
+    return jsonResponse({ available: false, note: SAFE_ERROR_MSG_UNAVAILABLE, data: {} }, 200, origin);
   }
 }
 
@@ -1377,7 +1382,7 @@ async function handleNBAAIInjuriesBatch(request, env, origin) {
     }, 200, origin);
   } catch (err) {
     console.error('AIInjuriesBatch error:', err.message);
-    return jsonResponse({ available: false, note: err.message }, 200, origin);
+    return jsonResponse({ available: false, note: SAFE_ERROR_MSG_UNAVAILABLE }, 200, origin);
   }
 }
 
@@ -1416,7 +1421,7 @@ async function handleNBAAIPlayerPropsGet(url, env, origin) {
         by_game:    cached.by_game,
       }, 200, origin);
     } catch (err) {
-      return jsonResponse({ available: false, note: err.message }, 500, origin);
+      return jsonResponse({ available: false, note: SAFE_ERROR_MSG_UNAVAILABLE }, 500, origin);
     }
   }
 
@@ -1451,7 +1456,7 @@ async function handleNBAAIPlayerPropsGet(url, env, origin) {
     });
     return await handleNBAAIPlayerPropsBatch(fakeReq, env, origin);
   } catch (err) {
-    return jsonResponse({ available: false, note: err.message }, 500, origin);
+    return jsonResponse({ available: false, note: SAFE_ERROR_MSG_UNAVAILABLE }, 500, origin);
   }
 }
 
@@ -1648,7 +1653,7 @@ Confidence = high si 2+ sources concordent, medium si 1 source fiable, low sinon
     }, 200, origin);
   } catch (err) {
     console.error('AIProps error:', err.message);
-    return jsonResponse({ available: false, note: err.message }, 200, origin);
+    return jsonResponse({ available: false, note: SAFE_ERROR_MSG_UNAVAILABLE }, 200, origin);
   }
 }
 
@@ -1797,7 +1802,7 @@ Retourne exactement cet objet JSON :
     return jsonResponse({ available: true, source: 'claude_web_search', fetched_at: new Date().toISOString(), home, away, data: payload }, 200, origin);
   } catch (err) {
     console.error('AIInjuries error:', err.message);
-    return jsonResponse({ available: false, note: err.message, home, away }, 200, origin);
+    return jsonResponse({ available: false, note: SAFE_ERROR_MSG_UNAVAILABLE, home, away }, 200, origin);
   }
 }
 
@@ -1963,7 +1968,7 @@ async function handleNBAPlayerTest(url, env, origin) {
       count:        (data.body ?? []).length,
     }, 200, origin);
   } catch (err) {
-    return jsonResponse({ available: false, note: err.message, player: playerName }, 200, origin);
+    return jsonResponse({ available: false, note: SAFE_ERROR_MSG_UNAVAILABLE, player: playerName }, 200, origin);
   }
 }
 
@@ -2392,7 +2397,7 @@ async function handleDebugBasketUSA(url, env, origin) {
         status: 'ERROR',
         html_length: 0,
         candidates_count: 0,
-        error: err.message,
+        error: SAFE_ERROR_MSG_500,
       });
     }
   }
@@ -2664,7 +2669,7 @@ async function handleNBATeamsStats(env, origin) {
 
   } catch (err) {
     console.error('Tank01 fetch error:', err.message);
-    return jsonResponse({ available: false, note: err.message, teams: {} }, 200, origin);
+    return jsonResponse({ available: false, note: SAFE_ERROR_MSG_UNAVAILABLE, teams: {} }, 200, origin);
   }
 }
 
@@ -2943,7 +2948,7 @@ async function _fetchPlayerPointsForEvent(eventId, env, ctx = null) {
     }
     return result;
   } catch (err) {
-    return { available: false, note: err.message, lines: {} };
+    return { available: false, note: SAFE_ERROR_MSG_UNAVAILABLE, lines: {} };
   }
 }
 
@@ -3846,7 +3851,7 @@ async function handleBotLogs(url, env, origin) {
         },
       },
     }, 200, origin);
-  } catch (err) { return jsonResponse({ error: err.message }, 500, origin); }
+  } catch (err) { return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin); }
 }
 
 async function _botSettleDate(env, dateStr, options = {}) {
@@ -4012,7 +4017,7 @@ async function handleBotSettleLogs(request, env, origin) {
         try {
           const r = await _botSettleDate(env, ds, { force });
           results.push({ date: ds, settled: r.settled, error: r.error });
-        } catch (err) { results.push({ date: ds, error: err.message }); }
+        } catch (err) { results.push({ date: ds, error: SAFE_ERROR_MSG_500 }); }
       }
       const totalSettled = results.reduce((s, r) => s + (r.settled ?? 0), 0);
       return jsonResponse({ success: true, mode: 'range', force, dates_processed: dates.length, total_settled: totalSettled, details: results }, 200, origin);
@@ -4023,7 +4028,7 @@ async function handleBotSettleLogs(request, env, origin) {
     const res     = await _botSettleDate(env, dateStr, { force });
     if (res.error) return jsonResponse({ error: res.error }, 502, origin);
     return jsonResponse({ success: true, force, ...res }, 200, origin);
-  } catch (err) { return jsonResponse({ error: err.message }, 500, origin); }
+  } catch (err) { return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin); }
 }
 
 // ── CALIBRATION AUTO (v6.69) ──────────────────────────────────────────────────
@@ -4192,7 +4197,7 @@ async function handleBotCalibration(url, env, origin) {
       },
     }, 200, origin);
   } catch (err) {
-    return jsonResponse({ error: err.message }, 500, origin);
+    return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin);
   }
 }
 
@@ -4225,7 +4230,7 @@ async function handleBotRun(request, env, origin) {
     // Récupérer le nombre de logs écrits pour la réponse
     const list = await env.PAPER_TRADING.list({ prefix: BOT_LOG_PREFIX });
     return jsonResponse({ success: true, note: 'Bot run terminé', logs_written: list.keys?.length ?? 0 }, 200, origin);
-  } catch (err) { return jsonResponse({ error: err.message }, 500, origin); }
+  } catch (err) { return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin); }
 }
 
 // ── CRON NIGHTLY AUTO-SETTLE ──────────────────────────────────────────────────
@@ -4441,7 +4446,7 @@ async function _runCalibrationCron(env) {
       reports.push({ sport, data });
     } catch (err) {
       console.warn('[CAL CRON]', sport, err.message);
-      reports.push({ sport, data: { error: err.message } });
+      reports.push({ sport, data: { error: SAFE_ERROR_MSG_500 } });
     }
   }
 
@@ -4698,7 +4703,7 @@ async function handleOddsHistory(url, env, origin) {
       snapshots:  arr,
       movement:   _computeLineMovement(arr),
     }, 200, origin);
-  } catch (err) { return jsonResponse({ error: err.message }, 500, origin); }
+  } catch (err) { return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin); }
 }
 
 /**
@@ -4811,7 +4816,8 @@ async function handleBotLogsExportCSV(url, env, origin) {
       },
     });
   } catch (err) {
-    return new Response(`error: ${err.message}`, { status: 500, headers: corsHeaders(origin) });
+    console.error('BotLogsExportCSV error:', err, err?.stack);
+    return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin);
   }
 }
 
@@ -5881,7 +5887,7 @@ async function handlePaperGet(env, origin) {
     const raw   = await env.PAPER_TRADING.get(PAPER_KV_KEY);
     const state = raw ? JSON.parse(raw) : _defaultPaperState();
     return jsonResponse(state, 200, origin);
-  } catch (err) { return jsonResponse({ error: err.message }, 500, origin); }
+  } catch (err) { return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin); }
 }
 
 async function handlePaperPlaceBet(request, env, origin) {
@@ -5931,7 +5937,7 @@ async function handlePaperPlaceBet(request, env, origin) {
     } catch (err) { console.warn('PlaceBet index write error:', err.message); }
 
     return jsonResponse({ success: true, bet_id: bet.bet_id, state }, 200, origin);
-  } catch (err) { return jsonResponse({ error: err.message }, 500, origin); }
+  } catch (err) { return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin); }
 }
 
 async function handlePaperSettleBet(request, betId, env, origin) {
@@ -5992,7 +5998,7 @@ async function handlePaperSettleBet(request, betId, env, origin) {
     } catch (err) { console.warn('SettleBet index write error:', err.message); }
 
     return jsonResponse({ success: true, bet, state }, 200, origin);
-  } catch (err) { return jsonResponse({ error: err.message }, 500, origin); }
+  } catch (err) { return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin); }
 }
 
 async function handlePaperReset(request, env, origin) {
@@ -6007,7 +6013,7 @@ async function handlePaperReset(request, env, origin) {
       await env.PAPER_TRADING.put(PAPER_BETS_INDEX_KEY, JSON.stringify({}));
     } catch (err) { console.warn('Reset index write error:', err.message); }
     return jsonResponse({ success: true, state }, 200, origin);
-  } catch (err) { return jsonResponse({ error: err.message }, 500, origin); }
+  } catch (err) { return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin); }
 }
 
 function _defaultPaperState(initialBankroll = 1000) {
@@ -6409,7 +6415,7 @@ async function handleTennisTournaments(url, env, origin) {
             .map(s => ({ key: s.key, title: s.title, active: s.active }));
         }
       } catch (err) {
-        tournaments = candidates.map(t => ({ ...t, validated: null, note: err.message }));
+        tournaments = candidates.map(t => ({ ...t, validated: null, note: SAFE_ERROR_MSG_UNAVAILABLE }));
       }
     }
     if (!all) tournaments = tournaments.filter(t => t.validated !== false);
@@ -6440,7 +6446,7 @@ async function handleTennisCSVTest(url, env, origin) {
         preview: text ? text.split('\n').slice(0, 3).join(' | ') : null,
         error: resp.ok ? null : `HTTP ${resp.status}`,
       };
-    } catch (err) { results[key] = { ok: false, error: err.message }; }
+    } catch (err) { results[key] = { ok: false, error: SAFE_ERROR_MSG_500 }; }
   }
   return jsonResponse({ results }, 200, origin);
 }
@@ -6459,7 +6465,7 @@ async function handleTennisSportsList(url, env, origin) {
       .filter(s => s.key && s.key.includes('tennis'))
       .map(s => ({ key: s.key, title: s.title, active: s.active }));
     return jsonResponse({ available: true, tennis_sports: tennis }, 200, origin);
-  } catch (err) { return jsonResponse({ error: err.message }, 200, origin); }
+  } catch (err) { return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 200, origin); }
 }
 
 async function handleTennisOdds(url, env, origin) {
@@ -6568,7 +6574,7 @@ async function handleTennisOdds(url, env, origin) {
     return jsonResponse({ available: true, source: 'the_odds_api', tournament: resolvedKey,
       tour: tournament.tour, surface: tournament.surface,
       matches, fetched_at: new Date().toISOString() }, 200, origin);
-  } catch (err) { return jsonResponse({ available: false, note: err.message }, 200, origin); }
+  } catch (err) { return jsonResponse({ available: false, note: SAFE_ERROR_MSG_UNAVAILABLE }, 200, origin); }
 }
 
 // ── INTÉGRATION api-tennis.com ──────────────────────────────────────────────
@@ -6954,7 +6960,7 @@ async function handleTennisStats(url, env, origin) {
     return jsonResponse({ available: true, source: `sackmann_${tour}_csv_github`, tour, surface, players, stats,
       resolved: resolvedMap, sources,
       fetched_at: new Date().toISOString(), rows_analyzed: allRows.length, api_tennis_added: apiTennisAdded }, 200, origin);
-  } catch (err) { return jsonResponse({ available: false, note: err.message }, 200, origin); }
+  } catch (err) { return jsonResponse({ available: false, note: SAFE_ERROR_MSG_UNAVAILABLE }, 200, origin); }
 }
 
 function _parseTennisCSV(text) {
@@ -7574,7 +7580,7 @@ async function handleMLBPitchers(url, env, origin) {
     return jsonResponse({ ...result, source: 'mlb_stats_api' }, 200, origin);
 
   } catch (err) {
-    return jsonResponse({ available: false, note: err.message, pitchers: {} }, 200, origin);
+    return jsonResponse({ available: false, note: SAFE_ERROR_MSG_UNAVAILABLE, pitchers: {} }, 200, origin);
   }
 }
 
@@ -7670,7 +7676,7 @@ async function handleMLBOdds(url, env, origin) {
     return jsonResponse({ ...result, source: 'the_odds_api' }, 200, origin);
 
   } catch (err) {
-    return jsonResponse({ available: false, note: err.message, matches: [] }, 200, origin);
+    return jsonResponse({ available: false, note: SAFE_ERROR_MSG_UNAVAILABLE, matches: [] }, 200, origin);
   }
 }
 
@@ -7748,7 +7754,7 @@ async function handleMLBStandings(origin) {
     }
     return jsonResponse({ available: true, standings, source: 'mlb_stats_api' }, 200, origin);
   } catch (err) {
-    return jsonResponse({ available: false, note: err.message }, 200, origin);
+    return jsonResponse({ available: false, note: SAFE_ERROR_MSG_UNAVAILABLE }, 200, origin);
   }
 }
 
@@ -7801,7 +7807,7 @@ async function handleMLBBullpenStats(env, origin) {
     }
     return jsonResponse({ ...result, source: 'mlb_stats_api' }, 200, origin);
   } catch (err) {
-    return jsonResponse({ available: false, note: err.message, teams: {} }, 200, origin);
+    return jsonResponse({ available: false, note: SAFE_ERROR_MSG_UNAVAILABLE, teams: {} }, 200, origin);
   }
 }
 
@@ -7956,7 +7962,7 @@ async function handleMLBTeamStats(env, origin) {
 
     return jsonResponse({ ...result, source: 'mlb_stats_api' }, 200, origin);
   } catch (err) {
-    return jsonResponse({ available: false, note: err.message, teams: {} }, 200, origin);
+    return jsonResponse({ available: false, note: SAFE_ERROR_MSG_UNAVAILABLE, teams: {} }, 200, origin);
   }
 }
 
@@ -8058,7 +8064,7 @@ async function _fetchWeatherForVenue(venue, env) {
     }
     return result;
   } catch (err) {
-    return { error: err.message, venue };
+    return { error: SAFE_ERROR_MSG_500, venue };
   }
 }
 
@@ -8812,7 +8818,7 @@ async function handleMLBBotRun(request, env, origin) {
     await _runMLBBotCron(env, true);
     const list = await env.PAPER_TRADING.list({ prefix: MLB_BOT_LOG_PREFIX });
     return jsonResponse({ success: true, note: 'MLB Bot run terminé', logs_written: list.keys?.length ?? 0 }, 200, origin);
-  } catch (err) { return jsonResponse({ error: err.message }, 500, origin); }
+  } catch (err) { return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin); }
 }
 
 // ── HANDLER LOGS MLB ──────────────────────────────────────────────────────────
@@ -8865,7 +8871,7 @@ async function handleMLBBotLogs(url, env, origin) {
         brier_score:    brierScore,
       },
     }, 200, origin);
-  } catch (err) { return jsonResponse({ error: err.message }, 500, origin); }
+  } catch (err) { return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin); }
 }
 
 // ── HANDLER SETTLER MLB ───────────────────────────────────────────────────────
@@ -9041,7 +9047,7 @@ async function handleMLBBotSettleLogs(request, env, origin) {
         try {
           const r = await _mlbBotSettleDate(env, ds, { force });
           results.push({ date: ds, settled: r.settled, error: r.error });
-        } catch (err) { results.push({ date: ds, error: err.message }); }
+        } catch (err) { results.push({ date: ds, error: SAFE_ERROR_MSG_500 }); }
       }
       const totalSettled = results.reduce((s, r) => s + (r.settled ?? 0), 0);
       return jsonResponse({ success: true, mode: 'range', force, dates_processed: dates.length, total_settled: totalSettled, details: results }, 200, origin);
@@ -9051,7 +9057,7 @@ async function handleMLBBotSettleLogs(request, env, origin) {
     const res     = await _mlbBotSettleDate(env, dateStr, { force });
     if (res.error) return jsonResponse({ error: res.error }, 502, origin);
     return jsonResponse({ success: true, force, ...res }, 200, origin);
-  } catch (err) { return jsonResponse({ error: err.message }, 500, origin); }
+  } catch (err) { return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -9874,7 +9880,9 @@ function _tennisNamesMatchEspn(a, b) {
 // v6.95 — Endpoint diagnostic pour voir exactement ce qu'ESPN renvoie pour un joueur.
 // v6.96 — Enrichi : si player param est absent ou verbose=1, sonde brute (status HTTP,
 // sample body, test multi-URLs alternatives × avec/sans User-Agent).
-async function handleTennisEspnProbe(url, origin) {
+async function handleTennisEspnProbe(url, env, origin) {
+  const authDeny = _denyIfNoDebugAuth(url, env, origin);
+  if (authDeny) return authDeny;
   const player = url.searchParams.get('player');
   const tour   = (url.searchParams.get('tour') ?? 'atp').toLowerCase() === 'wta' ? 'wta' : 'atp';
   const days   = Math.min(parseInt(url.searchParams.get('days') ?? '21') || 21, 30);
@@ -9916,7 +9924,7 @@ async function handleTennisEspnProbe(url, origin) {
           } catch {}
           results.push({ variant: v.label, http: r.status, ok: r.ok, events_count: eventsCount, leagues, first_event: firstEvent, body_head: bodyHead });
         } catch (err) {
-          results.push({ variant: v.label, error: err.message });
+          results.push({ variant: v.label, error: SAFE_ERROR_MSG_500 });
         }
       }
       return { idx, url: u, results };
@@ -10439,7 +10447,7 @@ async function handleTennisBotRun(request, env, origin) {
     await _runTennisBotCron(env, true);
     const list = await env.PAPER_TRADING.list({ prefix: TENNIS_BOT_LOG_PREFIX });
     return jsonResponse({ success: true, note: 'Tennis Bot run terminé', logs_written: list.keys?.length ?? 0 }, 200, origin);
-  } catch (err) { return jsonResponse({ error: err.message }, 500, origin); }
+  } catch (err) { return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin); }
 }
 
 async function handleTennisBotLogs(url, env, origin) {
@@ -10492,7 +10500,7 @@ async function handleTennisBotLogs(url, env, origin) {
         brier_score:    brierScore,
       },
     }, 200, origin);
-  } catch (err) { return jsonResponse({ error: err.message }, 500, origin); }
+  } catch (err) { return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin); }
 }
 
 async function handleTennisBotSettleLogs(request, env, origin) {
@@ -10529,5 +10537,5 @@ async function handleTennisBotSettleLogs(request, env, origin) {
     });
     const totalSettled = results.reduce((s, r) => s + r.settled, 0);
     return jsonResponse({ success: true, force, total_settled: totalSettled, by_date: results }, 200, origin);
-  } catch (err) { return jsonResponse({ error: err.message }, 500, origin); }
+  } catch (err) { return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin); }
 }
