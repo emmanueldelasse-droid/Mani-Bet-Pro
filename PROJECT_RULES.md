@@ -71,6 +71,7 @@
   - Toute route consommant quota provider (Tank01 · Claude) doit requérir auth
   - Paper · ✓ MBP-S.2 (backend) + MBP-S.2.1 (front) · `requirePaperApiKey` worker · `paperFetch` front · clé `localStorage` user uniquement
   - Bot run · ✓ MBP-S.3 · `requireBotRunApiKey` worker · header `X-Bot-Api-Key` · secret `BOT_RUN_API_KEY` · cron scheduled exempté
+  - Rate limit Claude · ✓ MBP-S.4 · per-IP via `_rateLimitIpHash` (SHA-256 tronqué) · IP brute jamais stockée · cron namespace `'system'` exempté
 - **Nouvelle règle MBP-A.4 · validation body**
   - `request.json()` toujours dans try/catch
   - Tout enum valeur strictement whitelisted

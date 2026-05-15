@@ -294,7 +294,7 @@ Impact réel limité (pas de cookie ni credentials), mais permet cross-origin fe
 | **MBP-A.4 CRIT-C** | CORS prefix matching | worker.js:206 `startsWith` | forge subdomain attacker.com | 5 min (`===` strict) |
 | ~~MBP-A.4 CRIT-D~~ | ✓ **Résolu MBP-S.3** · auth `X-Bot-Api-Key` (secret `BOT_RUN_API_KEY`) · 8 routes POST protégées | — | — |
 | **MBP-A.4 CRIT-E** | `/tennis/_espn_probe` sans guard | worker.js:372, 9877 | matches ESPN bruts publics · pas rate limit | 5 min (`_denyIfNoDebugAuth`) |
-| **MBP-A.4 CRIT-F** | Rate limit Claude global cross-user | worker.js:1319, 1539, 1699 | user A spam = blocage user B 25h | 1-2h (per-IP) |
+| ~~MBP-A.4 CRIT-F~~ | ✓ **Résolu MBP-S.4** · rate limit per-IP via hash SHA-256 tronqué (worker.js:914) · cron exempté ('system') | — | — |
 
 ### Haut
 
@@ -346,8 +346,22 @@ Effort total · **~2h** · risque régression très faible · pas de changement 
 ### Phase 2 · auth ressources (à valider ChatGPT)
 5. ~~CRIT-D · auth header partagé bot run~~ · ✓ **résolu MBP-S.3** (header `X-Bot-Api-Key`)
 6. ~~CRIT-A · stratégie auth Paper~~ · ✓ **résolu MBP-S.2** (Option A · header `X-API-Key`)
-7. CRIT-F · rate limit per-IP via `CF-Connecting-IP` header
+7. ~~CRIT-F · rate limit per-IP~~ · ✓ **résolu MBP-S.4** (hash SHA-256 tronqué · `_rateLimitIpHash` worker.js:914)
 8. HAUT-8 · `DEBUG_SECRET` migré query → header `Authorization: Bearer`
+
+### MBP-S.4 · Rate limit per-IP appliqué
+- Helper `_rateLimitIpHash(request)` worker.js:914
+- Source IP · `CF-Connecting-IP` puis `x-forwarded-for[0]` · fallback `'system'` si rien
+- Hash · SHA-256 tronqué 16 hex chars · salt `mbp-s4-salt-v1:` · jamais l'IP brute stockée
+- 3 clés rate KV refactorées :
+  - `ai_injuries_batch_rate_{YYYYMMDD}_{ipHash}` (worker.js:1384)
+  - `ai_player_props_rate_{YYYYMMDD}_{ipHashProps}` (worker.js:1610)
+  - `ai_injuries_rate_{YYYY-MM-DD}_{ipHashInj}` (worker.js:1770)
+- Cron handlers (`scheduled` → `_runBotCron`, `_runAIPlayerPropsCron`, etc.) · fakeReq sans `CF-Connecting-IP` → namespace `'system'` automatique · pas de blocage
+- HTTP user (vraie request CF) · hash propre → quota indépendant par IP
+- Propagation parent → fakeReq · `handleNBAAIPlayerPropsGet` recopie `CF-Connecting-IP` dans le fakeReq vers batch (worker.js:1517-1519) · le user humain qui passe par fresh fetch garde son quota perso
+- Logs serveur autorisés · `AI rate limit exceeded: <feature> ip=<hash>` (hash · pas valeur)
+- TTL clés rate · 25h inchangé · clés naturellement expirées
 
 ### MBP-S.3 · Auth Bot Run appliquée
 - Helper `requireBotRunApiKey(request, env, origin)` worker.js:914

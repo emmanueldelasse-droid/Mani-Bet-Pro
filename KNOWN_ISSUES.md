@@ -307,13 +307,12 @@ Détail complet · `SECURITY_AUDIT.md`. Résumé classification ici.
 - Route worker.js:378 + handler worker.js:9883
 - Validation params `player`/`tour`/`days` reste à faire (HAUT-3/4 phase ultérieure)
 
-### MBP-A.4 · CRIT-F · Rate limit Claude global cross-user (nouveau)
-- Clés rate KV partagées (worker.js:1319, 1539, 1699)
-- `ai_injuries_batch_rate_{date}` `ai_player_props_rate_{date}` `ai_injuries_rate_{date}`
-- User A spam = blocage user B 25h
-- Si multi-user un jour · critique
-- Fix · clé incluant IP `_${ip}` ou hash session
-- Effort · 1-2h (CF-Connecting-IP)
+### MBP-A.4 · CRIT-F · Rate limit Claude global cross-user (résolu MBP-S.4)
+- ✓ Résolu MBP-S.4 · helper `_rateLimitIpHash(request)` (worker.js:914)
+- Hash SHA-256 tronqué (16 hex) · salt `mbp-s4-salt-v1:` · IP brute jamais stockée
+- 3 clés rate suffixées `_${ipHash}` · injuries_batch · player_props · injuries_single
+- Cron handlers exemptés · fakeReq sans `CF-Connecting-IP` → namespace `'system'`
+- Spam user A n'épuise plus le quota user B
 
 ## Haut
 
