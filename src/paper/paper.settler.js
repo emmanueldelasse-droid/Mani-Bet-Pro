@@ -5,11 +5,19 @@
 import { PaperEngine } from './paper.engine.js';
 import { API_CONFIG }  from '../config/api.config.js';
 import { Logger }      from '../utils/utils.logger.js';
+import { PaperAuth }   from '../utils/utils.paper-auth.js';
 
 const WORKER = API_CONFIG.WORKER_BASE_URL;
 
 export class PaperSettler {
   static async settle(store) {
+    // MBP-S.2.1 · le settler écrit dans /paper/bet/:id (auth requise).
+    // Skip silencieux si clé absente · évite spam erreurs.
+    if (!PaperAuth.hasKey()) {
+      Logger.debug('PAPER_SETTLER_SKIP', { reason: 'no_paper_api_key' });
+      return;
+    }
+
     const state = await PaperEngine.loadAsync();
     const pendingBets = state.bets.filter(function(bet) { return bet.result === 'PENDING'; });
     if (pendingBets.length === 0) return;

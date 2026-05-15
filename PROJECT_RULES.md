@@ -69,7 +69,7 @@
 - **Nouvelle règle MBP-A.4 · auth ressources**
   - Toute route mutant état (POST · PUT · DELETE) doit requérir auth
   - Toute route consommant quota provider (Tank01 · Claude) doit requérir auth
-  - Paper · ✓ MBP-S.2 · `requirePaperApiKey` · secret `PAPER_API_KEY`
+  - Paper · ✓ MBP-S.2 (backend) + MBP-S.2.1 (front) · `requirePaperApiKey` worker · `paperFetch` front · clé `localStorage` user uniquement
   - Bot run · TODO MBP-S.3 · `X-API-Key` à appliquer aussi
 - **Nouvelle règle MBP-A.4 · validation body**
   - `request.json()` toujours dans try/catch

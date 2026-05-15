@@ -32,7 +32,8 @@ néant
 - Front GH Pages · auto-deploy push main
 - KV `PAPER_TRADING` · id `17eb7ddc41a949dd99bd840142832cfd`
 - Cron `0 * * * *` · idempotent par sport
-- Dernière session · MBP-S.2 + hotfix CORS Allow-Headers X-API-Key (preflight bloquait browser)
+- Dernière session · MBP-S.2.1 front Paper API key · UI saisie + injection auto X-API-Key
+- MBP-S.2 + hotfix CORS Allow-Headers X-API-Key mergées · backend auth Paper OK
 - MBP-S.2 auth Paper · helper `requirePaperApiKey` · 4 routes protégées
 - MBP-S.1 sécu Phase 1 · 4 fixes CRIT-B/C/E + HAUT-6 mergée
 - Audit MBP-A.4 sécurité complet mergée
@@ -62,7 +63,7 @@ néant
 - [x] ~~P1 MBP-A.4 CRIT-E~~ · ✓ MBP-S.1 · guard `_denyIfNoDebugAuth` ajouté à `/tennis/_espn_probe`
 - [x] ~~P1 MBP-A.4 HAUT-6~~ · ✓ MBP-S.1 · CSV error JSON cohérent (worker.js:4814)
 - [x] ~~P1 MBP-A.4 CRIT-A~~ · ✓ MBP-S.2 · auth `X-API-Key` Paper (helper `requirePaperApiKey`) · secret `PAPER_API_KEY` à configurer côté CF
-- [ ] P2 MBP-S.2.1 · adapter front pour saisir/envoyer `X-API-Key` (localStorage + fetch header injection)
+- [x] ~~P2 MBP-S.2.1~~ · ✓ adaptation front · `utils.paper-auth.js` + section Réglages + paper.engine.js refactor
 - [ ] P1 MBP-A.4 CRIT-D · auth `X-API-Key` routes `/bot/run` + `/{sport}/bot/run` · 30 min
 - [ ] P2 MBP-A.4 CRIT-F · rate limit Claude per-IP au lieu de global
 - [ ] P2 MBP-A.4 HAUT-1 à 9 · validations + ai.guard intégration + headers sécu
