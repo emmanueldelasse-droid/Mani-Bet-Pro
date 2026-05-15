@@ -168,12 +168,12 @@ Source · SESSION.md + audit code + git log mai 2026.
 
 ## Critique
 
-### MBP-A.1 · CRIT-1 · Guards debug optionnels → routes publiques fallback
-- 5 routes NBA debug + `/debug/basketusa` (worker.js:1937, 1973, 2487, 2545, 2345)
-- `_denyIfNoDebugAuth` (worker.js:881) requiert `env.DEBUG_SECRET`
-- Si secret absent → **routes publiquement accessibles** (note v6.33 "rétrocompatible")
-- Risque · scan ports Cloudflare expose info Tank01 raw + box scores + roster
-- Fix · forcer 401 si `DEBUG_SECRET` absent en prod
+### MBP-A.1 · CRIT-1 · **CORRIGÉ MBP-A.4 · fausse alerte**
+- Vérification directe worker.js:883 · `_denyIfNoDebugAuth` est **fail-CLOSE**
+- Si `DEBUG_SECRET` absent → 401 Unauthorized (pas accès)
+- Le commentaire historique v6.33 "rétrocompatible" est trompeur · code actuel correct
+- ✓ 5 routes guardées effectivement (worker.js:1937, 1973, 2487, 2545, 2345)
+- **Nouvelles critiques MBP-A.4** remplacent · voir section dédiée ci-dessous
 
 ### MBP-A.1 · CRIT-2 · Routes Paper sans auth HTTP
 - `/paper/state` `/paper/bet` `/paper/bet/:id` `/paper/reset` (worker.js:401-410)
@@ -267,3 +267,96 @@ Source · SESSION.md + audit code + git log mai 2026.
 - 10 providers actifs · 1 désactivé (api-tennis) · 1 ambigu (BasketUSA) · 1 mort (NBA PDF)
 - 3 clés KV mortes ou orphelines détectées
 - 19 variables d'environnement recensées
+
+---
+
+# Écarts détectés · audit MBP-A.4 sécurité
+
+Détail complet · `SECURITY_AUDIT.md`. Résumé classification ici.
+
+## Critique (à corriger urgent)
+
+### MBP-A.4 · CRIT-A · Paper routes sans auth HTTP (confirme MBP-A.1 CRIT-2 · étendu)
+- `/paper/state` `/paper/bet` `/paper/bet/:id` `/paper/reset` (worker.js:401-410)
+- Aucune auth · pas de CSRF token · pas de rate limit
+- N'importe quel client peut · lire bankroll · placer bets · settle · **wipe complet illimité**
+- Stratégie auth · 6 options proposées dans `SECURITY_AUDIT.md` section 10
+- Recommandation Claude · Option A (header `X-API-Key`) court terme · Option E (CF Access) long terme
+
+### MBP-A.4 · CRIT-B · `errorResponse` fuite `err.message` × 14 occurrences (confirme MBP-A.1 CRIT-3 · étendu)
+- worker.js:438 (catch global) + 13 handlers (worker.js:1170, 1380, 1419, 1454, 1651, 1800, 2667, 3849, 4026, 4814, 5934, 5995, 6010)
+- Fuite · stack interne · noms fonctions · présence secrets inférable · format providers
+- Fix · fonction `safeError(err, status, origin)` centrale · loop replace
+- Effort · ~1h · risque régression faible
+
+### MBP-A.4 · CRIT-C · CORS prefix matching vulnerability (nouveau)
+- worker.js:206 · `ALLOWED_ORIGINS.some(o => origin?.startsWith(o))`
+- Attaquant forge `emmanueldelasse-droid.github.io.attacker.com` → CORS match
+- Impact réel limité (pas de cookie) mais permet cross-origin fetch routes publiques
+- Fix · `===` strict equality
+- Effort · 5 min
+
+### MBP-A.4 · CRIT-D · Routes bot/run sans auth → quota DoS (nouveau)
+- `/bot/run` (worker.js:397) · `/nba/bot/run` · `/mlb/bot/run` (352) · `/tennis/bot/run` (374)
+- `/bot/settle-logs` (391) · `/{sport}/bot/settle-logs`
+- Chaque appel · ~20-30 Tank01 calls + 1-2 Claude tokens
+- Spam = épuisement quota Tank01 1000/j · épuisement Claude rate limit 25h
+- Fix · header `X-API-Key` partagé
+- Effort · 30 min
+
+### MBP-A.4 · CRIT-E · `/tennis/_espn_probe` sans guard (nouveau)
+- worker.js:372 → handler `handleTennisEspnProbe` worker.js:9877
+- Aucun `_denyIfNoDebugAuth` appliqué
+- Matches ESPN bruts publics · params `player`/`tour`/`days` non validés
+- Fix · ajouter guard · valider params
+- Effort · 5 min
+
+### MBP-A.4 · CRIT-F · Rate limit Claude global cross-user (nouveau)
+- Clés rate KV partagées (worker.js:1319, 1539, 1699)
+- `ai_injuries_batch_rate_{date}` `ai_player_props_rate_{date}` `ai_injuries_rate_{date}`
+- User A spam = blocage user B 25h
+- Si multi-user un jour · critique
+- Fix · clé incluant IP `_${ip}` ou hash session
+- Effort · 1-2h (CF-Connecting-IP)
+
+## Haut
+
+| ID | Composant | Effort |
+|---|---|---|
+| MBP-A.4 HAUT-1 | `ai.guard.js` jamais appelé · validation Claude réponses absente | 2h |
+| MBP-A.4 HAUT-2 | Prompt injection ESPN MLB/Tennis · NBA mitigé par enum 30 équipes | 1h |
+| MBP-A.4 HAUT-3 | `request.json()` sans try/catch (worker.js:5890) | 10 min |
+| MBP-A.4 HAUT-4 | POST body size unbounded (tous handlers POST/PUT) | 30 min |
+| MBP-A.4 HAUT-5 | Paper `result` enum non strict (worker.js:5940) | 10 min |
+| MBP-A.4 HAUT-6 | CSV error response non-JSON (worker.js:4814) | 5 min |
+| MBP-A.4 HAUT-7 | Race condition KV rate limit (worker.js:1319-1328) | 1h |
+| MBP-A.4 HAUT-8 | `DEBUG_SECRET` en URL query (referer leak · browser history) | 30 min |
+| MBP-A.4 HAUT-9 | Hallucinations joueurs Claude non bloquée (pas whitelist) | 3h |
+
+## Moyen
+
+| ID | Composant | Effort |
+|---|---|---|
+| MBP-A.4 MOY-2 | Headers sécu manquants (CSP · HSTS · X-Frame) | 30 min |
+| MBP-A.4 MOY-3 | Stale cache 8-24h AI injuries sans warning | 15 min |
+| MBP-A.4 MOY-4 | `DEBUG_SECRET` pas de rate limit brute-force | 1h |
+| MBP-A.4 MOY-5 | Validation date Claude params · regex non stricte | 10 min |
+| MBP-A.4 MOY-6 | `closing_odds` non validé | 10 min |
+| MBP-A.4 MOY-7 | `initial_bankroll` NaN possible | 5 min |
+
+## Faible
+
+| ID | Composant |
+|---|---|
+| MBP-A.4 FAI-1 | `/health` info disclosure (version · routes) |
+| MBP-A.4 FAI-2 | Logs publics exposent edge moteur (intentionnel ?) |
+| MBP-A.4 FAI-3 | Sport param validation fragile (currently safe via enum) |
+| MBP-A.4 FAI-4 | Claude error text logged 200 chars |
+| MBP-A.4 FAI-5 | `paper_trading_state` floating point precision (millions bets) |
+
+## Statistiques audit MBP-A.4
+- 6 critiques · 9 hauts · 6 moyens · 5 faibles
+- 1 MBP-A.1 fausse alerte reclassée (CRIT-1)
+- 14 occurrences fuites `err.message` localisées
+- 6 stratégies auth Paper proposées (à valider ChatGPT)
+- Phase 1 (critiques rapides · CRIT-B/C/E + HAUT-6) · ~2h effort · risque faible

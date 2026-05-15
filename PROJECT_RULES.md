@@ -56,11 +56,25 @@
 - Cotes décimales européennes (jamais US)
 - Confidence : `HIGH/MEDIUM/LOW/INCONCLUSIVE` · jamais `Data quality` direct
 
-## Sécurité
-- Routes debug guardées par `DEBUG_SECRET`
-- Params user → regex avant KV key
+## Sécurité (post MBP-A.4)
+- Routes debug guardées par `DEBUG_SECRET` · `_denyIfNoDebugAuth` (worker.js:881) fail-CLOSE OK
+- Nouvelle route debug → **toujours** ajouter guard `_denyIfNoDebugAuth` ou auth équivalent
+- Params user → regex avant KV key · enum quand possible
 - `innerHTML` → `escapeHtml`
 - Pas de secret en clair dans code · CF Dashboard uniquement
+- **Nouvelle règle MBP-A.4 · erreurs**
+  - Jamais retourner `err.message` brut au client
+  - Toujours passer par `safeError(err, status, origin)` (à créer)
+  - Log full côté Cloudflare uniquement
+- **Nouvelle règle MBP-A.4 · auth ressources**
+  - Toute route mutant état (POST · PUT · DELETE) doit requérir auth
+  - Toute route consommant quota provider (Tank01 · Claude) doit requérir auth
+- **Nouvelle règle MBP-A.4 · validation body**
+  - `request.json()` toujours dans try/catch
+  - Tout enum valeur strictement whitelisted
+  - Check `content-length` avant parse si > 10KB
+- **Nouvelle règle MBP-A.4 · CORS**
+  - Whitelist origins · `===` strict equality jamais `startsWith`
 
 ## Tests avant PR
 - `git diff --stat` review
