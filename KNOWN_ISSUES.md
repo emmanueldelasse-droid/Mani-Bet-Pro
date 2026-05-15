@@ -370,11 +370,13 @@ Détail complet · `NBA_ENGINE_AUDIT.md`. Résumé classification ici.
 - MLB · Tennis · legacy min-based préservé (audit séparé prévu)
 - Robustness conservée dans `analysis.robustness_score` · ne pilote plus la confidence NBA
 
-### MBP-A.2 · CRIT-3 · `home_away_split` formule divergente
-- Backend `(h_home - h_away) - (a_away - a_home)` clamp [-0.5, 0.5]
-- Frontend `(home_pct - away_pct) × 2` clamp [-1, 1]
-- Amplification ×2 frontend · contribution score différente
-- Décision ChatGPT requise · valider formule canonique
+### MBP-A.2 · CRIT-3 · `home_away_split` formule divergente (résolu MBP-FIX-A.2.2)
+- ✓ Résolu MBP-FIX-A.2.2 · frontend aligné strict sur backend
+- `computeHomeSplit` (`src/engine/engine.nba.variables.js:262`) utilise désormais 4 variables + formule backend
+- `(hs.home_win_pct - hs.away_win_pct) - (as.away_win_pct - as.home_win_pct)` clamp [-0.50, 0.50]
+- Identique à `_botExtractVariables` worker.js:5037-5043
+- MLB · Tennis · pas concernés (formule NBA only)
+- UI rétrocompatible · `raw.home_home_win_pct` et `raw.away_away_win_pct` conservés + 2 nouveaux champs `home_away_win_pct` et `away_home_win_pct`
 
 ## Moyen
 
