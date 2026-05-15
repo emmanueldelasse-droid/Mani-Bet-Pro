@@ -210,7 +210,7 @@ function corsHeaders(origin) {
   return {
     'Access-Control-Allow-Origin':  allowed,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key, X-Bot-Api-Key',
     'Access-Control-Max-Age':       '86400',
   };
 }
@@ -908,6 +908,22 @@ function requirePaperApiKey(request, env, origin) {
   return null;
 }
 
+// MBP-S.3 · guard Bot Run strict (routes manuelles qui consomment quotas).
+// Cron scheduled() exempté · les handlers _run*Cron() ne reçoivent pas de request.
+// Fail-close si BOT_RUN_API_KEY absent ou header X-Bot-Api-Key incorrect.
+function requireBotRunApiKey(request, env, origin) {
+  if (!env.BOT_RUN_API_KEY) {
+    console.warn('Bot run auth failed: secret not configured');
+    return errorResponse('Unauthorized', 401, origin);
+  }
+  const provided = request.headers.get('X-Bot-Api-Key');
+  if (!provided || provided !== env.BOT_RUN_API_KEY) {
+    console.warn('Bot run auth failed: invalid or missing header');
+    return errorResponse('Unauthorized', 401, origin);
+  }
+  return null;
+}
+
 async function _tank01FetchWithFallback(url, env, timeout = 10000) {
   const keys = [
     env.TANK01_API_KEY1,
@@ -1271,6 +1287,8 @@ function _getParisClaudeWindowKey() {
 }
 
 async function handleNBAAIInjuriesBatch(request, env, origin) {
+  const authDeny = requireBotRunApiKey(request, env, origin);
+  if (authDeny) return authDeny;
   let body = null;
   try {
     body = await request.json();
@@ -1478,6 +1496,8 @@ async function handleNBAAIPlayerPropsGet(url, env, origin) {
 }
 
 async function handleNBAAIPlayerPropsBatch(request, env, origin) {
+  const authDeny = requireBotRunApiKey(request, env, origin);
+  if (authDeny) return authDeny;
   let body = null;
   try { body = await request.json(); } catch (_) {
     return jsonResponse({ available: false, note: 'invalid json body' }, 400, origin);
@@ -4020,6 +4040,8 @@ async function _fetchESPNBoxScore(eventId) {
 }
 
 async function handleBotSettleLogs(request, env, origin) {
+  const authDeny = requireBotRunApiKey(request, env, origin);
+  if (authDeny) return authDeny;
   if (!env.PAPER_TRADING) return jsonResponse({ error: 'KV not configured' }, 500, origin);
   try {
     const body  = await request.json().catch(() => ({}));
@@ -4240,6 +4262,8 @@ function _expandDateRange(fromStr, toStr) {
 }
 
 async function handleBotRun(request, env, origin) {
+  const authDeny = requireBotRunApiKey(request, env, origin);
+  if (authDeny) return authDeny;
   if (!env.PAPER_TRADING) return jsonResponse({ error: 'KV not configured' }, 500, origin);
   try {
     await env.PAPER_TRADING.delete(BOT_RUN_KEY);
@@ -8837,6 +8861,8 @@ function _botPredictMLBStrikeouts(matchData) {
 
 // ── HANDLER BOT RUN MLB ───────────────────────────────────────────────────────
 async function handleMLBBotRun(request, env, origin) {
+  const authDeny = requireBotRunApiKey(request, env, origin);
+  if (authDeny) return authDeny;
   if (!env.PAPER_TRADING) return jsonResponse({ error: 'KV not configured' }, 500, origin);
   try {
     await env.PAPER_TRADING.delete(MLB_BOT_RUN_KEY);
@@ -9058,6 +9084,8 @@ async function _fetchMLBPitcherActualKs(espnEventId) {
 }
 
 async function handleMLBBotSettleLogs(request, env, origin) {
+  const authDeny = requireBotRunApiKey(request, env, origin);
+  if (authDeny) return authDeny;
   if (!env.PAPER_TRADING) return jsonResponse({ error: 'KV not configured' }, 500, origin);
   try {
     const body  = await request.json().catch(() => ({}));
@@ -10466,6 +10494,8 @@ async function _tennisBotSettleDate(env, dateStr, options = {}) {
 // ── HANDLERS ROUTES TENNIS BOT ────────────────────────────────────────────────
 
 async function handleTennisBotRun(request, env, origin) {
+  const authDeny = requireBotRunApiKey(request, env, origin);
+  if (authDeny) return authDeny;
   if (!env.PAPER_TRADING) return jsonResponse({ error: 'KV not configured' }, 500, origin);
   try {
     await env.PAPER_TRADING.delete(TENNIS_BOT_RUN_KEY);
@@ -10529,6 +10559,8 @@ async function handleTennisBotLogs(url, env, origin) {
 }
 
 async function handleTennisBotSettleLogs(request, env, origin) {
+  const authDeny = requireBotRunApiKey(request, env, origin);
+  if (authDeny) return authDeny;
   if (!env.PAPER_TRADING) return jsonResponse({ error: 'KV not configured' }, 500, origin);
   try {
     const body    = await request.json().catch(() => ({}));
