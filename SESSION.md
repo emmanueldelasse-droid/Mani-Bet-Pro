@@ -15,7 +15,7 @@ Voir `BOT_OBJECTIVE.md` pour mission complète.
 2. `BOT_OBJECTIVE.md` · mission · règles absolues
 3. `PROJECT_RULES.md` · workflow · interdictions Claude
 4. `CLAUDE.md` · règles session
-5. Selon tâche · `ARCHITECTURE.md` · `DATA_PIPELINE.md` · `BETTING_LOGIC.md` · `PROVIDERS_MATRIX.md` · `KNOWN_ISSUES.md` · `CHECKLIST_MERGE.md` · `ROUTES_AUDIT.md`
+5. Selon tâche · `ARCHITECTURE.md` · `DATA_PIPELINE.md` · `BETTING_LOGIC.md` · `PROVIDERS_MATRIX.md` · `KNOWN_ISSUES.md` · `CHECKLIST_MERGE.md` · `ROUTES_AUDIT.md` · `NBA_ENGINE_AUDIT.md`
 6. `.claude/onboarding.md` uniquement pour deploy/setup/reprise compte
 7. `.claude/agents/alon.md` pour analyse calibration
 
@@ -32,7 +32,9 @@ néant
 - Front GH Pages · auto-deploy push main
 - KV `PAPER_TRADING` · id `17eb7ddc41a949dd99bd840142832cfd`
 - Cron `0 * * * *` · idempotent par sport
-- Dernière session · MBP-S.4 rate limit per-IP · hash SHA-256 tronqué · cron exempté
+- Dernière session · MBP-A.2 audit moteur NBA backend ↔ frontend (PR docs only)
+- Découverte structurelle · **2 moteurs NBA distincts** (backend cron · frontend runtime)
+- 3 divergences critiques · confidence algo · home_away_split formule · back_to_back numérique
 - MBP-A.4 · 6/6 critiques sécu résolues (CRIT-A à F)
 - MBP-S.3 auth Bot Run mergée
 - MBP-S.2.1 front Paper API key mergée
@@ -70,6 +72,11 @@ néant
 - [x] ~~P1 MBP-A.4 CRIT-D~~ · ✓ MBP-S.3 · auth `X-Bot-Api-Key` (secret `BOT_RUN_API_KEY`) · 8 routes POST protégées · cron exempté
 - [x] ~~P2 MBP-A.4 CRIT-F~~ · ✓ MBP-S.4 · rate limit per-IP hash SHA-256 tronqué · cron exempté ('system')
 - [ ] P2 MBP-A.4 HAUT-1 à 9 · validations + ai.guard intégration + headers sécu
+- [ ] **P1 MBP-A.2 CRIT-1** · décider stratégie 2 moteurs NBA (supprimer backend ou aligner strict)
+- [ ] **P1 MBP-A.2 CRIT-2** · aligner algorithme confidence backend/frontend (distance vs min(robust,dq))
+- [ ] **P1 MBP-A.2 CRIT-3** · valider formule `home_away_split` correcte · aligner backend/frontend
+- [ ] P2 MBP-A.2 MED-1 à 6 · back_to_back numérique · pill UI seuil · penalty mort · etc.
+- [ ] P3 MBP-A.2 FAI-1 à 6 · variables backend orphelines · nettoyage `ts_diff`/`avg_pts_diff` morts
 - [ ] P1 surveiller hit rate MLB v6.94 post 50 paris · si <52% désactiver bot (Option C)
 - [ ] P1 surveiller hit rate tennis v6.93 post 50 paris · revert isolé si baisse
 - [ ] P1 gate `confidence=INCONCLUSIVE` si `data_quality<0.55` (worker.js:5185)
@@ -127,3 +134,4 @@ Détail TODO + dette technique · `KNOWN_ISSUES.md`
 - `BOT_OBJECTIVE.md` · mission projet
 - `ROUTES_AUDIT.md` · routes exhaustives + auth + provider + cache (MBP-A.1)
 - `SECURITY_AUDIT.md` · 6 CRIT · 9 HAUT · 6 MOY · 5 FAI · 6 stratégies auth Paper (MBP-A.4)
+- `NBA_ENGINE_AUDIT.md` · pipeline NBA backend ↔ frontend · 2 moteurs · 3 CRIT (MBP-A.2)

@@ -7,9 +7,18 @@
 - Garde-fous : sample minimum · cote plafond · data_quality minimum
 - Confidence calculée → recommandation finale
 
-## Confidence HIGH / MEDIUM / LOW / INCONCLUSIVE
+## ⚠ Confidence · 2 algorithmes distincts coexistent (MBP-A.2 CRIT-2)
 
-Fonction `_botComputeConfidence` (worker.js:5805)
+| Côté | Fichier | Algorithme |
+|---|---|---|
+| Backend (cron · logs · calibration) | `worker.js:5888` `_botComputeConfidence` | distance-based · `dist + dq + pen` |
+| Frontend (UI utilisateur runtime) | `src/engine/engine.core.js:314` `_computeConfidenceLevel` | min-based · `min(robust_effective, dq)` |
+
+Cas extrêmes possibles · labels opposés. Voir `NBA_ENGINE_AUDIT.md` §5 pour détail. Décision ChatGPT requise pour aligner.
+
+## Confidence HIGH / MEDIUM / LOW / INCONCLUSIVE · backend actuel
+
+Fonction `_botComputeConfidence` (worker.js:5888 · MBP-A.2 vérifié)
 
 | Niveau | Conditions |
 |---|---|
