@@ -32,7 +32,8 @@ néant
 - Front GH Pages · auto-deploy push main
 - KV `PAPER_TRADING` · id `17eb7ddc41a949dd99bd840142832cfd`
 - Cron `0 * * * *` · idempotent par sport
-- Dernière session · MBP-S.2 auth Paper · helper `requirePaperApiKey` · 4 routes protégées
+- Dernière session · MBP-S.2 + hotfix CORS Allow-Headers X-API-Key (preflight bloquait browser)
+- MBP-S.2 auth Paper · helper `requirePaperApiKey` · 4 routes protégées
 - MBP-S.1 sécu Phase 1 · 4 fixes CRIT-B/C/E + HAUT-6 mergée
 - Audit MBP-A.4 sécurité complet mergée
 - Secret CF à configurer · `PAPER_API_KEY` via `wrangler secret put PAPER_API_KEY` ou CF Dashboard

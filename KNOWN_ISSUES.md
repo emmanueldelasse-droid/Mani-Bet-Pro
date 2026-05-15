@@ -276,11 +276,12 @@ Détail complet · `SECURITY_AUDIT.md`. Résumé classification ici.
 
 ## Critique (à corriger urgent)
 
-### MBP-A.4 · CRIT-A · Paper routes sans auth HTTP (résolu MBP-S.2)
+### MBP-A.4 · CRIT-A · Paper routes sans auth HTTP (résolu MBP-S.2 + hotfix CORS)
 - ✓ Résolu MBP-S.2 · helper `requirePaperApiKey` (worker.js:898) appliqué aux 4 handlers
 - Secret `PAPER_API_KEY` requis · fail-close si absent · 401 générique sinon
 - Routes protégées · GET `/paper/state` · POST `/paper/bet` · PUT `/paper/bet/:id` · POST `/paper/reset`
 - Logs serveur conservés (sans valeur clé)
+- ✓ Hotfix CORS Allow-Headers ajouté `X-API-Key` (worker.js:213) · preflight browser passait pas sinon
 - Front non encore adapté · MBP-S.2.1 à prévoir pour saisie/envoi clé depuis l'app
 
 ### MBP-A.4 · CRIT-B · `errorResponse` fuite `err.message` (résolu MBP-S.1)
