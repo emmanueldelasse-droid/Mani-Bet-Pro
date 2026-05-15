@@ -294,7 +294,7 @@ export default {
         return await handleNBARosterInjuries(env, origin);
 
       if (path === '/nba/ai-injuries' && request.method === 'GET')
-        return await handleNBAAIInjuries(url, env, origin);
+        return await handleNBAAIInjuries(url, env, origin, request);
 
       if (path === '/nba/ai-injuries-batch' && request.method === 'POST')
         return await handleNBAAIInjuriesBatch(request, env, origin);
@@ -303,7 +303,7 @@ export default {
         return await handleNBAAIPlayerPropsBatch(request, env, origin);
 
       if (path === '/nba/ai-player-props' && request.method === 'GET')
-        return await handleNBAAIPlayerPropsGet(url, env, origin);
+        return await handleNBAAIPlayerPropsGet(url, env, origin, request);
 
       if (path === '/nba/roster-debug' && request.method === 'GET')
         return await handleNBARosterDebug(url, env, origin);
@@ -908,6 +908,29 @@ function requirePaperApiKey(request, env, origin) {
   return null;
 }
 
+// MBP-S.4 · hash IP léger pour isoler les rate limits par appelant.
+// Retourne 'system' pour les cron handlers (pas de request) ou fakeReq sans IP.
+// Retourne hash SHA-256 tronqué (16 hex chars) sinon · jamais l'IP brute.
+async function _rateLimitIpHash(request) {
+  let ip = null;
+  if (request && request.headers) {
+    ip = request.headers.get('CF-Connecting-IP')
+      || (request.headers.get('x-forwarded-for') || '').split(',')[0].trim()
+      || null;
+  }
+  if (!ip) return 'system';
+  try {
+    const data = new TextEncoder().encode(`mbp-s4-salt-v1:${ip}`);
+    const buf  = await crypto.subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(buf))
+      .slice(0, 8)
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+  } catch {
+    return 'unknown';
+  }
+}
+
 // MBP-S.3 · guard Bot Run strict (routes manuelles qui consomment quotas).
 // Cron scheduled() exempté · les handlers _run*Cron() ne reçoivent pas de request.
 // Fail-close si BOT_RUN_API_KEY absent ou header X-Bot-Api-Key incorrect.
@@ -1356,12 +1379,15 @@ async function handleNBAAIInjuriesBatch(request, env, origin) {
   // Nouveau pattern : lire + incrémenter avant l'appel → une requête bloque l'autre.
   // Note : KV Cloudflare n'est pas transactionnel, mais la fenêtre de collision
   // est réduite de ~30s (durée appel Claude) à ~1ms (durée lecture KV).
-  const _batchRateKey = `ai_injuries_batch_rate_${_todayParisKey()}`;
+  // MBP-S.4 · rate limit per-IP (hash) ou 'system' si cron/fakeReq sans IP.
+  const _ipHash = await _rateLimitIpHash(request);
+  const _batchRateKey = `ai_injuries_batch_rate_${_todayParisKey()}_${_ipHash}`;
   if (env.PAPER_TRADING) {
     try {
       const rateRaw = await env.PAPER_TRADING.get(_batchRateKey);
       const count = rateRaw ? parseInt(rateRaw, 10) : 0;
       if (count >= dailyLimit) {
+        console.warn(`AI rate limit exceeded: injuries_batch ip=${_ipHash}`);
         return jsonResponse({ available: false, note: `AI injuries batch daily limit reached (${dailyLimit}/day)` }, 429, origin);
       }
       // Incrémenter immédiatement — avant l'appel Claude
@@ -1429,7 +1455,7 @@ async function handleNBAAIInjuriesBatch(request, env, origin) {
 
 // GET /nba/ai-player-props?date=YYYYMMDD[&refresh=1]
 // Lit le cache (défaut) · refresh=1 force un appel Claude avec tous les matchs ESPN du jour
-async function handleNBAAIPlayerPropsGet(url, env, origin) {
+async function handleNBAAIPlayerPropsGet(url, env, origin, request = null) {
   const dateParam = url.searchParams.get('date');
   const dateStr   = dateParam ? dateParam.replace(/-/g, '') : _botFormatDate(_botNowParis());
   const refresh   = url.searchParams.get('refresh') === '1';
@@ -1484,9 +1510,13 @@ async function handleNBAAIPlayerPropsGet(url, env, origin) {
       away: _botGetTeamAbv(m.away_team?.name),
     })).filter(g => g.home && g.away);
 
+    // MBP-S.4 · propager CF-Connecting-IP du parent pour que le rate limit reste per-IP utilisateur.
+    const fakeHeaders = { 'Content-Type': 'application/json' };
+    const parentIp = request?.headers?.get('CF-Connecting-IP');
+    if (parentIp) fakeHeaders['CF-Connecting-IP'] = parentIp;
     const fakeReq = new Request('https://manibetpro.emmanueldelasse.workers.dev/nba/ai-player-props-batch', {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: fakeHeaders,
       body:    JSON.stringify({ date: dateStr, games, force: true }),
     });
     return await handleNBAAIPlayerPropsBatch(fakeReq, env, origin);
@@ -1575,12 +1605,15 @@ async function handleNBAAIPlayerPropsBatch(request, env, origin) {
     return jsonResponse({ available: false, note: 'CLAUDE_API_KEY not configured' }, 200, origin);
   }
 
-  const rateKey = `ai_player_props_rate_${_todayParisKey()}`;
+  // MBP-S.4 · rate limit per-IP (hash) ou 'system' si cron/fakeReq sans IP.
+  const _ipHashProps = await _rateLimitIpHash(request);
+  const rateKey = `ai_player_props_rate_${_todayParisKey()}_${_ipHashProps}`;
   if (env.PAPER_TRADING) {
     try {
       const rateRaw = await env.PAPER_TRADING.get(rateKey);
       const count = rateRaw ? parseInt(rateRaw, 10) : 0;
       if (count >= dailyLimit) {
+        console.warn(`AI rate limit exceeded: player_props ip=${_ipHashProps}`);
         return jsonResponse({ available: false, note: `AI player props daily limit reached (${dailyLimit}/day)` }, 429, origin);
       }
       await env.PAPER_TRADING.put(rateKey, String(count + 1), { expirationTtl: 25 * 3600 });
@@ -1696,7 +1729,7 @@ Confidence = high si 2+ sources concordent, medium si 1 source fiable, low sinon
 
 // ── HANDLER : AI INJURIES ONLY ──────────────────────────────────────────────
 
-async function handleNBAAIInjuries(url, env, origin) {
+async function handleNBAAIInjuries(url, env, origin, request = null) {
   const home = (url.searchParams.get('home') ?? '').trim().toUpperCase();
   const away = (url.searchParams.get('away') ?? '').trim().toUpperCase();
   const date = url.searchParams.get('date') ?? formatDateESPN(new Date());
@@ -1732,7 +1765,9 @@ async function handleNBAAIInjuries(url, env, origin) {
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  const rateKey = `ai_injuries_rate_${today}`;
+  // MBP-S.4 · rate limit per-IP (hash) ou 'system' si pas de request.
+  const _ipHashInj = await _rateLimitIpHash(request);
+  const rateKey = `ai_injuries_rate_${today}_${_ipHashInj}`;
   const dailyLimit = 4;
 
   // CORRECTION v6.32 : incrémenter avant l'appel Claude (même fix que handleNBAAIInjuriesBatch).
@@ -1741,6 +1776,7 @@ async function handleNBAAIInjuries(url, env, origin) {
       const rateRaw = await env.PAPER_TRADING.get(rateKey);
       const count = rateRaw ? parseInt(rateRaw, 10) : 0;
       if (count >= dailyLimit) {
+        console.warn(`AI rate limit exceeded: injuries_single ip=${_ipHashInj}`);
         return jsonResponse({ available: false, note: `AI injuries daily limit reached (${dailyLimit}/day)`, home, away }, 429, origin);
       }
       // Incrémenter immédiatement — avant l'appel Claude

@@ -181,15 +181,23 @@ Edit sports.config.js · commit · merge
 | `tennis_odds_cache_v2_{resolvedKey}` | (TTL non trouvé) | Tennis cotes par match |
 | `odds_quota_state` | 35j (3_024_000s) | Quota TheOddsAPI |
 
-### Rate limit Claude
+### Rate limit Claude (MBP-S.4 · per-IP)
+Suffixe `_{ipHash}` ajouté · hash SHA-256 tronqué (16 hex chars) ou `'system'` pour cron.
+Helper · `_rateLimitIpHash(request)` worker.js:914.
+
 | Clé | TTL | Rôle |
 |---|---|---|
-| `ai_injuries_batch_v2_{date}_{games}` | 8h (28_800s) | Cache batch injuries |
-| `ai_injuries_batch_rate_{YYYYMMDD}` | 25h (90_000s) | Rate limit batch (1/jour) |
-| `ai_injuries_only_{date}_{away}_{home}` | 8h | Cache single injuries |
-| `ai_injuries_rate_{date}` | 25h | Rate limit single |
+| `ai_injuries_batch_v2_{date}_{games}` | 8h (28_800s) | Cache batch injuries (clé inchangée) |
+| `ai_injuries_batch_rate_{YYYYMMDD}_{ipHash}` | 25h (90_000s) | Rate limit batch (1/jour par IP) |
+| `ai_injuries_only_{date}_{away}_{home}` | 8h | Cache single injuries (clé inchangée) |
+| `ai_injuries_rate_{date}_{ipHash}` | 25h | Rate limit single par IP |
 | `ai_player_props_{date}` | ~20h | Cache Claude props batch (**lu mais write non trouvée par grep · à vérifier**) |
-| `ai_player_props_rate_{YYYYMMDD}` | 25h | Rate limit props |
+| `ai_player_props_rate_{YYYYMMDD}_{ipHash}` | 25h | Rate limit props par IP |
+
+Sécu MBP-S.4 ·
+- IP brute jamais stockée (seulement le hash 16 hex)
+- Cron Cloudflare exempté (namespace `'system'` automatique car pas de header IP)
+- Spam d'un user n'affecte plus les autres utilisateurs
 
 ### Clés mortes / orphelines (audit MBP-A.1)
 | Clé | Statut | Note |
