@@ -364,11 +364,11 @@ Détail complet · `NBA_ENGINE_AUDIT.md`. Résumé classification ici.
 - Calibration Alon analyse les logs backend · UI affiche le frontend
 - Décision ChatGPT requise · supprimer un · ou aligner strictement
 
-### MBP-A.2 · CRIT-2 · Algorithme confidence backend ≠ frontend
-- Backend distance-based · `dist ≥ 0.20 + dq ≥ 0.7 + pen < 0.08 → HIGH` (worker.js:5888)
-- Frontend min-based · `min(robust_effective, dq) ≥ 0.75 → HIGH` (engine.core.js:314)
-- Cas extrême · score 0.95 + robust 0.40 + dq 0.85 → backend HIGH / frontend LOW
-- Décision ChatGPT requise · aligner algo
+### MBP-A.2 · CRIT-2 · Algorithme confidence backend ≠ frontend (résolu MBP-FIX-A.2.1)
+- ✓ Résolu MBP-FIX-A.2.1 · frontend aligné strict sur backend (distance-based)
+- `_computeConfidenceLevel` (src/engine/engine.core.js:314) · branche `sport === 'NBA'` utilise dist+dq+pen
+- MLB · Tennis · legacy min-based préservé (audit séparé prévu)
+- Robustness conservée dans `analysis.robustness_score` · ne pilote plus la confidence NBA
 
 ### MBP-A.2 · CRIT-3 · `home_away_split` formule divergente
 - Backend `(h_home - h_away) - (a_away - a_home)` clamp [-0.5, 0.5]

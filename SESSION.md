@@ -32,9 +32,10 @@ néant
 - Front GH Pages · auto-deploy push main
 - KV `PAPER_TRADING` · id `17eb7ddc41a949dd99bd840142832cfd`
 - Cron `0 * * * *` · idempotent par sport
-- Dernière session · MBP-A.2 audit moteur NBA backend ↔ frontend (PR docs only)
-- Découverte structurelle · **2 moteurs NBA distincts** (backend cron · frontend runtime)
-- 3 divergences critiques · confidence algo · home_away_split formule · back_to_back numérique
+- Dernière session · MBP-FIX-A.2.1 · alignement confidence NBA frontend → backend (distance-based)
+- MBP-A.2 audit moteur NBA mergé
+- 2 moteurs NBA coexistent · décision validée · garder + aligner
+- CRIT-2 confidence résolu · CRIT-1 (2 moteurs) et CRIT-3 (home_away_split) restent
 - MBP-A.4 · 6/6 critiques sécu résolues (CRIT-A à F)
 - MBP-S.3 auth Bot Run mergée
 - MBP-S.2.1 front Paper API key mergée
@@ -73,7 +74,7 @@ néant
 - [x] ~~P2 MBP-A.4 CRIT-F~~ · ✓ MBP-S.4 · rate limit per-IP hash SHA-256 tronqué · cron exempté ('system')
 - [ ] P2 MBP-A.4 HAUT-1 à 9 · validations + ai.guard intégration + headers sécu
 - [ ] **P1 MBP-A.2 CRIT-1** · décider stratégie 2 moteurs NBA (supprimer backend ou aligner strict)
-- [ ] **P1 MBP-A.2 CRIT-2** · aligner algorithme confidence backend/frontend (distance vs min(robust,dq))
+- [x] ~~P1 MBP-A.2 CRIT-2~~ · ✓ MBP-FIX-A.2.1 · frontend NBA aligné distance-based · MLB/Tennis legacy préservé
 - [ ] **P1 MBP-A.2 CRIT-3** · valider formule `home_away_split` correcte · aligner backend/frontend
 - [ ] P2 MBP-A.2 MED-1 à 6 · back_to_back numérique · pill UI seuil · penalty mort · etc.
 - [ ] P3 MBP-A.2 FAI-1 à 6 · variables backend orphelines · nettoyage `ts_diff`/`avg_pts_diff` morts
