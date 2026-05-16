@@ -64,7 +64,7 @@ néant
 ## TODO prioritaires
 
 ### P1 · critique
-- [ ] **MBP-A.2 CRIT-1** · décision stratégie 2 moteurs NBA (à terme · supprimer backend ou garantir non-divergence)
+- [ ] **MBP-A.2 CRIT-1** · stratégie validée · garder les 2 moteurs + ajouter test de parité backend/frontend
 - [ ] Surveiller hit rate MLB v6.94 post 50 paris · si <52% désactiver bot (Option C)
 - [ ] Surveiller hit rate tennis v6.93 post 50 paris · revert isolé si baisse
 - [ ] Gate `confidence=INCONCLUSIVE` si `data_quality<0.55` (worker.js:5185)
