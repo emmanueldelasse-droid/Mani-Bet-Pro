@@ -23,7 +23,7 @@ Début → "En cours" 1/N · Fin étape → +1 · Merge → vider "En cours" · 
 Update SESSION.md seulement si impact critique. Update docs dédiées à chaque merge concerné.
 
 ## En cours
-- MBP-P1 · gate `data_quality < 0.55` → INCONCLUSIVE · 3 surfaces (backend NBA + Tennis · frontend NBA + legacy) · MLB exclu (label-based) · tests boundaries 33/33 · PR à valider
+- MBP-P1 · gate `data_quality` faible · v2 post-review ChatGPT · 6 surfaces · backend NBA/Tennis (< 0.55 numérique) + backend MLB `_mlbEngineCompute` + `_mlbAnalyzeMatch` strikeouts (`=== 'LOW'`) + frontend EngineCore (NBA + legacy) + frontend MLB `_analyzeMLBMatch` (`=== 'LOW'`) · 44 assertions · parité NBA toujours OK · PR à valider
 
 ## État actuel
 - Worker · `manibetpro.emmanueldelasse.workers.dev` · auto-deploy push main
@@ -67,7 +67,10 @@ Update SESSION.md seulement si impact critique. Update docs dédiées à chaque 
 - [x] **MBP-A.2 CRIT-1** · test parité backend/frontend NBA en place (PR #196) · `node scripts/test-nba-engine-parity.mjs` · 492 assertions · doc `docs/tests/NBA_ENGINE_PARITY.md` · stratégie "garder les 2 moteurs" validée par ChatGPT · MED-1 b2b numérique signalé KNOWN
 - [ ] Surveiller hit rate MLB v6.94 post 50 paris · si <52% désactiver bot (Option C)
 - [ ] Surveiller hit rate tennis v6.93 post 50 paris · revert isolé si baisse
-- [x] **MBP-P1** · Gate `confidence=INCONCLUSIVE` si `data_quality<0.55` (PR à venir) · backend NBA `_botComputeConfidence` + backend Tennis `_botTennisConfidence` (ex-0.30) + frontend `EngineCore._computeConfidenceLevel` · MLB exclu (label-based · gate équivalent existant via 'LOW' = pas de reco) · `node scripts/test-data-quality-gate.mjs` 33/33
+- [x] **MBP-P1** · Gate `data_quality` faible (PR #197 v2) · 6 surfaces ·
+  - NBA/Tennis numérique `< 0.55` → INCONCLUSIVE (`_botComputeConfidence`, `_botTennisConfidence`, `EngineCore._computeConfidenceLevel`)
+  - MLB label-based `=== 'LOW'` → `recommendations: []` + `best: null` (`_mlbEngineCompute`, `_mlbAnalyzeMatch` strikeouts, `_analyzeMLBMatch` orchestrator)
+  - Tests · `node scripts/test-data-quality-gate.mjs` 44/44 · parité NBA 492/0 préservée
 
 ### P2 · important
 - [ ] MBP-A.4 HAUT-1 · intégrer `ai.guard.js` jamais appelé (validation réponses Claude)

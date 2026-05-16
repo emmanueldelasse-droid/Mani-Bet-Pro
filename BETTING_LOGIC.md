@@ -38,26 +38,41 @@ Fonction `_botComputeConfidence` (worker.js:5888 · MBP-A.2 vérifié · MBP-P1-
 - `data_quality` = (1 − missing_vars / total_vars) → [0, 1]
 - `confidence_penalty` = pénalité divergence marché (worker.js:5188)
 
-## Gate data_quality < 0.55 (MBP-P1)
+## Gate data_quality faible (MBP-P1)
 
-Règle commune appliquée en amont des 3 fonctions confidence avec dq numérique ·
-- backend NBA · `_botComputeConfidence` (worker.js:5888)
+Règle uniforme · bloque toute reco exploitable quand la qualité des données est trop faible. Le seuil exact dépend du format `data_quality` par sport.
+
+### Sports avec data_quality numérique → seuil strict `< 0.55`
+- backend NBA · `_botComputeConfidence` (worker.js:5888) · ajout `dataQuality == null || dataQuality < 0.55 → INCONCLUSIVE`
 - backend Tennis · `_botTennisConfidence` (worker.js:9458) · remplace ancien gate à 0.30
-- frontend · `EngineCore._computeConfidenceLevel` (engine.core.js:319) · branches NBA + legacy
+- frontend · `EngineCore._computeConfidenceLevel` (engine.core.js:319) · branches NBA + legacy · `data_quality == null || < 0.55 → INCONCLUSIVE`
 
-Seuil strict · `data_quality < 0.55` force INCONCLUSIVE · `0.55` exact reste autorisé.
-`null` et `undefined` traités comme dq absente → INCONCLUSIVE.
+Comportement · `0.55` exact reste autorisé · `0.549` bloqué · `null`/`undefined` bloqués.
 
-But · empêcher le bot d'afficher une recommandation exploitable sur données fragiles. Ne calibre rien · bloque les signaux faibles uniquement.
+### Sports avec data_quality label-based → gate `=== 'LOW'`
+- backend MLB · `_mlbEngineCompute` (worker.js:8424) · ajout `recommendations: []` et `best: null` si `dataQuality === 'LOW'`
+- backend MLB enrichissement props · `_mlbAnalyzeMatch` (worker.js:8336) · skip strikeouts merge si `analysis.data_quality === 'LOW'`
+- frontend MLB · `_analyzeMLBMatch` (data.orchestrator.js:1370) · ajout `recommendations: []`, `best_recommendation: null`, `decision: 'INSUFFISANT'` si `dataQuality === 'LOW'`
 
-MLB backend exclu · son `data_quality` est label-based ('LOW'/'MEDIUM'/'HIGH') · le gate équivalent existant est 'LOW' = pas de reco (worker.js:8425+).
+Comportement · `LOW` force aucune reco/best · `MEDIUM`/`HIGH` inchangés.
 
-Tests · `node scripts/test-data-quality-gate.mjs` · 33 assertions sur boundaries (0.54 · 0.55 · 0.56 · null · undefined).
+### Note historique (claim erroné corrigé)
+
+Avant MBP-P1, MLB n'avait PAS de gate effectif côté `_mlbEngineCompute` ni côté `_analyzeMLBMatch` · seule la doc affirmait que `'LOW' = pas de reco` · vérification code (PR #197 review ChatGPT) a montré que les recos étaient produites quelle que soit la `data_quality`. MBP-P1 corrige en posant le gate explicite dans le moteur · le claim doc est maintenant vrai.
+
+### But
+
+Empêcher le bot d'afficher une recommandation exploitable sur données fragiles. Ne calibre rien · ne touche pas aux poids ni aux seuils HIGH/MEDIUM · bloque les signaux faibles uniquement.
+
+### Tests
+
+- `node scripts/test-data-quality-gate.mjs` · 44 assertions sur 6 surfaces (NBA/Tennis boundaries + MLB LOW/HIGH backend + frontend)
+- `node scripts/test-nba-engine-parity.mjs` · 492 assertions · parité backend↔frontend NBA préservée
 
 ## Data quality
 - NBA · numérique [0, 1] · 11 vars (worker.js:3537)
-- MLB · enum `LOW`/`MEDIUM`/`HIGH` (worker.js:8425)
-  - `LOW` si pitcher FIP/ERA manquant → pas de reco (gate équivalent)
+- MLB · enum `LOW`/`MEDIUM`/`HIGH` (worker.js:8519)
+  - `LOW` si pitcher FIP/ERA manquant · MBP-P1 force `recommendations: []` + `best: null` côté backend ET frontend
   - `HIGH` si pitcher + team_ops + team_era + bullpen tous présents
 - Tennis · `_botTennisDataQuality` · [0, 1] · INCONCLUSIVE si < 0.55 (MBP-P1 · ex-0.30) (worker.js:9458)
 
@@ -225,8 +240,8 @@ fatigue_index
 
 ## Règles de blocage
 - INCONCLUSIVE → pas de reco affichée user
-- data_quality LOW (MLB · label-based) → pas de reco
-- data_quality < 0.55 (NBA · Tennis · frontend) → confidence forcée INCONCLUSIVE (MBP-P1 · worker.js:5888 · 9458 · engine.core.js:319)
+- data_quality `LOW` (MLB · label-based) → `recommendations: []` + `best: null` + `decision: 'INSUFFISANT'` (MBP-P1 · worker.js:8424 + 8336 · data.orchestrator.js:1370)
+- data_quality < 0.55 (NBA · Tennis · frontend EngineCore) → confidence forcée INCONCLUSIVE (MBP-P1 · worker.js:5888 · 9458 · engine.core.js:319)
 - Edge sous seuil → pas de reco
 - Sample insuffisant (NBA <10 games · tennis <15 matchs) → pas de reco
 - Cote ≥ 5 + edge < 15% → drop (tennis)

@@ -1367,7 +1367,7 @@ const MLB_PARK_FACTORS_FRONT = {
   'Rogers Centre':102,'Nationals Park':99,
 };
 
-function _analyzeMLBMatch(match) {
+export function _analyzeMLBMatch(match) {
   const { home_pitcher, away_pitcher, home_season, away_season, venue, market_odds } = match;
 
   const hFIP = home_pitcher?.fip ?? home_pitcher?.era ?? 4.20;
@@ -1440,23 +1440,31 @@ function _analyzeMLBMatch(match) {
       contribution: restAdv,     direction: _sigDir(restAdv) },
   ].filter(s => Math.abs(s.contribution) >= 0.01);
 
+  // MBP-P1-DQ-GATE MLB · data_quality === 'LOW' → aucune reco exploitable.
+  // MLB utilise un dq label-based · le gate équivalent au seuil 0.55 numérique
+  // est ici la valeur 'LOW' (pitcher FIP/ERA absent ou autre var critique missing).
+  // Aligné comportement backend `_mlbEngineCompute` (worker.js:8424).
+  const dataQuality  = missing.length ? 'LOW' : home_pitcher?.fip ? 'HIGH' : 'MEDIUM';
+  const isLowQuality = dataQuality === 'LOW';
+  const gatedRecs    = isLowQuality ? [] : recommendations;
+  const gatedBest    = isLowQuality ? null : (recommendations.find(r => !r.is_contrarian) ?? null);
+
   return {
     sport:            'MLB',
     match_id:         match.id,
-    decision:         recommendations.length ? 'EXPLORER' : 'INSUFFISANT',
+    decision:         gatedRecs.length ? 'EXPLORER' : 'INSUFFISANT',
     rejection_reason: missing.length >= 2 ? 'MISSING_PITCHER_DATA' : null,
     predictive_score: homeProb,
     home_win_prob:    homeProb,
     away_win_prob:    1 - homeProb,
     motor_prob_home:  Math.round(homeProb * 100),
     motor_prob_away:  Math.round((1 - homeProb) * 100),
-    data_quality:     missing.length ? 'LOW' : home_pitcher?.fip ? 'HIGH' : 'MEDIUM',
+    data_quality:     dataQuality,
     missing_variables: missing,
     est_total_runs:   estTotal,
     park_factor:      parkFactor,
-    recommendations,
-    // Mode A (prudent) : exclure les paris contrarian du "best".
-    best_recommendation: recommendations.find(r => !r.is_contrarian) ?? null,
+    recommendations:  gatedRecs,
+    best_recommendation: gatedBest,
     key_signals,
     variables_used: {
       pitcher_fip_diff: { value: Math.round(fipDiff * 100) / 100, quality: 'OK' },

@@ -89,6 +89,7 @@ function loadBackendSandbox() {
     '_botComputeConfidence',
     '_botTennisConfidence',
     '_botEngineCompute',
+    '_mlbEngineCompute',
   ];
   const exported = {};
   for (const name of required) {

@@ -8333,7 +8333,9 @@ async function _mlbAnalyzeMatch(match, dateStr, pitchersData, oddsData, standing
   if (!analysis) return null;
 
   // Matching projection K starter ↔ Pinnacle MLB lines · génère reco PITCHER_STRIKEOUTS
-  if (env && analysis.pitcher_strikeouts_prediction?.available) {
+  // MBP-P1-DQ-GATE MLB · skip si data_quality === 'LOW' · `_mlbEngineCompute` a déjà
+  // vidé recommendations+best · ne pas re-peupler via enrichissement props.
+  if (env && analysis.pitcher_strikeouts_prediction?.available && analysis.data_quality !== 'LOW') {
     try {
       const lines = await _fetchPlayerStrikeoutsPinnacle(homeName, awayName, dateStr, env);
       if (lines?.available) {
@@ -8601,6 +8603,13 @@ function _mlbEngineCompute(matchData) {
   // Projections strikeouts starters (props joueur MLB Phase 1)
   const pitcherStrikeouts = _botPredictMLBStrikeouts(matchData);
 
+  // MBP-P1-DQ-GATE MLB · data_quality === 'LOW' → aucune reco exploitable.
+  // MLB utilise un dq label-based ('LOW'/'MEDIUM'/'HIGH') · le gate équivalent
+  // au seuil 0.55 numérique est ici la valeur 'LOW' (pitcher FIP/ERA manquant).
+  // Empêche le bot d'afficher une recommandation sur données fragiles.
+  // Aligné comportement frontend `computeMLB` (engine.mlb.betting.js).
+  const _mlbLowQuality = dataQuality === 'LOW';
+
   return {
     home_prob:    Math.round(homeProb * 100),
     away_prob:    Math.round((1 - homeProb) * 100),
@@ -8626,9 +8635,9 @@ function _mlbEngineCompute(matchData) {
       home_pitcher:        home_pitcher?.name ?? null,
       away_pitcher:        away_pitcher?.name ?? null,
     },
-    recommendations,
-    best:          recommendations[0] ?? null,
-    est_total_runs: Math.round(estTotal * 10) / 10,
+    recommendations: _mlbLowQuality ? [] : recommendations,
+    best:            _mlbLowQuality ? null : (recommendations[0] ?? null),
+    est_total_runs:  Math.round(estTotal * 10) / 10,
     pitcher_strikeouts_prediction: pitcherStrikeouts,
   };
 }
