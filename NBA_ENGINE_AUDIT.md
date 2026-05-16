@@ -565,25 +565,28 @@ Grep `exploitability` worker.js · 0 résultat. Mentionné dans la mission audit
 | 15 | Champs purement décoratifs ? | Emojis · couleurs · labels FR · étoiles blessures · Win/Loss tiles |
 | 16 | Champs critiques pour qualité réelle ? | `motor_prob` · `confidence_level` · `edge` · `kelly_stake` · `market_divergence_flag` |
 
-## 16. Prochaines priorités recommandées
+## 16. Prochaines priorités recommandées (mis à jour post-MBP-FIX-A.2.x + PR #196 #197)
 
-### P1 · alignement structurel
-1. **MBP-A.2 CRIT-1** · décision ChatGPT · faut-il garder les 2 moteurs ou en supprimer un · si garder · synchronisation explicite
-2. **MBP-A.2 CRIT-2** · aligner algorithme confidence (recommandation Claude · adopter distance-based backend partout · plus robuste aux faibles échantillons)
-3. **MBP-A.2 CRIT-3** · valider formule `home_away_split` correcte · aligner
+### P1 · résolu ou anti-régression
+1. ✓ **MBP-A.2 CRIT-1** · décision ChatGPT · garder les 2 moteurs + anti-régression via test parité automatisé (PR #196 · `scripts/test-nba-engine-parity.mjs` · 492 assertions · 2 phases · 11 vars + score + dq + confidence)
+2. ✓ **MBP-A.2 CRIT-2** · MBP-FIX-A.2.1 · `EngineCore._computeConfidenceLevel` branche NBA distance-based identique backend `_botComputeConfidence`
+3. ✓ **MBP-A.2 CRIT-3** · MBP-FIX-A.2.2 · `computeHomeSplit` formule 4 vars clamp [-0.50, 0.50] identique backend
+4. ✓ **MBP-P1** · Gate `data_quality < 0.55` → INCONCLUSIVE backend + frontend NBA (PR #197 · couvre aussi Tennis numérique + MLB label-based)
 
 ### P2 · cohérence cosmétique
-4. MED-1 · `back_to_back` numérique
-5. MED-3 · supprimer `confidence_penalty.score` mort
-6. MED-4 · seuil pill UI ↔ moteur
+5. MED-1 · `back_to_back` numérique (-0.6/+0.6 backend vs -1/+1 frontend) · reporté KNOWN-DIVERGENCE par le test parité · à aligner quand bandwidth
+6. MED-3 · supprimer `confidence_penalty.score` mort
+7. MED-4 · seuil pill UI ↔ moteur
 
 ### P3 · nettoyage dette
-7. FAI-1/2 · supprimer 5 variables backend orphelines + 2 morts
-8. FAI-5 · guard `__ema_lambda`
+8. FAI-1/2 · supprimer 5 variables backend orphelines + 2 morts
+9. FAI-5 · guard `__ema_lambda`
+10. Supprimer dead code `src/engine/engine.mlb.betting.js` (`computeMLB` jamais importé · note KNOWN_ISSUES P1-3)
 
 ### P3 hors périmètre MBP-A.2 (déjà ailleurs)
 - MBP-A.4 HAUT-1 · intégrer `ai.guard.js` (validation réponses Claude)
-- Calibration Alon · audit hit rate avec backend actuel
+- Calibration Alon · audit hit rate avec backend actuel · attendre 50 logs post-MBP-P1 (rule SESSION.md)
+- Monitoring · `scripts/report-bot-monitoring.mjs` · suit hit rate par confidence · par type · par sport (PR #198)
 
 ## 17. À vérifier (post-audit)
 
@@ -597,7 +600,19 @@ Grep `exploitability` worker.js · 0 résultat. Mentionné dans la mission audit
 Cet audit ne couvre **pas** ·
 - Moteur MLB (MBP-A.2 NBA uniquement)
 - Moteur Tennis (MBP-A.2 NBA uniquement · MBP-A.X possible)
-- Tests automatisés (pas de suite Jest/Vitest dans le repo)
 - Performance · pas de profiling
 - A11y · pas d'audit accessibilité
-- Calibration logs réels par sport (réservé à MBP-A.3)
+- Calibration logs réels par sport (réservé à MBP-A.3 · partiellement adressé par monitoring PR #198)
+
+## 19. Évolution post-audit (PRs mergées)
+
+### Tests automatisés ajoutés (vs note initiale "pas de suite Jest/Vitest")
+- Pas de framework lourd · 3 scripts Node ESM purs sans dépendance npm ·
+  - `scripts/test-nba-engine-parity.mjs` · 492 assertions (PR #196)
+  - `scripts/test-data-quality-gate.mjs` · 44 assertions (PR #197)
+  - `scripts/test-bot-monitoring-summary.mjs` · 50 assertions (PR #198)
+- Lib partagée · `scripts/lib/dom-stub.mjs` (stub `window` pour Logger) · `scripts/lib/backend-engine.mjs` (vm sandbox worker.js)
+
+### Tooling monitoring
+- `scripts/report-bot-monitoring.mjs` (PR #198) · CLI read-only · suit l'impact des garde-fous sur les logs production · décisions auto MLB/Tennis sur 50 derniers settlés
+- Doc · `docs/monitoring/BOT_MONITORING.md`

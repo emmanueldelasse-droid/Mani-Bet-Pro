@@ -48,11 +48,32 @@ néant
 
 ### Moteur NBA (chantier MBP-A.2)
 - 2 moteurs distincts · backend cron logs + frontend runtime UI
+- **CRIT-1 anti-régression** · PR #196 · test parité 492 assertions sur 2 phases (regular + playoff) · poids + variables + score + confidence + dq lus depuis les vraies sources · MED-1 b2b numérique reporté KNOWN-DIVERGENCE
 - **CRIT-2 confidence aligné** · MBP-FIX-A.2.1 · frontend NBA distance-based identique backend
 - **CRIT-3 home_away_split aligné** · MBP-FIX-A.2.2 · formule 4 vars clamp [-0.50, 0.50] identique backend
-- CRIT-1 (2 moteurs) · structurel · stratégie validée garder + aligner progressivement
 - MED-1 à 6 · pendant · `back_to_back` numérique · robustness backend · etc.
 - FAI-1 à 6 · pendant · variables backend orphelines · nettoyage `ts_diff` `avg_pts_diff` morts
+
+### Gate data_quality (MBP-P1 · PR #197)
+- NBA/Tennis numérique · `dq < 0.55` → `INCONCLUSIVE` (`_botComputeConfidence` · `_botTennisConfidence` · `EngineCore._computeConfidenceLevel`)
+- MLB label-based · `dq === 'LOW'` → `recommendations: []` + `best: null` (`_mlbEngineCompute` · `_mlbAnalyzeMatch` strikeouts · `_analyzeMLBMatch` orchestrator frontend)
+- Tests · 44 assertions boundaries (`scripts/test-data-quality-gate.mjs`)
+- Doc · `BETTING_LOGIC.md` §"Gate data_quality faible (MBP-P1)"
+
+### Monitoring (MBP-monitoring · PR #198)
+- Rapport read-only `scripts/report-bot-monitoring.mjs` · 3 modes (`--demo` · `--url <worker>` · `--fixture <json>`)
+- Source · 3 routes publiques GET existantes (`/bot/logs` · `/mlb/bot/logs` · `/tennis/bot/logs`)
+- Décisions auto · MLB `LIMITER_OU_DESACTIVER` si 50+ settlés ET hit_last_50 < 52% · Tennis `SURVEILLER_REVERT` si < 50%
+- `total_blocked` = logs UNIQUES bloqués · `blocked_reasons_total` = somme brute (diagnostic)
+- En mode `--url` · 1+ endpoint en erreur → bandeau RAPPORT INCOMPLET stderr + exit 1
+- Tests · 50 assertions (`scripts/test-bot-monitoring-summary.mjs`)
+- Doc · `docs/monitoring/BOT_MONITORING.md`
+
+### Tests automatisés (Node ESM · pas de framework)
+- `scripts/test-nba-engine-parity.mjs` · 492 assertions parité backend↔frontend NBA (PR #196)
+- `scripts/test-data-quality-gate.mjs` · 44 assertions boundaries 6 surfaces gate (PR #197)
+- `scripts/test-bot-monitoring-summary.mjs` · 50 assertions monitoring (PR #198)
+- Lib partagée · `scripts/lib/dom-stub.mjs` (stub window pour import Logger) · `backend-engine.mjs` (vm sandbox worker.js)
 
 ## Conventions
 - Confidence · `HIGH/MEDIUM/LOW/INCONCLUSIVE` (jamais "Data quality" en UI)
@@ -65,12 +86,13 @@ néant
 
 ### P1 · critique
 - [x] **MBP-A.2 CRIT-1** · test parité backend/frontend NBA en place (PR #196) · `node scripts/test-nba-engine-parity.mjs` · 492 assertions · doc `docs/tests/NBA_ENGINE_PARITY.md` · stratégie "garder les 2 moteurs" validée par ChatGPT · MED-1 b2b numérique signalé KNOWN
-- [ ] Surveiller hit rate MLB v6.94 post 50 paris · si <52% désactiver bot (Option C)
-- [ ] Surveiller hit rate tennis v6.93 post 50 paris · revert isolé si baisse
+- [ ] Surveiller hit rate MLB v6.94 post 50 paris · si <52% désactiver bot (Option C) · outil · `node scripts/report-bot-monitoring.mjs --url <worker>` (PR #198 · décide auto LIMITER_OU_DESACTIVER sur 50 derniers settlés)
+- [ ] Surveiller hit rate tennis v6.93 post 50 paris · revert isolé si baisse · outil · `node scripts/report-bot-monitoring.mjs --url <worker>` (PR #198 · décide auto SURVEILLER_REVERT sur 50 derniers settlés)
 - [x] **MBP-P1** · Gate `data_quality` faible (PR #197 v2) · 6 surfaces ·
   - NBA/Tennis numérique `< 0.55` → INCONCLUSIVE (`_botComputeConfidence`, `_botTennisConfidence`, `EngineCore._computeConfidenceLevel`)
   - MLB label-based `=== 'LOW'` → `recommendations: []` + `best: null` (`_mlbEngineCompute`, `_mlbAnalyzeMatch` strikeouts, `_analyzeMLBMatch` orchestrator)
   - Tests · `node scripts/test-data-quality-gate.mjs` 44/44 · parité NBA 492/0 préservée
+- [x] **MBP-monitoring** · rapport read-only post-gate (PR #198) · `node scripts/report-bot-monitoring.mjs` · 3 modes (`--demo` · `--url` · `--fixture`) · 50/50 tests · doc `docs/monitoring/BOT_MONITORING.md`
 
 ### P2 · important
 - [ ] MBP-A.4 HAUT-1 · intégrer `ai.guard.js` jamais appelé (validation réponses Claude)
@@ -88,7 +110,8 @@ néant
 - [ ] Réactiver paris contrarian après 200+ logs · cotes≥3
 - [ ] Réactiver api-tennis fixtures si compte payé · `env.TENNIS_API_FIXTURES_ENABLED=1`
 - [ ] MBP-A.1 MED-5/6 · supprimer constantes mortes `MLB_PITCHER_KV_KEY` `NBA_INJURY_BASE`
-- [ ] Option B · script test de parité backend ↔ frontend automatisé (anti-régression)
+- [ ] Supprimer dead code `src/engine/engine.mlb.betting.js` (`computeMLB`) · jamais importé en prod (KNOWN_ISSUES P1-3 note)
+- [x] Option B · script test de parité backend ↔ frontend automatisé · livré PR #196 (`scripts/test-nba-engine-parity.mjs`)
 
 Détail dette technique · `KNOWN_ISSUES.md`
 
@@ -135,15 +158,17 @@ Détail dette technique · `KNOWN_ISSUES.md`
 - `BOT_OBJECTIVE.md` · mission · ce que le projet est · n'est pas · règles absolues
 - `PROJECT_RULES.md` · workflow ChatGPT/Claude/user · interdictions · règles auth
 - `CLAUDE.md` · règles session Claude · périmètre · style
-- `ARCHITECTURE.md` · stack · modules · zones sensibles · 2 moteurs NBA
-- `DATA_PIPELINE.md` · flux NBA/MLB/Tennis · caches KV · TTL · rate limits per-IP
-- `BETTING_LOGIC.md` · confidence backend-canonique · variables · calibration
+- `ARCHITECTURE.md` · stack · modules · zones sensibles · 2 moteurs NBA · infra tests
+- `DATA_PIPELINE.md` · flux NBA/MLB/Tennis · caches KV · TTL · rate limits per-IP · effet MBP-P1
+- `BETTING_LOGIC.md` · confidence backend-canonique · variables · gate MBP-P1 (data_quality) · calibration
 - `PROVIDERS_MATRIX.md` · 12 providers · clés · fallbacks · quotas
-- `KNOWN_ISSUES.md` · bugs P1/P2/P3 · dette technique · écarts MBP-A.1 + A.2 + A.4
+- `KNOWN_ISSUES.md` · bugs P1/P2/P3 · dette technique · écarts MBP-A.1 + A.2 + A.4 + P1-3 (résolu MBP-P1)
 - `CHECKLIST_MERGE.md` · checklist pré-merge
 - `ROUTES_AUDIT.md` · 54 routes HTTP + 7 cron exhaustif (MBP-A.1)
 - `SECURITY_AUDIT.md` · 6 CRIT résolus · 9 HAUT + 6 MOY + 5 FAI restent (MBP-A.4)
-- `NBA_ENGINE_AUDIT.md` · pipeline NBA backend ↔ frontend · 2 moteurs (MBP-A.2)
+- `NBA_ENGINE_AUDIT.md` · pipeline NBA backend ↔ frontend · 2 moteurs (MBP-A.2) · CRIT-2/3 résolus
+- `docs/tests/NBA_ENGINE_PARITY.md` · test parité backend↔frontend NBA · 492 assertions (MBP-A.2 PR #196)
+- `docs/monitoring/BOT_MONITORING.md` · rapport monitoring read-only post-gate MBP-P1 (PR #198)
 - `.claude/onboarding.md` · deploy/setup/reprise compte
 - `.claude/agents/alon.md` · analyste calibration bot
 - `git log` · historique PRs et versions

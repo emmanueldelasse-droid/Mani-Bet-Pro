@@ -128,6 +128,39 @@ Alon agent (.claude/agents/alon.md) · proposition ajustements poids
 Edit sports.config.js · commit · merge
 ```
 
+## Flux monitoring (MBP-monitoring · PR #198)
+```
+node scripts/report-bot-monitoring.mjs --url <worker_origin>
+  ↓
+fetch parallèle (read-only · pas de provider externe)
+  - GET /bot/logs           (NBA · worker.js:3855)
+  - GET /mlb/bot/logs       (MLB · worker.js:8924)
+  - GET /tennis/bot/logs    (Tennis · worker.js:10558)
+  ↓
+summarize(logsBySport)  · pure function
+  - matchs analysés · matchs avec reco exploitable · total_blocked (UNIQUE)
+  - INCONCLUSIVE · MLB LOW · dq<0.55 · settlés vs non
+  - hit rate global + 50 derniers · par confidence · par type
+  - distribution data_quality (numérique buckets ou label LOW/MEDIUM/HIGH)
+  - décisions auto · MLB LIMITER_OU_DESACTIVER · Tennis SURVEILLER_REVERT · NBA OK/SURVEILLER
+  ↓
+console output formaté (formatReport)
+  - exit 0 si OK · exit 1 si rapport incomplet (≥1 fetch failed)
+```
+Doc · `docs/monitoring/BOT_MONITORING.md`.
+
+## Effet MBP-P1 sur les logs (PR #197)
+
+Le gate `data_quality` faible (worker.js:5888 NBA · :9458 Tennis · :8424 MLB engine · :8336 MLB strikeouts) modifie le contenu des logs persistés ·
+
+| Sport | Condition | Effet log |
+|---|---|---|
+| NBA | `data_quality < 0.55` (numérique) | `confidence_level: 'INCONCLUSIVE'` · `betting_recommendations.best` reste possible mais reco INCONCLUSIVE non exploitée UI |
+| Tennis | `data_quality < 0.55` (numérique) | idem NBA · `confidence_level: 'INCONCLUSIVE'` |
+| MLB | `data_quality === 'LOW'` (label) | `recommendations: []` · `best: null` · enrichissement strikeouts skip |
+
+Conséquence calibration · les logs LOW MLB et < 0.55 NBA/Tennis ne génèrent plus de paris exploitables · le hit rate post-MBP-P1 ne mélange plus les recos sur données fragiles. Attendre 50 nouveaux paris settlés post-gate avant toute recalibration (rule SESSION.md P1).
+
 ## Caches KV (TTL · MBP-A.1 vérifié)
 
 ### Persistants (sans TTL)

@@ -49,7 +49,7 @@ index.html + src/ui/*.js (GitHub Pages front)
 - `src/paper/` · `paper.engine.js` (place bet) · `paper.settler.js` (settle bet)
 - `src/providers/` · `provider.cache.js` · `provider.injuries.js` · `provider.nba.js`
 - `src/state/store.js` · état global front
-- `src/utils/` · `utils.logger.js` · `utils.odds.js` · `utils.update-checker.js`
+- `src/utils/` · `utils.logger.js` · `utils.odds.js` · `utils.update-checker.js` · `utils.paper-auth.js` (clé Paper front MBP-S.2.1)
 
 ## Cloudflare Worker config (`wrangler.jsonc`)
 - `name: manibetpro`
@@ -92,17 +92,31 @@ index.html + src/ui/*.js (GitHub Pages front)
 - **Backend** · `_botEngineCompute` (worker.js:5211) · appelé uniquement par cron `_runBotCron` (worker.js:3528) · sortie logs KV `bot_log_*` → calibration Alon
 - **Frontend** · `EngineCore.compute('NBA', rawData)` (`data.orchestrator.js:857`) · appelé à chaque chargement utilisateur · sortie store · affichage UI
 - **Pas de route HTTP `/nba/analyze`** · l'UI ne consomme jamais le moteur backend
-- **3 divergences critiques** détectées · confidence algo · `home_away_split` · `back_to_back` (voir `KNOWN_ISSUES.md` MBP-A.2 CRIT-1/2/3)
+- **CRIT-2 résolu** MBP-FIX-A.2.1 · confidence aligné distance-based · **CRIT-3 résolu** MBP-FIX-A.2.2 · `home_away_split` aligné · **CRIT-1 anti-régression** PR #196 · test parité `scripts/test-nba-engine-parity.mjs` (492 assertions · 2 phases)
+- MED-1 `back_to_back` numérique (-0.6/+0.6 backend vs -1/+1 frontend) · reste pendant · documenté KNOWN-DIVERGENCE par le test parité
 
 ## Zones sensibles
 - `_botEngineCompute` (worker.js:5211) · cœur calcul NBA backend (cron · logs · calibration)
 - `EngineCore.compute` `EngineNBA.compute` `EngineRobustness.compute` · cœur calcul NBA frontend (runtime user)
-- `_botComputeConfidence` (worker.js:5888) · gate HIGH/MEDIUM/LOW/INCONCLUSIVE · source canonique NBA (MBP-FIX-A.2.1)
+- `_botComputeConfidence` (worker.js:5888) · gate HIGH/MEDIUM/LOW/INCONCLUSIVE · source canonique NBA (MBP-FIX-A.2.1) · gate dq<0.55 ajouté MBP-P1
+- `_botTennisConfidence` (worker.js:9458) · idem Tennis · gate dq<0.55 MBP-P1 (ex-0.30)
+- `_mlbEngineCompute` (worker.js:8424) · moteur MLB inline · gate `dq==='LOW'` → recos:[] + best:null MBP-P1
+- `_mlbAnalyzeMatch` (worker.js:8336) · enrichissement strikeouts · skip si LOW MBP-P1
+- `_analyzeMLBMatch` (data.orchestrator.js:1370) · vrai chemin MLB frontend · gate LOW MBP-P1
 - `_botComputeBettingRecs` (worker.js:5334) · génération recos · Kelly · edge
 - `_botSaveLog` (worker.js:3606) · persistance logs KV
 - `_botSettleDate` (worker.js:3852) · réconciliation résultats
 - `_runNightlySettle` (worker.js:4237) · idempotence 48h
 - `handlePaperPlaceBet` · `handlePaperSettleBet` (worker.js:5887, 5937) · paper trading
+
+## Infra tests (Node ESM · pas de framework)
+- `scripts/test-nba-engine-parity.mjs` · 492 assertions parité backend↔frontend NBA (PR #196 · MBP-A.2)
+- `scripts/test-data-quality-gate.mjs` · 44 assertions boundaries gate 6 surfaces (PR #197 · MBP-P1)
+- `scripts/test-bot-monitoring-summary.mjs` · 50 assertions rapport monitoring (PR #198)
+- `scripts/report-bot-monitoring.mjs` · CLI read-only · 3 modes (`--demo` · `--url <origin>` · `--fixture <path>`)
+- `scripts/lib/dom-stub.mjs` · stub `window.location` + `localStorage` pour imports Logger en Node
+- `scripts/lib/backend-engine.mjs` · vm sandbox worker.js · expose fonctions pures `_bot*` + `_mlbEngineCompute` + `getWeightsForPhase`
+- Aucun framework lourd (Jest/Vitest) · ESM natif Node 20+ · pas de dépendance npm
 
 ## Sécurité (post chantier MBP-A.4 · `SECURITY_AUDIT.md`)
 **6/6 critiques résolues** ·
