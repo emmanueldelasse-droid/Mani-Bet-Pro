@@ -173,6 +173,7 @@ export function summarizeSport(logs, sport) {
       total_analyzed:        0,
       total_recos_exploitable: 0,
       total_blocked:         0,
+      blocked_reasons_total: 0,
       total_inconclusive:    0,
       mlb_low_blocked:       0,
       dq_below_055_blocked:  0,
@@ -200,13 +201,22 @@ export function summarizeSport(logs, sport) {
   const inconclusive = sorted.filter(isInconclusive).length;
   const mlbLowBlocked = sport === 'MLB' ? sorted.filter(isMLBLowBlocked).length : 0;
   const numericLowBlocked = sport !== 'MLB' ? sorted.filter(isNumericDqBelowThreshold).length : 0;
-  const totalBlocked = inconclusive + mlbLowBlocked + numericLowBlocked;
+
+  // Logs UNIQUES bloqués · un log peut être INCONCLUSIVE ET dq<0.55 simultanément
+  // (cas typique post-MBP-P1) · ne pas compter 2 fois.
+  // Note · `blocked_reasons_total` (somme brute) reste exposé séparément pour
+  // diagnostic.
+  const totalBlocked = sport === 'MLB'
+    ? sorted.filter(isMLBLowBlocked).length
+    : sorted.filter(l => isInconclusive(l) || isNumericDqBelowThreshold(l)).length;
+  const blockedReasonsTotal = inconclusive + mlbLowBlocked + numericLowBlocked;
 
   const result = {
     sport,
     total_analyzed:           sorted.length,
     total_recos_exploitable:  recosExploitable,
-    total_blocked:            totalBlocked,
+    total_blocked:            totalBlocked,           // logs UNIQUES bloqués
+    blocked_reasons_total:    blockedReasonsTotal,    // somme brute (peut dépasser si chevauchements)
     total_inconclusive:       inconclusive,
     mlb_low_blocked:          mlbLowBlocked,
     dq_below_055_blocked:     numericLowBlocked,
@@ -382,6 +392,32 @@ export function formatReport(summary) {
   lines.push('CONCLUSION');
   for (const m of summary.conclusion) lines.push(`  · ${m}`);
   return lines.join('\n');
+}
+
+// ── Évaluation des erreurs fetch (mode --url) ───────────────────────────────
+
+/**
+ * Décide du comportement du CLI quand des endpoints échouent en mode --url.
+ *
+ * Règle (validée ChatGPT post-review PR #198) · ANY erreur → rapport
+ * incomplet → exit 1. Un outil de monitoring ne doit jamais produire un
+ * rapport silencieux comme si tout allait bien.
+ *
+ * Input · array d'erreurs { sport, url, reason }
+ * Output · { incomplete, exitCode, failedSports[], allFailed }
+ *
+ * Pure function · testable sans réseau.
+ */
+export function evaluateFetchErrors(errors) {
+  if (!Array.isArray(errors) || errors.length === 0) {
+    return { incomplete: false, exitCode: 0, failedSports: [], allFailed: false };
+  }
+  return {
+    incomplete:    true,
+    exitCode:      1,
+    failedSports:  errors.map(e => e.sport),
+    allFailed:     errors.length >= 3,
+  };
 }
 
 // ── Constantes exportées (utiles tests) ─────────────────────────────────────

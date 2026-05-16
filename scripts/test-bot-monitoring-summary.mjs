@@ -9,7 +9,7 @@
  * Exit · 0 OK · 1 fail.
  */
 
-import { summarize, summarizeSport, _CONST } from './lib/monitoring-summary.mjs';
+import { summarize, summarizeSport, evaluateFetchErrors, _CONST } from './lib/monitoring-summary.mjs';
 import { NBA_FIXTURE_LOGS, MLB_FIXTURE_LOGS, TENNIS_FIXTURE_LOGS, DEMO_LOGS_BY_SPORT } from './lib/monitoring-fixtures.mjs';
 
 const results = [];
@@ -34,8 +34,11 @@ expect('NBA · dq_below_055_blocked', 2, nba.dq_below_055_blocked);
 expect('NBA · mlb_low_blocked', 0, nba.mlb_low_blocked);
 // recos exploitables · best non null OU recs.length > 0 · 10 logs (007 et 008 vides)
 expect('NBA · total_recos_exploitable', 10, nba.total_recos_exploitable);
-// total_blocked = inconclusive + dq below = 2 + 2 = 4
-expect('NBA · total_blocked', 4, nba.total_blocked);
+// total_blocked = logs UNIQUES bloqués · NBA-007 et NBA-008 ont les 2 conditions
+// (INCONCLUSIVE + dq < 0.55) · comptés 1 fois chacun = 2
+expect('NBA · total_blocked (unique logs)', 2, nba.total_blocked);
+// blocked_reasons_total = somme brute des raisons = inconclusive(2) + dq(2) = 4
+expect('NBA · blocked_reasons_total (somme brute)', 4, nba.blocked_reasons_total);
 // status · total_settled=9 < NBA_RECHECK_MIN=80 → SURVEILLER
 expect('NBA · status', 'SURVEILLER', nba.status);
 
@@ -144,6 +147,71 @@ expect('Conclusion · liste non vide', true, Array.isArray(full.conclusion) && f
 // (test passif · le module n'importe rien qui touche le réseau · vérif par lecture
 // du fichier)
 expect('Module purement local', true, _CONST.NUMERIC_DQ_THRESHOLD === 0.55);
+
+// ── 10. total_blocked unique · post-review ChatGPT ─────────────────────────
+// Un log NBA peut être INCONCLUSIVE ET avoir dq < 0.55 simultanément.
+// total_blocked doit compter ce log 1 fois · pas 2.
+// blocked_reasons_total reste exposé séparément (somme brute des raisons).
+const overlapNBA = [
+  { match_id: 'OV-1', logged_at: '2026-05-01T00:00:00Z', motor_was_right: null,
+    confidence_level: 'INCONCLUSIVE', data_quality: 0.42,  // les 2 conditions
+    betting_recommendations: { recommendations: [], best: null } },
+  { match_id: 'OV-2', logged_at: '2026-05-02T00:00:00Z', motor_was_right: true,
+    confidence_level: 'INCONCLUSIVE', data_quality: 0.65,  // INCONCLUSIVE seul
+    betting_recommendations: { recommendations: [], best: null } },
+  { match_id: 'OV-3', logged_at: '2026-05-03T00:00:00Z', motor_was_right: true,
+    confidence_level: 'LOW', data_quality: 0.50,  // dq < 0.55 seul
+    betting_recommendations: { recommendations: [], best: null } },
+];
+const ovSummary = summarizeSport(overlapNBA, 'NBA');
+expect('Overlap NBA · total_inconclusive (compteur raison)', 2, ovSummary.total_inconclusive);
+expect('Overlap NBA · dq_below_055_blocked (compteur raison)', 2, ovSummary.dq_below_055_blocked);
+expect('Overlap NBA · blocked_reasons_total (somme brute)', 4, ovSummary.blocked_reasons_total);
+// Logs uniques bloqués · 3 logs · OV-1 et OV-2 et OV-3
+expect('Overlap NBA · total_blocked (logs uniques)', 3, ovSummary.total_blocked);
+
+// Cas Tennis · 1 log dq=0.48 + INCONCLUSIVE → total_blocked 1, pas 2
+const overlapTennis = [
+  { match_id: 'OT-1', logged_at: '2026-05-01T00:00:00Z', motor_was_right: null,
+    confidence_level: 'INCONCLUSIVE', data_quality: 0.48,
+    betting_recommendations: { recommendations: [], best: null } },
+];
+const otSummary = summarizeSport(overlapTennis, 'TENNIS');
+expect('Overlap Tennis · total_blocked (1 log · 2 raisons)', 1, otSummary.total_blocked);
+expect('Overlap Tennis · blocked_reasons_total (somme brute=2)', 2, otSummary.blocked_reasons_total);
+
+// MLB · 1 log LOW · total_blocked 1
+const overlapMLB = [
+  { match_id: 'OM-1', logged_at: '2026-05-01T00:00:00Z', motor_was_right: null,
+    confidence_level: 'LOW', data_quality: 'LOW',
+    betting_recommendations: { recommendations: [], best: null } },
+];
+const omSummary = summarizeSport(overlapMLB, 'MLB');
+expect('Overlap MLB · total_blocked (1 log LOW)', 1, omSummary.total_blocked);
+expect('Overlap MLB · mlb_low_blocked', 1, omSummary.mlb_low_blocked);
+
+// ── 11. evaluateFetchErrors · pure function · post-review ──────────────────
+expect('evaluateFetchErrors · aucune erreur · exit 0',
+  { incomplete: false, exitCode: 0, failedSports: [], allFailed: false },
+  evaluateFetchErrors([]));
+expect('evaluateFetchErrors · 1 erreur · exit 1',
+  { incomplete: true, exitCode: 1, failedSports: ['NBA'], allFailed: false },
+  evaluateFetchErrors([{ sport: 'NBA', url: 'http://x', reason: 'HTTP 500' }]));
+expect('evaluateFetchErrors · 2 erreurs · exit 1',
+  { incomplete: true, exitCode: 1, failedSports: ['MLB', 'TENNIS'], allFailed: false },
+  evaluateFetchErrors([
+    { sport: 'MLB', url: 'http://x', reason: 'HTTP 500' },
+    { sport: 'TENNIS', url: 'http://x', reason: 'HTTP 504' },
+  ]));
+expect('evaluateFetchErrors · 3 erreurs · allFailed true · exit 1',
+  { incomplete: true, exitCode: 1, failedSports: ['NBA', 'MLB', 'TENNIS'], allFailed: true },
+  evaluateFetchErrors([
+    { sport: 'NBA', url: 'http://x', reason: 'fetch error' },
+    { sport: 'MLB', url: 'http://x', reason: 'fetch error' },
+    { sport: 'TENNIS', url: 'http://x', reason: 'fetch error' },
+  ]));
+expect('evaluateFetchErrors · input null · safe', false,
+  evaluateFetchErrors(null).incomplete);
 
 // ── REPORT ─────────────────────────────────────────────────────────────────
 

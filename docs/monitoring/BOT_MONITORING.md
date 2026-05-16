@@ -31,6 +31,21 @@ node scripts/report-bot-monitoring.mjs --demo
 
 Aucun secret requis. Aucun appel provider externe (Tank01 · ESPN · TheOddsAPI · Claude · Telegram). Aucune écriture KV.
 
+### Comportement `--url` en cas d'erreur
+
+**Règle stricte (validée ChatGPT post-review PR #198)** · un rapport partiel ou vide ne doit jamais être présenté comme s'il était complet.
+
+- **0 endpoint en échec** · rapport complet · exit 0
+- **1 à 3 endpoints en échec** · ·
+  - bandeau `[ERROR] RAPPORT INCOMPLET` affiché en TÊTE (stderr) avant le rapport
+  - liste des routes échouées + raison (HTTP code · fetch error · payload inattendu)
+  - mention explicite "ne pas baser de décision MLB/Tennis sur ce rapport"
+  - **exit 1**
+
+**Un rapport incomplet n'est pas une base de décision.** Ne jamais merger une calibration ou désactiver un sport en se basant sur un rapport en échec partiel.
+
+Fonction pure `evaluateFetchErrors(errors)` exportée par `scripts/lib/monitoring-summary.mjs` · testable sans réseau.
+
 ## Sources de données
 
 Routes publiques existantes (audit ROUTES_AUDIT.md confirmé) ·
@@ -52,9 +67,12 @@ Toutes en lecture seule · TTL 90j sur les clés KV.
 ### Par sport
 - matchs analysés
 - recos exploitables
-- INCONCLUSIVE (NBA · Tennis)
-- MLB LOW bloqués (post-MBP-P1)
-- data_quality < 0.55 bloqués (NBA · Tennis post-MBP-P1)
+- **`total_blocked`** · logs UNIQUES bloqués (un log à la fois INCONCLUSIVE ET dq<0.55 compte 1 fois)
+- **`blocked_reasons_total`** · somme brute des raisons (peut dépasser `total_blocked` si chevauchements) · diagnostic
+- compteurs séparés par raison ·
+  - `total_inconclusive` · NBA · Tennis · `confidence_level === 'INCONCLUSIVE'`
+  - `dq_below_055_blocked` · NBA · Tennis · `data_quality < 0.55` (MBP-P1)
+  - `mlb_low_blocked` · MLB · `data_quality === 'LOW'` (MBP-P1)
 - settlés / non settlés
 - hit rate global
 - hit rate sur les 50 derniers settlés (proxy "post-recalibration")
@@ -86,6 +104,11 @@ Texte synthétique par sport + recommandation globale "ne pas recalibrer tant qu
 ### Reco bloquée
 - NBA · Tennis · `confidence_level === 'INCONCLUSIVE'` OU `data_quality < 0.55`
 - MLB · `data_quality === 'LOW'`
+
+**Important · `total_blocked` compte les LOGS uniques · pas les raisons.**
+Un log NBA/Tennis avec dq < 0.55 a aussi `confidence_level === 'INCONCLUSIVE'`
+(MBP-P1 force le label). Ne pas additionner les compteurs · ils chevauchent.
+Pour la somme brute des raisons → champ séparé `blocked_reasons_total`.
 
 ### Hit rate par type
 - par reco individuelle · champ `was_right` (boolean ou null)
@@ -144,13 +167,15 @@ Texte synthétique par sport + recommandation globale "ne pas recalibrer tant qu
 node scripts/test-bot-monitoring-summary.mjs
 ```
 
-Couvre · 36 assertions sur fixtures déterministes ·
+Couvre · 50 assertions sur fixtures déterministes ·
 - comptage NBA / MLB / Tennis (analysed · settled · unsettled · blocked · inconclusive)
 - hit rate excluant non-settlés
 - seuil strict dq 0.55 (0.55 autorisé · 0.549 bloqué)
 - décisions MLB (50 settlés · hit 50% → LIMITER · hit 54% → SURVEILLER)
 - décisions Tennis (50 settlés · hit 44% → SURVEILLER_REVERT · hit 56% → SURVEILLER)
 - cohérence totaux globaux
+- `total_blocked` unique vs `blocked_reasons_total` somme brute (post-review · pas de double comptage)
+- `evaluateFetchErrors` · 0 / 1 / 2 / 3 erreurs · input null safe
 
 ## Architecture fichiers
 

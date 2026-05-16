@@ -24,7 +24,7 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { summarize, formatReport } from './lib/monitoring-summary.mjs';
+import { summarize, formatReport, evaluateFetchErrors } from './lib/monitoring-summary.mjs';
 import { DEMO_LOGS_BY_SPORT } from './lib/monitoring-fixtures.mjs';
 
 function parseArgs(argv) {
@@ -50,30 +50,39 @@ function printHelp() {
 }
 
 async function loadFromUrl(origin) {
-  // 3 fetches parallèles · timeout 30s par défaut · pas de retry exotique.
+  // 3 fetches parallèles · pas de retry exotique. Collecte les erreurs sans
+  // les masquer · le caller décide quoi faire (correction post-review · un
+  // outil de monitoring ne doit jamais produire un rapport vide silencieux).
   const endpoints = {
     NBA:    `${origin}/bot/logs`,
     MLB:    `${origin}/mlb/bot/logs`,
     TENNIS: `${origin}/tennis/bot/logs`,
   };
   const out = {};
+  const errors = [];
   await Promise.all(Object.entries(endpoints).map(async ([sport, url]) => {
     try {
       const resp = await fetch(url, { headers: { Accept: 'application/json' } });
       if (!resp.ok) {
-        console.warn(`[WARN] ${sport} · HTTP ${resp.status} sur ${url}`);
+        errors.push({ sport, url, reason: `HTTP ${resp.status}` });
         out[sport] = [];
         return;
       }
       const data = await resp.json();
-      out[sport] = Array.isArray(data?.logs) ? data.logs : [];
+      if (!Array.isArray(data?.logs)) {
+        errors.push({ sport, url, reason: 'payload sans `logs[]` · format inattendu' });
+        out[sport] = [];
+        return;
+      }
+      out[sport] = data.logs;
     } catch (err) {
-      console.warn(`[WARN] ${sport} · fetch error · ${err.message}`);
+      errors.push({ sport, url, reason: `fetch error · ${err.message}` });
       out[sport] = [];
     }
   }));
-  return out;
+  return { logsBySport: out, errors };
 }
+
 
 function loadFromFixture(path) {
   const abs  = resolve(process.cwd(), path);
@@ -91,6 +100,7 @@ async function main() {
   if (opts.mode === 'help') { printHelp(); process.exit(0); }
 
   let logsBySport;
+  let fetchEval = { incomplete: false, exitCode: 0, failedSports: [] };
   try {
     if (opts.mode === 'demo') {
       console.log('[INFO] Mode demo · fixtures embarquées (scripts/lib/monitoring-fixtures.mjs)');
@@ -100,7 +110,24 @@ async function main() {
       if (!opts.url) { console.error('[ERROR] --url manquant'); process.exit(1); }
       console.log(`[INFO] Mode url · fetch depuis ${opts.url}`);
       console.log('');
-      logsBySport = await loadFromUrl(opts.url);
+      const { logsBySport: data, errors } = await loadFromUrl(opts.url);
+      logsBySport = data;
+      fetchEval   = evaluateFetchErrors(errors);
+      if (fetchEval.incomplete) {
+        // Banner en TÊTE · visible avant le rapport · pas de rapport silencieux.
+        console.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+        console.error(`[ERROR] RAPPORT INCOMPLET · ${errors.length}/3 endpoint(s) en échec`);
+        for (const e of errors) {
+          console.error(`  · ${e.sport} (${e.url}) · ${e.reason}`);
+        }
+        if (fetchEval.allFailed) {
+          console.error('[ERROR] Aucune donnée récupérée · ce rapport ne doit pas servir de base de décision');
+        } else {
+          console.error('[ERROR] Données partielles · ne pas baser de décision MLB/Tennis sur ce rapport');
+        }
+        console.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+        console.error('');
+      }
     } else if (opts.mode === 'fixture') {
       if (!opts.fixture) { console.error('[ERROR] --fixture manquant'); process.exit(1); }
       console.log(`[INFO] Mode fixture · lecture ${opts.fixture}`);
@@ -114,7 +141,7 @@ async function main() {
 
   const summary = summarize(logsBySport);
   console.log(formatReport(summary));
-  process.exit(0);
+  process.exit(fetchEval.exitCode);
 }
 
 main();
