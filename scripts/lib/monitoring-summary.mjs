@@ -330,7 +330,7 @@ export function formatReport(summary) {
 
   lines.push('GLOBAL');
   lines.push(`  matchs analysés · ${summary.global.total_analyzed}`);
-  lines.push(`  recommandations exploitables · ${summary.global.total_recos_exploitable}`);
+  lines.push(`  matchs avec reco exploitable · ${summary.global.total_recos_exploitable}`);
   lines.push(`  recommandations bloquées (INCONCLUSIVE + dq faible) · ${summary.global.total_blocked}`);
   lines.push(`  settlés · ${summary.global.total_settled}`);
   lines.push(`  non settlés · ${summary.global.total_unsettled}`);
@@ -341,7 +341,7 @@ export function formatReport(summary) {
     const s = summary[sport];
     lines.push(sport);
     lines.push(`  matchs analysés · ${s.total_analyzed}`);
-    lines.push(`  recommandations exploitables · ${s.total_recos_exploitable}`);
+    lines.push(`  matchs avec reco exploitable · ${s.total_recos_exploitable}`);
     if (sport === 'MLB') {
       lines.push(`  MLB LOW bloqués (MBP-P1) · ${s.mlb_low_blocked}`);
     } else {

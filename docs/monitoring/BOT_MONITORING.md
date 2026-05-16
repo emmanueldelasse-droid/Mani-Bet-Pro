@@ -59,14 +59,14 @@ Toutes en lecture seule · TTL 90j sur les clés KV.
 
 ### Globales
 - matchs analysés
-- recommandations exploitables (best non null OU recommendations[] non vide)
+- matchs avec reco exploitable · `total_recos_exploitable` · compte les LOGS qui ont au moins une reco utilisable (`best !== null` OU `recommendations[].length > 0`) · pas le nombre total de recos individuelles
 - recommandations bloquées (INCONCLUSIVE + dq < 0.55 numérique + MLB LOW)
 - settlés / non settlés
 - hit rate global pondéré
 
 ### Par sport
 - matchs analysés
-- recos exploitables
+- matchs avec reco exploitable (alias `total_recos_exploitable` · LOGS · pas recos individuelles)
 - **`total_blocked`** · logs UNIQUES bloqués (un log à la fois INCONCLUSIVE ET dq<0.55 compte 1 fois)
 - **`blocked_reasons_total`** · somme brute des raisons (peut dépasser `total_blocked` si chevauchements) · diagnostic
 - compteurs séparés par raison ·
