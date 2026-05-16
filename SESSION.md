@@ -23,7 +23,7 @@ Début → "En cours" 1/N · Fin étape → +1 · Merge → vider "En cours" · 
 Update SESSION.md seulement si impact critique. Update docs dédiées à chaque merge concerné.
 
 ## En cours
-- MBP-A.2 CRIT-1 · test parité backend ↔ frontend NBA (`scripts/test-nba-engine-parity.mjs`) · PR à valider · couvre 11 variables + score + confidence + dq + MED-1 back_to_back (KNOWN-DIVERGENCE documentée)
+néant
 
 ## État actuel
 - Worker · `manibetpro.emmanueldelasse.workers.dev` · auto-deploy push main
@@ -64,7 +64,7 @@ Update SESSION.md seulement si impact critique. Update docs dédiées à chaque 
 ## TODO prioritaires
 
 ### P1 · critique
-- [ ] **MBP-A.2 CRIT-1** · stratégie validée · garder les 2 moteurs + ajouter test de parité backend/frontend
+- [x] **MBP-A.2 CRIT-1** · test parité backend/frontend NBA en place (PR #196) · `node scripts/test-nba-engine-parity.mjs` · 492 assertions · doc `docs/tests/NBA_ENGINE_PARITY.md` · stratégie "garder les 2 moteurs" validée par ChatGPT · MED-1 b2b numérique signalé KNOWN
 - [ ] Surveiller hit rate MLB v6.94 post 50 paris · si <52% désactiver bot (Option C)
 - [ ] Surveiller hit rate tennis v6.93 post 50 paris · revert isolé si baisse
 - [ ] Gate `confidence=INCONCLUSIVE` si `data_quality<0.55` (worker.js:5185)
