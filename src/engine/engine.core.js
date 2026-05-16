@@ -317,7 +317,11 @@ export class EngineCore {
    * warnings · debug. Ne pilote plus la confidence NBA.
    */
   static _computeConfidenceLevel(predictive, robustness, dataQuality, penaltyScore = 0, sport = null) {
-    if (predictive === null || dataQuality === null) {
+    // MBP-P1-DQ-GATE · data_quality null/undefined OU < 0.55 → INCONCLUSIVE (strict).
+    // `== null` couvre null + undefined · aligné sur backend NBA et Tennis.
+    // Couvre les 3 sports avec dq numérique côté frontend · MLB backend reste
+    // label-based ('LOW'/'MEDIUM'/'HIGH') · son gate équivalent est 'LOW' = pas de reco.
+    if (predictive === null || dataQuality == null || dataQuality < 0.55) {
       return 'INCONCLUSIVE';
     }
 

@@ -15,11 +15,19 @@ Source · SESSION.md + audit code + git log mai 2026.
 - TODO SESSION.md:15 · surveiller post 50 paris · revert isolé si baisse
 - Ref · `worker.js:9097` + `sports.config.js:190`
 
-### P1-3 · Confidence gate INCONCLUSIVE manquant
-- Pas de gate auto `confidence=INCONCLUSIVE` si `data_quality<0.55`
-- Risque · recos publiées sur données fragiles
-- TODO P2 SESSION.md:17 (en réalité priorité critique)
-- Ref · `worker.js:5185`
+### P1-3 · Confidence gate INCONCLUSIVE manquant · ✓ RÉSOLU MBP-P1 (corrigé v2 post-review)
+- Gate appliqué sur 6 surfaces · couverture étendue après review ChatGPT PR #197 ·
+  - backend NBA `_botComputeConfidence` (worker.js:5888) · dq numérique < 0.55
+  - backend Tennis `_botTennisConfidence` (worker.js:9458) · dq numérique < 0.55 (ex-0.30)
+  - backend MLB `_mlbEngineCompute` (worker.js:8424) · `recommendations: []` + `best: null` si `dataQuality === 'LOW'`
+  - backend MLB enrichissement props · `_mlbAnalyzeMatch` (worker.js:8336) · skip strikeouts merge si LOW
+  - frontend `EngineCore._computeConfidenceLevel` (engine.core.js:319) · branches NBA + legacy
+  - frontend MLB UI `_analyzeMLBMatch` (data.orchestrator.js:1370) · `recommendations: []` + `best_recommendation: null` + `decision: 'INSUFFISANT'` si LOW
+- **Correction claim erroné** · première version PR #197 affirmait "MLB LOW = pas de reco déjà gaté" · vérification code a montré que `_mlbEngineCompute` produisait recos peu importe `dataQuality` · ChatGPT a flaggé · gate ajouté explicitement dans le moteur
+- Tests · `node scripts/test-data-quality-gate.mjs` · 44 assertions
+- Test parité NBA toujours OK · 492 pass · 0 fail
+- Doc · `BETTING_LOGIC.md` §"Gate data_quality faible (MBP-P1)"
+- Note · `src/engine/engine.mlb.betting.js` (`computeMLB`) est dead code · jamais importé en prod · non gaté (hors scope · à nettoyer en P3)
 
 ## P2 (à traiter sous quelques semaines)
 

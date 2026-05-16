@@ -5887,6 +5887,9 @@ function _botMatchPlayerPropsToLines(propsPrediction, linesMap, homeTeam, awayTe
 
 function _botComputeConfidence(analysis, dataQuality) {
   if (!analysis.score) return 'INCONCLUSIVE';
+  // MBP-P1-DQ-GATE · data_quality < 0.55 → INCONCLUSIVE (strict · 0.55 inclus côté autorisé).
+  // Protège contre recommandation sur données insuffisantes · seuil validé ChatGPT/user.
+  if (dataQuality == null || dataQuality < 0.55) return 'INCONCLUSIVE';
   const score = analysis.score;
   const dist  = Math.abs(score - 0.5);
   const pen   = analysis.confidence_penalty?.score ?? 0;
@@ -8330,7 +8333,9 @@ async function _mlbAnalyzeMatch(match, dateStr, pitchersData, oddsData, standing
   if (!analysis) return null;
 
   // Matching projection K starter ↔ Pinnacle MLB lines · génère reco PITCHER_STRIKEOUTS
-  if (env && analysis.pitcher_strikeouts_prediction?.available) {
+  // MBP-P1-DQ-GATE MLB · skip si data_quality === 'LOW' · `_mlbEngineCompute` a déjà
+  // vidé recommendations+best · ne pas re-peupler via enrichissement props.
+  if (env && analysis.pitcher_strikeouts_prediction?.available && analysis.data_quality !== 'LOW') {
     try {
       const lines = await _fetchPlayerStrikeoutsPinnacle(homeName, awayName, dateStr, env);
       if (lines?.available) {
@@ -8598,6 +8603,13 @@ function _mlbEngineCompute(matchData) {
   // Projections strikeouts starters (props joueur MLB Phase 1)
   const pitcherStrikeouts = _botPredictMLBStrikeouts(matchData);
 
+  // MBP-P1-DQ-GATE MLB · data_quality === 'LOW' → aucune reco exploitable.
+  // MLB utilise un dq label-based ('LOW'/'MEDIUM'/'HIGH') · le gate équivalent
+  // au seuil 0.55 numérique est ici la valeur 'LOW' (pitcher FIP/ERA manquant).
+  // Empêche le bot d'afficher une recommandation sur données fragiles.
+  // Aligné comportement frontend `_analyzeMLBMatch` (src/orchestration/data.orchestrator.js).
+  const _mlbLowQuality = dataQuality === 'LOW';
+
   return {
     home_prob:    Math.round(homeProb * 100),
     away_prob:    Math.round((1 - homeProb) * 100),
@@ -8623,9 +8635,9 @@ function _mlbEngineCompute(matchData) {
       home_pitcher:        home_pitcher?.name ?? null,
       away_pitcher:        away_pitcher?.name ?? null,
     },
-    recommendations,
-    best:          recommendations[0] ?? null,
-    est_total_runs: Math.round(estTotal * 10) / 10,
+    recommendations: _mlbLowQuality ? [] : recommendations,
+    best:            _mlbLowQuality ? null : (recommendations[0] ?? null),
+    est_total_runs:  Math.round(estTotal * 10) / 10,
     pitcher_strikeouts_prediction: pitcherStrikeouts,
   };
 }
@@ -9456,7 +9468,9 @@ function _botTennisDataQuality(variables) {
 }
 
 function _botTennisConfidence(score, dataQuality, missingCount) {
-  if (score == null || dataQuality < 0.30) return 'INCONCLUSIVE';
+  // MBP-P1-DQ-GATE · data_quality < 0.55 → INCONCLUSIVE (remplace ancien seuil 0.30).
+  // Unifie le gate sur l'ensemble des sports avec dq numérique · seuil validé ChatGPT/user.
+  if (score == null || dataQuality == null || dataQuality < 0.55) return 'INCONCLUSIVE';
   if (missingCount >= 3) return 'LOW';
   const deviation = Math.abs(score - 0.5);
   if (deviation >= 0.20 && dataQuality >= 0.70) return 'HIGH';
