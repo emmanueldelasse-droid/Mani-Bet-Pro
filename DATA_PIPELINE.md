@@ -153,13 +153,20 @@ Doc · `docs/monitoring/BOT_MONITORING.md`.
 
 Le gate `data_quality` faible (worker.js:5888 NBA · :9458 Tennis · :8424 MLB engine · :8336 MLB strikeouts) modifie le contenu des logs persistés ·
 
+Règle produit ferme · `confidence_level === 'INCONCLUSIVE'` ⇒ reco non exploitable · jamais affichée user · jamais comptée comme reco exploitable par le monitoring.
+
 | Sport | Condition | Effet log |
 |---|---|---|
-| NBA | `data_quality < 0.55` (numérique) | `confidence_level: 'INCONCLUSIVE'` · `betting_recommendations.best` reste possible mais reco INCONCLUSIVE non exploitée UI |
-| Tennis | `data_quality < 0.55` (numérique) | idem NBA · `confidence_level: 'INCONCLUSIVE'` |
-| MLB | `data_quality === 'LOW'` (label) | `recommendations: []` · `best: null` · enrichissement strikeouts skip |
+| NBA | `data_quality < 0.55` (numérique) | `confidence_level: 'INCONCLUSIVE'` · reco non exploitable |
+| Tennis | `data_quality < 0.55` (numérique) | idem NBA · `confidence_level: 'INCONCLUSIVE'` · reco non exploitable |
+| MLB | `data_quality === 'LOW'` (label) | `recommendations: []` · `best: null` · strikeouts merge skip (worker.js:8424 · :8336) |
 
-Conséquence calibration · les logs LOW MLB et < 0.55 NBA/Tennis ne génèrent plus de paris exploitables · le hit rate post-MBP-P1 ne mélange plus les recos sur données fragiles. Attendre 50 nouveaux paris settlés post-gate avant toute recalibration (rule SESSION.md P1).
+Notes ·
+- NBA/Tennis · `_botEngineCompute` ne vide pas `betting_recommendations` (label `INCONCLUSIVE` suffit · règle produit bloque) · MLB · gate franc dans le moteur (vide recos)
+- Anciens logs pré-MBP-P1 (avant gate) peuvent contenir `best`/`recommendations[]` non vides en INCONCLUSIVE · à interpréter prudemment · ne PAS présenter comme comportement normal exploitable post-gate
+- Frontend · `EngineCore._computeConfidenceLevel` → `'INCONCLUSIVE'` si dq < 0.55 · UI affiche "INSUFFISANT" · pas de reco exposée
+
+Conséquence calibration · les logs INCONCLUSIVE (NBA/Tennis) et LOW (MLB) ne génèrent plus de paris exploitables · hit rate post-MBP-P1 ne mélange plus les recos sur données fragiles. Attendre 50 nouveaux paris settlés post-gate avant toute recalibration (rule SESSION.md P1).
 
 ## Caches KV (TTL · MBP-A.1 vérifié)
 
