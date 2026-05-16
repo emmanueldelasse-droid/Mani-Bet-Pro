@@ -23,7 +23,7 @@ Début → "En cours" 1/N · Fin étape → +1 · Merge → vider "En cours" · 
 Update SESSION.md seulement si impact critique. Update docs dédiées à chaque merge concerné.
 
 ## En cours
-néant
+- MBP-monitoring · rapport read-only `scripts/report-bot-monitoring.mjs` · 3 modes (`--demo` · `--url` · `--fixture`) · suit impact MBP-P1 (gate dq) · décisions MLB / Tennis sur 50 derniers settlés · 36/36 tests unitaires · doc `docs/monitoring/BOT_MONITORING.md` · PR à valider
 
 ## État actuel
 - Worker · `manibetpro.emmanueldelasse.workers.dev` · auto-deploy push main
