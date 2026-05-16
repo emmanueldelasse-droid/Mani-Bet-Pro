@@ -15,11 +15,15 @@ Source · SESSION.md + audit code + git log mai 2026.
 - TODO SESSION.md:15 · surveiller post 50 paris · revert isolé si baisse
 - Ref · `worker.js:9097` + `sports.config.js:190`
 
-### P1-3 · Confidence gate INCONCLUSIVE manquant
-- Pas de gate auto `confidence=INCONCLUSIVE` si `data_quality<0.55`
-- Risque · recos publiées sur données fragiles
-- TODO P2 SESSION.md:17 (en réalité priorité critique)
-- Ref · `worker.js:5185`
+### P1-3 · Confidence gate INCONCLUSIVE manquant · ✓ RÉSOLU MBP-P1
+- Gate appliqué sur les 3 surfaces avec dq numérique ·
+  - backend NBA `_botComputeConfidence` (worker.js:5888)
+  - backend Tennis `_botTennisConfidence` (worker.js:9458 · ex-seuil 0.30 → 0.55)
+  - frontend `EngineCore._computeConfidenceLevel` (engine.core.js:319 · branches NBA + legacy)
+- MLB backend exclu · `data_quality` label-based · gate équivalent 'LOW' = pas de reco
+- Tests · `node scripts/test-data-quality-gate.mjs` · 33 boundaries (0.54 · 0.55 · 0.56 · null · undefined)
+- Test parité NBA toujours OK · 492 pass · 0 fail
+- Doc · `BETTING_LOGIC.md` §"Gate data_quality < 0.55 (MBP-P1)"
 
 ## P2 (à traiter sous quelques semaines)
 

@@ -24,26 +24,42 @@ Reste calculée frontend (`EngineRobustness.compute`) et exposée dans `analysis
 
 ## Confidence HIGH / MEDIUM / LOW / INCONCLUSIVE · backend actuel
 
-Fonction `_botComputeConfidence` (worker.js:5888 · MBP-A.2 vérifié)
+Fonction `_botComputeConfidence` (worker.js:5888 · MBP-A.2 vérifié · MBP-P1-DQ-GATE appliqué)
 
 | Niveau | Conditions |
 |---|---|
+| `INCONCLUSIVE` (gate dq) | `data_quality` null/undefined OU < 0.55 (priorité sur tout le reste · MBP-P1) |
 | `HIGH` | dist ≥ 0.20 ET data_quality ≥ 0.70 ET confidence_penalty < 0.08 |
 | `MEDIUM` | dist ≥ 0.12 ET data_quality ≥ 0.50 ET confidence_penalty < 0.15 |
-| `LOW` | dist ≥ 0.06 (toute qualité) |
-| `INCONCLUSIVE` | dist < 0.06 OU score absent |
+| `LOW` | dist ≥ 0.06 (toute qualité ≥ 0.55) |
+| `INCONCLUSIVE` (autres) | dist < 0.06 OU score absent |
 
 - `dist` = |score − 0.5| · distance au 50/50
 - `data_quality` = (1 − missing_vars / total_vars) → [0, 1]
 - `confidence_penalty` = pénalité divergence marché (worker.js:5188)
 
+## Gate data_quality < 0.55 (MBP-P1)
+
+Règle commune appliquée en amont des 3 fonctions confidence avec dq numérique ·
+- backend NBA · `_botComputeConfidence` (worker.js:5888)
+- backend Tennis · `_botTennisConfidence` (worker.js:9458) · remplace ancien gate à 0.30
+- frontend · `EngineCore._computeConfidenceLevel` (engine.core.js:319) · branches NBA + legacy
+
+Seuil strict · `data_quality < 0.55` force INCONCLUSIVE · `0.55` exact reste autorisé.
+`null` et `undefined` traités comme dq absente → INCONCLUSIVE.
+
+But · empêcher le bot d'afficher une recommandation exploitable sur données fragiles. Ne calibre rien · bloque les signaux faibles uniquement.
+
+MLB backend exclu · son `data_quality` est label-based ('LOW'/'MEDIUM'/'HIGH') · le gate équivalent existant est 'LOW' = pas de reco (worker.js:8425+).
+
+Tests · `node scripts/test-data-quality-gate.mjs` · 33 assertions sur boundaries (0.54 · 0.55 · 0.56 · null · undefined).
+
 ## Data quality
 - NBA · numérique [0, 1] · 11 vars (worker.js:3537)
 - MLB · enum `LOW`/`MEDIUM`/`HIGH` (worker.js:8425)
-  - `LOW` si pitcher FIP/ERA manquant
+  - `LOW` si pitcher FIP/ERA manquant → pas de reco (gate équivalent)
   - `HIGH` si pitcher + team_ops + team_era + bullpen tous présents
-- Tennis · `_botTennisDataQuality` · [0, 1] · INCONCLUSIVE si <0.30 (worker.js:9364)
-- TODO P2 SESSION.md:17 · gate `confidence=INCONCLUSIVE` si `data_quality<0.55` (worker.js:5185)
+- Tennis · `_botTennisDataQuality` · [0, 1] · INCONCLUSIVE si < 0.55 (MBP-P1 · ex-0.30) (worker.js:9458)
 
 ## NBA · logique
 
@@ -209,11 +225,11 @@ fatigue_index
 
 ## Règles de blocage
 - INCONCLUSIVE → pas de reco affichée user
-- data_quality LOW (MLB) → pas de reco
+- data_quality LOW (MLB · label-based) → pas de reco
+- data_quality < 0.55 (NBA · Tennis · frontend) → confidence forcée INCONCLUSIVE (MBP-P1 · worker.js:5888 · 9458 · engine.core.js:319)
 - Edge sous seuil → pas de reco
 - Sample insuffisant (NBA <10 games · tennis <15 matchs) → pas de reco
 - Cote ≥ 5 + edge < 15% → drop (tennis)
-- TODO Confidence forcée INCONCLUSIVE si dq < 0.55 (worker.js:5185)
 
 ## Zones encore dangereuses / incertaines
 - MLB hit rate 49.8% sous cible · v6.94 surveillé

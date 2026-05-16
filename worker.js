@@ -5887,6 +5887,9 @@ function _botMatchPlayerPropsToLines(propsPrediction, linesMap, homeTeam, awayTe
 
 function _botComputeConfidence(analysis, dataQuality) {
   if (!analysis.score) return 'INCONCLUSIVE';
+  // MBP-P1-DQ-GATE · data_quality < 0.55 → INCONCLUSIVE (strict · 0.55 inclus côté autorisé).
+  // Protège contre recommandation sur données insuffisantes · seuil validé ChatGPT/user.
+  if (dataQuality == null || dataQuality < 0.55) return 'INCONCLUSIVE';
   const score = analysis.score;
   const dist  = Math.abs(score - 0.5);
   const pen   = analysis.confidence_penalty?.score ?? 0;
@@ -9456,7 +9459,9 @@ function _botTennisDataQuality(variables) {
 }
 
 function _botTennisConfidence(score, dataQuality, missingCount) {
-  if (score == null || dataQuality < 0.30) return 'INCONCLUSIVE';
+  // MBP-P1-DQ-GATE · data_quality < 0.55 → INCONCLUSIVE (remplace ancien seuil 0.30).
+  // Unifie le gate sur l'ensemble des sports avec dq numérique · seuil validé ChatGPT/user.
+  if (score == null || dataQuality == null || dataQuality < 0.55) return 'INCONCLUSIVE';
   if (missingCount >= 3) return 'LOW';
   const deviation = Math.abs(score - 0.5);
   if (deviation >= 0.20 && dataQuality >= 0.70) return 'HIGH';

@@ -87,6 +87,7 @@ function loadBackendSandbox() {
     '_botComputeScore',
     '_botComputeMarketDivergence',
     '_botComputeConfidence',
+    '_botTennisConfidence',
     '_botEngineCompute',
   ];
   const exported = {};
