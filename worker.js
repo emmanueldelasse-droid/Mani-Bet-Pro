@@ -8607,7 +8607,7 @@ function _mlbEngineCompute(matchData) {
   // MLB utilise un dq label-based ('LOW'/'MEDIUM'/'HIGH') · le gate équivalent
   // au seuil 0.55 numérique est ici la valeur 'LOW' (pitcher FIP/ERA manquant).
   // Empêche le bot d'afficher une recommandation sur données fragiles.
-  // Aligné comportement frontend `computeMLB` (engine.mlb.betting.js).
+  // Aligné comportement frontend `_analyzeMLBMatch` (src/orchestration/data.orchestrator.js).
   const _mlbLowQuality = dataQuality === 'LOW';
 
   return {
