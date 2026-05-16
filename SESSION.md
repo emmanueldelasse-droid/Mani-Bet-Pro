@@ -23,7 +23,7 @@ Début → "En cours" 1/N · Fin étape → +1 · Merge → vider "En cours" · 
 Update SESSION.md seulement si impact critique. Update docs dédiées à chaque merge concerné.
 
 ## En cours
-- MBP-P1 · gate `data_quality` faible · v2 post-review ChatGPT · 6 surfaces · backend NBA/Tennis (< 0.55 numérique) + backend MLB `_mlbEngineCompute` + `_mlbAnalyzeMatch` strikeouts (`=== 'LOW'`) + frontend EngineCore (NBA + legacy) + frontend MLB `_analyzeMLBMatch` (`=== 'LOW'`) · 44 assertions · parité NBA toujours OK · PR à valider
+néant
 
 ## État actuel
 - Worker · `manibetpro.emmanueldelasse.workers.dev` · auto-deploy push main
