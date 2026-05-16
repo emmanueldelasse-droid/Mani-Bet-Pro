@@ -23,7 +23,7 @@ Début → "En cours" 1/N · Fin étape → +1 · Merge → vider "En cours" · 
 Update SESSION.md seulement si impact critique. Update docs dédiées à chaque merge concerné.
 
 ## En cours
-néant
+- MBP-A.2 CRIT-1 · test parité backend ↔ frontend NBA (`scripts/test-nba-engine-parity.mjs`) · PR à valider · couvre 11 variables + score + confidence + dq + MED-1 back_to_back (KNOWN-DIVERGENCE documentée)
 
 ## État actuel
 - Worker · `manibetpro.emmanueldelasse.workers.dev` · auto-deploy push main
