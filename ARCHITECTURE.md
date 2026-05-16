@@ -33,7 +33,7 @@ index.html + src/ui/*.js (GitHub Pages front)
 - `ui.loading.js` · spinners
 - `ui.theme-toggle.js` · dark/light
 
-## Worker (`worker.js` 10533 lignes · MBP-A.1 audit)
+## Worker (`worker.js` 10634 lignes · MBP-A.1 audit + ajouts sécu MBP-S.1 à S.4)
 - Point d'entrée unique · Cloudflare Worker
 - Export default `worker.js:234` · `fetch` `worker.js:248` · `scheduled` `worker.js:238`
 - Router = if/else chain linéaire (pas de switch · pas de table) · lignes 248-432
@@ -97,24 +97,29 @@ index.html + src/ui/*.js (GitHub Pages front)
 ## Zones sensibles
 - `_botEngineCompute` (worker.js:5211) · cœur calcul NBA backend (cron · logs · calibration)
 - `EngineCore.compute` `EngineNBA.compute` `EngineRobustness.compute` · cœur calcul NBA frontend (runtime user)
-- `_botComputeConfidence` (worker.js:5805) · gate HIGH/MEDIUM/LOW/INCONCLUSIVE
-- `_botComputeBettingRecs` (worker.js:5251) · génération recos · Kelly · edge
+- `_botComputeConfidence` (worker.js:5888) · gate HIGH/MEDIUM/LOW/INCONCLUSIVE · source canonique NBA (MBP-FIX-A.2.1)
+- `_botComputeBettingRecs` (worker.js:5334) · génération recos · Kelly · edge
 - `_botSaveLog` (worker.js:3606) · persistance logs KV
 - `_botSettleDate` (worker.js:3852) · réconciliation résultats
 - `_runNightlySettle` (worker.js:4237) · idempotence 48h
 - `handlePaperPlaceBet` · `handlePaperSettleBet` (worker.js:5887, 5937) · paper trading
 
-## Sécurité (audit MBP-A.4 détail · `SECURITY_AUDIT.md`)
-- `_denyIfNoDebugAuth(url, env, origin)` (worker.js:881) · **fail-CLOSE** confirmé (401 si secret absent) · 5 routes guardées
-- ✗ `/tennis/_espn_probe` (worker.js:372) · **sans guard** · à corriger (MBP-A.4 CRIT-E)
-- Secret `DEBUG_SECRET` en URL query string · referer leak possible (MBP-A.4 HAUT-8)
-- CORS `corsHeaders(origin)` (worker.js:206) · whitelist 3 origins · pas wildcard
-- ✗ CORS `startsWith` vulnerability · subdomain forge possible (MBP-A.4 CRIT-C)
+## Sécurité (post chantier MBP-A.4 · `SECURITY_AUDIT.md`)
+**6/6 critiques résolues** ·
+- ✓ `_denyIfNoDebugAuth(url, env, origin)` (worker.js:881) · fail-CLOSE confirmé · 5 routes NBA debug guardées + `/debug/basketusa`
+- ✓ `/tennis/_espn_probe` guard ajouté · MBP-S.1 CRIT-E (worker.js:9883)
+- ✓ CORS strict equality · MBP-S.1 CRIT-C · `ALLOWED_ORIGINS.includes(origin)` (worker.js:207)
+- ✓ `err.message` sanitisé 14+ occurrences · MBP-S.1 CRIT-B · constantes `SAFE_ERROR_MSG_*` (worker.js:233)
+- ✓ Auth Paper · MBP-S.2 + S.2.1 · `requirePaperApiKey` · header `X-API-Key` · secret `PAPER_API_KEY` · 4 routes protégées
+- ✓ Auth Bot Run · MBP-S.3 · `requireBotRunApiKey` · header `X-Bot-Api-Key` · secret `BOT_RUN_API_KEY` · 8 routes POST protégées
+- ✓ Rate limit Claude per-IP · MBP-S.4 · `_rateLimitIpHash` SHA-256 tronqué · cron exempté `'system'`
 - `escapeHtml` côté UI avant `innerHTML` · helpers ui.bot.js
 - Regex validation params user avant clé KV · OK pour la plupart
-- ✗ Auth utilisateur · **aucune sur Paper / Bot run** (MBP-A.4 CRIT-A · CRIT-D)
-- ✗ `err.message` fuit dans 14 occurrences (MBP-A.4 CRIT-B)
-- ✗ `ai.guard.js` défini mais **jamais appelé** dans worker.js (MBP-A.4 HAUT-1)
+
+**Restent (P2/P3)** ·
+- ✗ Secret `DEBUG_SECRET` en URL query string · referer leak possible (MBP-A.4 HAUT-8)
+- ✗ `ai.guard.js` défini mais jamais appelé (MBP-A.4 HAUT-1)
+- ✗ HAUT-2 à 9 + MOY-1 à 7 + FAI-1 à 5 · validations body · CSP headers · race KV · etc.
 
 ## Déploiement
 - Push `main` → Cloudflare auto-deploy worker
@@ -133,7 +138,7 @@ index.html + src/ui/*.js (GitHub Pages front)
 
 ## Zones à vérifier (MBP-A.1 résolu pour routes)
 - ✓ Router worker.js confirmé · 54 routes HTTP · ROUTES_AUDIT.md
-- ✗ `engine.robustness.js` rôle exact · non audité MBP-A.1
+- ✓ `engine.robustness.js` documenté MBP-A.2 · perturbation systématique ±10% ±20% · sortie `analysis.robustness_score` · ne pilote plus confidence NBA (post MBP-FIX-A.2.1)
 - ✗ `provider.cache.js` / `provider.injuries.js` / `provider.nba.js` utilisation actuelle · non audité
 - ✗ Handler `/mlb/weather` inline vs fonction nommée (worker.js:350)
 - ✗ Lignes exactes handlers MLB approximatives · ré-auditer si besoin

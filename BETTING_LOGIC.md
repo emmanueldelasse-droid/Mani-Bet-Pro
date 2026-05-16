@@ -7,13 +7,20 @@
 - Garde-fous : sample minimum · cote plafond · data_quality minimum
 - Confidence calculée → recommandation finale
 
-## Confidence NBA · backend = source canonique (MBP-FIX-A.2.1)
+## Backend = source canonique NBA (chantier MBP-FIX-A.2.x)
 
-Le frontend NBA utilise désormais **strictement** le même algorithme que le backend (worker.js:5888 `_botComputeConfidence`). Décision ChatGPT validée · backend = référence métier (calibration · logs · audit trail).
+Le frontend NBA utilise **strictement** les mêmes algorithmes que le backend (worker.js). Décision ChatGPT validée · backend = référence métier (calibration · logs · audit trail).
 
-Implémentation alignée · `src/engine/engine.core.js:314` `_computeConfidenceLevel(predictive, robustness, dataQuality, penaltyScore, sport)`. Si `sport === 'NBA'` · algorithme distance-based identique au backend. Autres sports (MLB · Tennis) · algorithme legacy min-based préservé (audit séparé prévu).
+### Alignements appliqués
+- **Confidence** (MBP-FIX-A.2.1 · PR #193) · `_computeConfidenceLevel` (engine.core.js:314) · branche `sport === 'NBA'` distance-based identique `_botComputeConfidence` worker.js:5888
+- **home_away_split** (MBP-FIX-A.2.2 · PR #194) · `computeHomeSplit` (engine.nba.variables.js:262) · formule 4 variables identique worker.js:5037-5043 · clamp [-0.50, 0.50]
 
-Robustness reste calculée frontend (`EngineRobustness.compute`) et exposée dans `analysis.robustness_score` pour UI · futurs warnings · debug. Elle ne pilote plus la confidence NBA.
+### Sports non alignés (legacy préservé · audit séparé prévu)
+- MLB · Tennis · algorithme confidence legacy min-based dans `_computeConfidenceLevel` (branche `sport !== 'NBA'`)
+- Pas de divergence backend connue pour MLB/Tennis sur split car ils utilisent leurs propres variables
+
+### Robustness
+Reste calculée frontend (`EngineRobustness.compute`) et exposée dans `analysis.robustness_score` pour UI · futurs warnings · debug. Ne pilote plus la confidence NBA (sport='NBA' utilise dist+dq+pen aligné backend).
 
 ## Confidence HIGH / MEDIUM / LOW / INCONCLUSIVE · backend actuel
 
@@ -65,11 +72,11 @@ travel_load_diff      0.02
 `_botGetNBAPhase` (worker.js:4897) → `season` / `playin` / `playoff`
 
 ### Shrinkage marché
-`_botEngineCompute` (worker.js:5128) applique `0.5 × motor + 0.5 × market` si :
+`_botEngineCompute` (worker.js:5211) applique `0.5 × motor + 0.5 × market` si :
 - divergence ≥ 28 pts OU
 - divergence ≥ 20 pts ET data_quality < 0.7
 
-### Recos NBA (worker.js:5251)
+### Recos NBA (worker.js:5334)
 - Marchés : MONEYLINE · SPREAD · OVER_UNDER · PLAYER_POINTS
 - Kelly fractionné (frac=0.25 · max 5% bankroll)
 - Edge minimum : 5% ML · 3% spread / O/U
@@ -189,7 +196,7 @@ fatigue_index
 - Tank01 roster + status · enrichissement
 - Claude AI · non-officiel · web search
 - NBA injury report PDF · source autorisée
-- `_botComputeAbsencesImpact` (worker.js:5021) · pondère par PPG joueur absent
+- `_botComputeAbsencesImpact` (worker.js:5104) · pondère par PPG joueur absent
 - Poids `absences_impact` 0.20 (saison) · idem playoff
 
 ## Rôle de la calibration

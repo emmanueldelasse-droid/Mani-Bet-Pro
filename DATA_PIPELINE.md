@@ -21,9 +21,9 @@ BallDontLie → 10-20 derniers matchs (recent_form_ema)
 TheOddsAPI → cotes décimales bookmakers
 Pinnacle (gratuit guest) → cotes justes
   ↓
-_botExtractVariables · _botEngineCompute (worker.js:5128)
+_botExtractVariables · _botEngineCompute (worker.js:5211)
   ↓
-Reco → `_botComputeBettingRecs` (worker.js:5251)
+Reco → `_botComputeBettingRecs` (worker.js:5334)
   ↓
 KV `bot_log_{matchId}` 90j (worker.js:3606)
   ↓
@@ -87,7 +87,7 @@ KV `tennis_odds_snap_{matchId}` 72h
 - NBA non-officiel · Claude web search (`_callClaudeWithWebSearch` worker.js:1847)
 - NBA injury report PDF (nba.com) · parsing `parseInjuryPDF` (worker.js:6214)
 - Merge dans `_botMergeInjuries` (worker.js:5836)
-- Impact calc `_botComputeAbsencesImpact` (worker.js:5021)
+- Impact calc `_botComputeAbsencesImpact` (worker.js:5104)
 
 ## Flux rosters
 - Tank01 `/getNBATeams` · cache `tank01_teams_stats` 6h read / 8h write

@@ -10,9 +10,11 @@
 2. `BOT_OBJECTIVE.md` (objectif réel · règles absolues)
 3. `PROJECT_RULES.md` (workflow · interdictions)
 4. Fichiers pertinents selon tâche :
-   - moteur → `BETTING_LOGIC.md` + `src/engine/*`
+   - moteur → `BETTING_LOGIC.md` + `NBA_ENGINE_AUDIT.md` + `src/engine/*`
    - data → `DATA_PIPELINE.md` + `PROVIDERS_MATRIX.md`
    - archi → `ARCHITECTURE.md`
+   - routes / API → `ROUTES_AUDIT.md`
+   - sécurité → `SECURITY_AUDIT.md`
    - bug → `KNOWN_ISSUES.md`
    - merge → `CHECKLIST_MERGE.md`
 5. `.claude/onboarding.md` uniquement pour deploy/setup/reprise compte
@@ -44,7 +46,7 @@
 ## Style fichiers .md
 - Télégraphique français · pas de prose · pas d'articles superflus · pas d'emoji
 - Listes à puces courtes · symboles `·` séparateur · `→` cause/résultat
-- Refs code : `file:line` (ex: `worker.js:5805`)
+- Refs code : `file:line` (ex: `worker.js:5888`)
 - Jamais dupliquer info stockée ailleurs (git log · issues · onboarding.md)
 - Section > 15 lignes → extraire dans `.claude/<nom>.md` ou doc dédiée
 - Non-respect = revert
@@ -67,11 +69,14 @@
 
 ## Périmètre interdit sans validation
 - `worker.js` moteur (`_botEngine*` · `_botCompute*` · `_botPredict*`)
-- `src/engine/*`
-- `src/config/sports.config.js` (poids · seuils)
+- `src/engine/*` (sauf alignement strict backend explicitement validé · ex: MBP-FIX-A.2.x)
+- `src/config/sports.config.js` (poids · seuils · normalisations)
 - Cron · KV schémas · `wrangler.jsonc`
-- Routes paris · paper · admin
+- Routes paris · paper · admin · cron handlers
 - Gates `confidence` · `data_quality`
+- Guards auth (`_denyIfNoDebugAuth` · `requirePaperApiKey` · `requireBotRunApiKey` · `_rateLimitIpHash`)
+- CORS Allow-Headers · ALLOWED_ORIGINS · secrets CF Dashboard
+- Algorithmes confidence (NBA aligné backend MBP-FIX-A.2.1) · `home_away_split` (aligné MBP-FIX-A.2.2)
 
 ## Périmètre autorisé après GO
 - UI ciblée (`src/ui/*`)
