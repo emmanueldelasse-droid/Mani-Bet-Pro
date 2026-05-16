@@ -119,40 +119,49 @@ function baseMatch(overrides = {}) {
 }
 
 // ── CAS DE TEST ──────────────────────────────────────────────────────────────
+//
+// Convention `expects` · seules les clés suivantes sont assertées par le
+// runner · toute autre clé est ignorée et NE doit PAS être ajoutée :
+//
+//   - `confidence` · string · label exact attendu (HIGH/MEDIUM/LOW/INCONCLUSIVE)
+//   - `confidence_in` · array · liste de labels acceptables
+//   - `back_to_back_known_divergence` · boolean · marque la fixture comme
+//     attendant la divergence MED-1 (backend ±0.6 vs frontend ±1)
+//
+// Si une fixture ne précise aucune `expects`, seuls les checks génériques
+// (variables · normalisation · score · dq · confidence parité) s'appliquent.
 
 export const FIXTURES = [
   {
-    id:       'neutral_baseline',
-    label:    'baseline neutre · aucun b2b · pas de blessures · stats moyennes',
-    data:     baseMatch(),
-    expects:  { confidence: 'any', score_delta_max: 0.01 },
+    id:    'neutral_baseline',
+    label: 'baseline neutre · aucun b2b · pas de blessures · stats moyennes',
+    data:  baseMatch(),
   },
 
   {
-    id:       'b2b_home_only',
-    label:    'home en back-to-back · away frais · attendu signaler divergence -0.6 (back) vs -1 (front)',
-    data:     baseMatch({ home_back_to_back: true, away_back_to_back: false }),
-    expects:  { back_to_back_known_divergence: true },
+    id:      'b2b_home_only',
+    label:   'home en back-to-back · away frais · attendu signaler divergence -0.6 (back) vs -1 (front)',
+    data:    baseMatch({ home_back_to_back: true, away_back_to_back: false }),
+    expects: { back_to_back_known_divergence: true },
   },
 
   {
-    id:       'b2b_away_only',
-    label:    'away en back-to-back · home frais · attendu +0.6 (back) vs +1 (front)',
-    data:     baseMatch({ home_back_to_back: false, away_back_to_back: true }),
-    expects:  { back_to_back_known_divergence: true },
+    id:      'b2b_away_only',
+    label:   'away en back-to-back · home frais · attendu +0.6 (back) vs +1 (front)',
+    data:    baseMatch({ home_back_to_back: false, away_back_to_back: true }),
+    expects: { back_to_back_known_divergence: true },
   },
 
   {
-    id:       'b2b_both',
-    label:    'les deux en back-to-back · neutre · valeur = 0 des 2 côtés',
-    data:     baseMatch({ home_back_to_back: true, away_back_to_back: true }),
-    expects:  { back_to_back_aligned: true },
+    id:    'b2b_both',
+    label: 'les deux en back-to-back · neutre · valeur = 0 des 2 côtés',
+    data:  baseMatch({ home_back_to_back: true, away_back_to_back: true }),
   },
 
   {
-    id:       'high_signal_home',
-    label:    'home largement favori · efg + net rating fort · away faible · attendu HIGH confidence',
-    data:     baseMatch({
+    id:    'high_signal_home',
+    label: 'home largement favori · efg + net rating fort · away faible · attendu HIGH confidence',
+    data:  baseMatch({
       home_season_stats: seasonStats({
         winPct: 0.72, netRating: 8.5, efgPct: 0.575, drtg: 108,
         homeWinPct: 0.80, awayWinPct: 0.65, name: TEAMS.HOME.name, avgPts: 119,
@@ -164,13 +173,13 @@ export const FIXTURES = [
       home_recent: recentForm(4, 1),
       away_recent: recentForm(1, 4),
     }),
-    expects:  { confidence: 'HIGH' },
+    expects: { confidence: 'HIGH' },
   },
 
   {
-    id:       'balanced_match',
-    label:    'match équilibré · score proche de 0.5 · attendu LOW ou INCONCLUSIVE',
-    data:     baseMatch({
+    id:    'balanced_match',
+    label: 'match équilibré · score proche de 0.5 · attendu LOW ou INCONCLUSIVE',
+    data:  baseMatch({
       home_season_stats: seasonStats({
         winPct: 0.52, netRating: 0.5, efgPct: 0.528, drtg: 112,
         homeWinPct: 0.55, awayWinPct: 0.49, name: TEAMS.HOME.name, avgPts: 113,
@@ -180,13 +189,13 @@ export const FIXTURES = [
         homeWinPct: 0.53, awayWinPct: 0.47, name: TEAMS.AWAY.name, avgPts: 112,
       }),
     }),
-    expects:  { confidence_in: ['LOW', 'INCONCLUSIVE', 'MEDIUM'] },
+    expects: { confidence_in: ['LOW', 'INCONCLUSIVE', 'MEDIUM'] },
   },
 
   {
-    id:       'home_away_split_asymmetric',
-    label:    'home très fort à domicile · away très faible à l\'extérieur · valide formule alignée',
-    data:     baseMatch({
+    id:    'home_away_split_asymmetric',
+    label: 'home très fort à domicile · away très faible à l\'extérieur · valide formule alignée MBP-FIX-A.2.2',
+    data:  baseMatch({
       home_season_stats: seasonStats({
         winPct: 0.55, netRating: 2.0, efgPct: 0.530, drtg: 112,
         homeWinPct: 0.78, awayWinPct: 0.32, name: TEAMS.HOME.name, avgPts: 115,
@@ -196,26 +205,24 @@ export const FIXTURES = [
         homeWinPct: 0.65, awayWinPct: 0.35, name: TEAMS.AWAY.name, avgPts: 112,
       }),
     }),
-    expects:  { home_away_split_aligned: true },
   },
 
   {
-    id:       'absences_impact_home_star',
-    label:    'star home Out (ppg 28) · vérifie absences_impact + star_absence_modifier',
-    data:     baseMatch({
+    id:    'absences_impact_home_star',
+    label: 'star home Out (ppg 28) · valide absences_impact aligné backend ↔ frontend',
+    data:  baseMatch({
       home_injuries: [
         { name: 'Player A', status: 'Out', ppg: 28, source: 'tank01_roster', impact_weight: 1.0 },
         { name: 'Player B', status: 'Probable', ppg: 9, source: 'espn_injuries' },
       ],
       away_injuries: [],
     }),
-    expects:  { absences_impact_aligned: true },
   },
 
   {
-    id:       'missing_critical_data',
-    label:    'données critiques manquantes · efg/net null · score doit chuter ou être null',
-    data:     baseMatch({
+    id:    'missing_critical_data',
+    label: 'données critiques manquantes · efg/net null · les 2 moteurs doivent dégrader pareil',
+    data:  baseMatch({
       home_season_stats: seasonStats({
         winPct: 0.55, netRating: null, efgPct: null, drtg: 112,
         homeWinPct: 0.60, awayWinPct: 0.50, name: TEAMS.HOME.name, avgPts: 115,
@@ -225,6 +232,5 @@ export const FIXTURES = [
         homeWinPct: 0.55, awayWinPct: 0.45, name: TEAMS.AWAY.name, avgPts: 112,
       }),
     }),
-    expects:  { score_method_any: true },
   },
 ];

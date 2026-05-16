@@ -94,8 +94,31 @@ function loadBackendSandbox() {
     if (typeof sandbox[name] !== 'function') {
       throw new Error(`backend loader · fonction \`${name}\` introuvable dans worker.js · refactor détecté · adapter le test`);
     }
-    exported[name] = sandbox[name];
+    // Bind via lookup dynamique sur sandbox · permet monkey-patch ultérieur
+    // (ex: `getWeightsForPhase` ci-dessous patche `_botGetNBAPhase` puis
+    // appelle `_botGetWeights` qui doit voir la nouvelle implémentation).
+    exported[name] = (...args) => sandbox[name](...args);
   }
+
+  /**
+   * Récupère les poids backend pour une phase forcée (regular | playoff).
+   * Monkey-patche temporairement `_botGetNBAPhase` dans le sandbox.
+   * Garantit qu'on lit la VRAIE table de poids backend (pas une copie
+   * hardcodée côté test).
+   */
+  exported.getWeightsForPhase = (phase) => {
+    if (!['regular', 'playin', 'playoff', 'offseason'].includes(phase)) {
+      throw new Error(`getWeightsForPhase · phase invalide · ${phase}`);
+    }
+    const original = sandbox._botGetNBAPhase;
+    sandbox._botGetNBAPhase = () => phase;
+    try {
+      return sandbox._botGetWeights();
+    } finally {
+      sandbox._botGetNBAPhase = original;
+    }
+  };
+
   return exported;
 }
 
