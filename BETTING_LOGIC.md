@@ -261,6 +261,22 @@ fatigue_index
 - `kelly` : fraction bankroll suggérée (Kelly × 0.25)
 - `signals` : top variables contributrices avec valeurs
 
+## Lecture produit · 3 catégories de log (MBP-tennis-ui-bet-classification)
+
+Règle métier universelle (NBA · MLB · Tennis) pour différencier ce que le bot **recommande vraiment** d'une simple value mathématique détectée. Source canonique · `src/ui/ui.bot.classifier.js` (pure · testée scripts/test-bot-bet-classifier.mjs · 34 assertions).
+
+| Catégorie | Condition log | Affichage UI |
+|---|---|---|
+| **`recommended_bet`** | `best_side` non null OU `betting_recommendations.best` non null | Section "Paris recommandés" · badge "Recommandé" · best mis en avant · joueur résolu via `resolveSidePlayerName` (HOME→p1 · AWAY→p2 tennis) |
+| **`value_idea_not_selected`** | `recommendations[]` non vide ET `best`/`best_side` null | Section "Idées value non retenues" · badge "Non retenu" · texte "value mathématique détectée mais non retenue" · badge "Contrarian" si `is_contrarian:true` |
+| **`no_bet_analysis`** | pas de `betting_recommendations` OU `recommendations[]` vide | Pas de section recos · seules les variables d'analyse affichées |
+
+**Règle stricte** · une `value_idea_not_selected` ne doit JAMAIS être présentée comme "pari conseillé". Texte explicite obligatoire pour éviter la confusion.
+
+**Helper joueur** · `resolveSidePlayerName(log, side)` · HOME/AWAY traduit en nom réel (`p1`/`p2` pour tennis · `home`/`away` pour NBA/MLB) · OVER/UNDER pass-through (totals).
+
+**Pas d'impact moteur** · classification = pure lecture frontend du log existant. Aucun champ backend nouveau · aucun calcul refait.
+
 ## Helpers UI FR
 - `_qualityFr` · `_betTypeFr` · `_fmtOdds` · `_confidenceFr` · `_interpretVariable`
 - (ui.bot.js:1090-1215)

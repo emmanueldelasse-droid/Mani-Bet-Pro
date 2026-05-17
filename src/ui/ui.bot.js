@@ -15,6 +15,11 @@
 
 import { API_CONFIG } from '../config/api.config.js';
 import { surfaceFr } from './ui.match-detail.helpers.js';
+import {
+  BET_CATEGORY,
+  classifyLogBet,
+  resolveSidePlayerName,
+} from './ui.bot.classifier.js';
 
 const WORKER = API_CONFIG.WORKER_BASE_URL;
 
@@ -782,6 +787,10 @@ function _renderLogCard(log) {
   // pas une vraie reco actionnable. On masque l'edge dans ce cas.
   const hasEdge    = log.best_edge && log.best_edge >= 5 && conf !== 'INCONCLUSIVE';
 
+  // MBP-tennis-ui-bet-classification · catégorie produit (recommended_bet ·
+  // value_idea_not_selected · no_bet_analysis) pour affichage explicite badge.
+  const betCategory = classifyLogBet(log);
+
   // Classe carte
   let cardClass = 'bot-log-card';
   if (hasEdge && !isSettled) cardClass += ' bot-log-card--edge';
@@ -803,6 +812,7 @@ function _renderLogCard(log) {
         <div class="bot-log-badges">
           ${phase ? `<span class="bot-badge bot-badge--phase">${phase}</span>` : ''}
           ${_renderConfBadge(conf)}
+          ${_renderCategoryBadge(betCategory)}
           ${hasEdge ? `<span class="bot-badge bot-badge--edge" title="Le bot estime que la cote sous-évalue cette prédiction">+${log.best_edge}% cote sous-évaluée</span>` : ''}
           ${isSettled
             ? log.motor_was_right
@@ -830,6 +840,19 @@ function _renderConfBadge(conf) {
   const map = { HIGH: 'high', MEDIUM: 'medium', LOW: 'low', INCONCLUSIVE: 'inconc' };
   const cls = map[conf] ?? 'inconc';
   return `<span class="bot-badge bot-badge--${cls}">${conf}</span>`;
+}
+
+// MBP-tennis-ui-bet-classification · badge catégorie produit · 3 valeurs ·
+//   Recommandé · Idée value · Aucun pari
+function _renderCategoryBadge(category) {
+  if (category === BET_CATEGORY.RECOMMENDED) {
+    return '<span class="bot-badge bot-badge--edge" title="Pari principal retenu par le moteur">Recommandé</span>';
+  }
+  if (category === BET_CATEGORY.VALUE_IDEA) {
+    return '<span class="bot-badge bot-badge--pending" title="Value mathématique détectée mais non retenue comme pari principal">Idée value</span>';
+  }
+  // NO_BET · pas de badge dédié (la confidence/edge badges suffisent)
+  return '';
 }
 
 function _renderProbaBar(log) {
@@ -932,21 +955,7 @@ function _renderDetailPanel(log) {
       <div class="bot-detail-row"><span>Bookmaker donne au domicile</span><span class="bot-detail-row__val">${log.market_divergence.market_implied_home != null ? Math.round(log.market_divergence.market_implied_home * 100) + '%' : '—'}</span></div>
     </div>` : ''}
 
-    ${recs.length ? `<div class="bot-detail-section">
-      <div class="bot-detail-title">Recommandations de paris</div>
-      ${recs.map(r => {
-        const label = r.type === 'PLAYER_POINTS'
-          ? `${r.player} · ${r.side === 'OVER' ? 'plus de' : 'moins de'} ${r.line} pts`
-          : _betTypeFr(r.type, r.side);
-        const extra = r.type === 'PLAYER_POINTS'
-          ? ` · projection ${r.projected_pts} pts · ${_confidenceFr(r.confidence_label)}${r.edge_raw && r.edge_raw !== r.edge ? ` (avantage brut ${r.edge_raw}% → ajusté ${r.edge}%)` : ''}${r.odds_source ? ' · source ' + r.odds_source : ''}`
-          : '';
-        return `<div class="bot-detail-row">
-        <span>${label}</span>
-        <span class="bot-detail-row__val">Cote sous-évaluée de +${r.edge}% · prob. bot ${r.motor_prob}% · cote ${_fmtOdds(r.odds_line)}${extra}</span>
-      </div>`;
-      }).join('')}
-    </div>` : ''}
+    ${_renderBetRecommendationsSection(log, recs)}
 
     ${_renderPlayerPropsSection(log)}
     ${_renderMLBPitcherStrikeoutsSection(log)}
@@ -962,6 +971,63 @@ function _renderDetailPanel(log) {
       · Phase compétition : ${log.nba_phase ?? '—'}
     </div>
   `;
+}
+
+// MBP-tennis-ui-bet-classification · sépare les recommandations en 3 catégories ·
+//   recommended_bet · value_idea_not_selected · no_bet_analysis
+// La règle métier est dans `ui.bot.classifier.js` (testée séparément).
+// Player props affichés à part dans _renderPlayerPropsSection (inchangé).
+function _renderBetRecommendationsSection(log, recs) {
+  // Filtrer player_points · gérés par section dédiée
+  const nonPP = (recs ?? []).filter(r => r?.type !== 'PLAYER_POINTS');
+  const category = classifyLogBet(log);
+
+  if (category === BET_CATEGORY.NO_BET) return '';
+
+  if (category === BET_CATEGORY.RECOMMENDED) {
+    // Pari principal · met en avant le best · liste également les autres recs
+    // (généralement le best y figure aussi).
+    const best     = log.betting_recommendations?.best ?? null;
+    const bestSide = log.best_side ?? best?.side ?? null;
+    const sideLbl  = resolveSidePlayerName(log, bestSide);
+
+    return `<div class="bot-detail-section">
+      <div class="bot-detail-title">Paris recommandés <span class="bot-badge bot-badge--edge" style="margin-left:8px">Recommandé</span></div>
+      ${bestSide ? `<div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:8px">
+        Pari principal · <strong>${sideLbl}</strong>${best?.is_contrarian ? ' · <span class="bot-badge bot-badge--wrong" style="font-size:9px">Contrarian</span>' : ''}
+      </div>` : ''}
+      ${nonPP.length === 0 ? '<div style="font-size:11px;color:var(--color-muted)">Aucun détail reco disponible.</div>' :
+        nonPP.map(r => _renderRecRow(log, r, false)).join('')}
+    </div>`;
+  }
+
+  // VALUE_IDEA · aucune reco retenue · ne JAMAIS afficher comme pari conseillé
+  if (nonPP.length === 0) return '';
+  return `<div class="bot-detail-section">
+    <div class="bot-detail-title">Idées value non retenues <span class="bot-badge bot-badge--pending" style="margin-left:8px">Non retenu</span></div>
+    <div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:8px;line-height:1.4">
+      Value mathématique détectée, mais <strong>non retenue comme pari principal par le moteur</strong>.
+      Ne pas jouer sur cette base seule.
+    </div>
+    ${nonPP.map(r => _renderRecRow(log, r, true)).join('')}
+  </div>`;
+}
+
+function _renderRecRow(log, r, isValueIdea) {
+  const sideLabel = resolveSidePlayerName(log, r.side);
+  const label = r.type === 'PLAYER_POINTS'
+    ? `${r.player} · ${r.side === 'OVER' ? 'plus de' : 'moins de'} ${r.line} pts`
+    : `${_betTypeFr(r.type, r.side)}${sideLabel && sideLabel !== r.side ? ' · ' + sideLabel : ''}`;
+  const contrarianBadge = r.is_contrarian
+    ? '<span class="bot-badge bot-badge--wrong" style="font-size:9px;margin-left:6px" title="Pari contrarian · côté minoritaire par le moteur">Contrarian</span>'
+    : '';
+  const statusBadge = isValueIdea
+    ? '<span class="bot-badge bot-badge--pending" style="font-size:9px;margin-left:6px">Non retenu</span>'
+    : '';
+  return `<div class="bot-detail-row">
+    <span>${label}${statusBadge}${contrarianBadge}</span>
+    <span class="bot-detail-row__val">Cote sous-évaluée de +${r.edge}% · prob. bot ${r.motor_prob}% · cote ${_fmtOdds(r.odds_line)}</span>
+  </div>`;
 }
 
 function _renderPlayerPropsSection(log) {
