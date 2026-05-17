@@ -364,6 +364,11 @@ export default {
 
       if (path === '/tennis/sports-list' && request.method === 'GET')
         return await handleTennisSportsList(url, env, origin);
+      // Debug protégé · diagnostic comparaison TENNIS_TOURNAMENTS (registre interne)
+      // vs sports tennis réellement exposés par TheOddsAPI. Usage admin/audit ·
+      // ne pas exposer publiquement (DEBUG_SECRET requis).
+      if (path === '/tennis/provider/sports-debug' && request.method === 'GET')
+        return await handleTennisProviderSportsDebug(url, env, origin);
       if (path === '/tennis/csv-test' && request.method === 'GET')
         return await handleTennisCSVTest(url, env, origin);
       if (path === '/tennis/tournaments' && request.method === 'GET')
@@ -6554,6 +6559,66 @@ async function handleTennisSportsList(url, env, origin) {
       .map(s => ({ key: s.key, title: s.title, active: s.active }));
     return jsonResponse({ available: true, tennis_sports: tennis }, 200, origin);
   } catch (err) { return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 200, origin); }
+}
+
+// Debug protégé · audit registre interne vs provider TheOddsAPI.
+// Usage · GET /tennis/provider/sports-debug?secret=DEBUG_SECRET
+// Croise TENNIS_TOURNAMENTS (worker.js:6406) avec /v4/sports/?all=true.
+// Retourne ·
+//   - provider_sports[]   · sports tennis exposés par TheOddsAPI (enrichi
+//                            key/title/active/has_outrights/description)
+//   - registry_keys[]     · sport_key de TENNIS_TOURNAMENTS uniquement
+//   - in_registry_not_in_provider[] · clés registre absentes chez le provider
+//   - in_provider_not_in_registry[] · clés provider non listées dans le registre
+//     (= candidats potentiels à ajouter au registre · à valider manuellement)
+async function handleTennisProviderSportsDebug(url, env, origin) {
+  const authDeny = _denyIfNoDebugAuth(url, env, origin);
+  if (authDeny) return authDeny;
+
+  const oddsKey = env.ODDS_API_KEY_1 ?? env.ODDS_API_KEY_2;
+  if (!oddsKey) return jsonResponse({ error: 'ODDS_API_KEY not configured' }, 200, origin);
+
+  try {
+    const resp = await fetchTimeout(
+      `https://api.the-odds-api.com/v4/sports/?apiKey=${oddsKey}&all=true`,
+      { headers: { Accept: 'application/json' } }, 10000
+    );
+    if (!resp.ok) return jsonResponse({ error: `Odds API ${resp.status}` }, 200, origin);
+    const data = await resp.json();
+
+    const providerSports = (Array.isArray(data) ? data : [])
+      .filter(s => s.key && s.key.toLowerCase().includes('tennis'))
+      .map(s => ({
+        key:          s.key,
+        title:        s.title         ?? null,
+        active:       s.active        ?? null,
+        has_outrights: s.has_outrights ?? null,
+        description:  s.description   ?? null,
+      }));
+
+    const providerKeys  = new Set(providerSports.map(s => s.key));
+    const registryKeys  = TENNIS_TOURNAMENTS.map(t => t.sport_key);
+    const registrySet   = new Set(registryKeys);
+
+    const inRegistryNotInProvider = registryKeys.filter(k => !providerKeys.has(k));
+    const inProviderNotInRegistry = providerSports
+      .filter(s => !registrySet.has(s.key))
+      .map(s => ({ key: s.key, title: s.title, active: s.active, has_outrights: s.has_outrights }));
+
+    return jsonResponse({
+      available:                   true,
+      checked_at:                  new Date().toISOString(),
+      provider_sports_count:       providerSports.length,
+      registry_keys_count:         registryKeys.length,
+      provider_sports:             providerSports,
+      registry_keys:               registryKeys,
+      in_registry_not_in_provider: inRegistryNotInProvider,
+      in_provider_not_in_registry: inProviderNotInRegistry,
+    }, 200, origin);
+  } catch (err) {
+    console.error('handleTennisProviderSportsDebug:', err?.message ?? err);
+    return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin);
+  }
 }
 
 async function handleTennisOdds(url, env, origin) {

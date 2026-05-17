@@ -63,19 +63,20 @@ Note · `/nba/team/:abv/{stats,recent}` matchés par regex `^\/nba\/team\/[^/]+\
 | `/mlb/bot/logs` | GET | logs MLB | 355 | public | — | `mlb_bot_log_*` 90j | actif |
 | `/mlb/bot/settle-logs` | POST | settle MLB | 358 | public | ESPN | `mlb_bot_log_*` 90j | actif |
 
-## Routes Tennis (9)
+## Routes Tennis (10)
 
 | Route | Méthode | Handler | Ligne route | Auth | Provider(s) | Cache KV | Statut |
 |---|---|---|---|---|---|---|---|
-| `/tennis/sports-list` | GET | tournois TheOddsAPI | 361 | public | TheOddsAPI | — | actif |
-| `/tennis/csv-test` | GET | `handleTennisCSVTest` | 363 | public | Sackmann CSV | `tennis_csv_stats_v12_*` (TTL non trouvé) | debug · actif |
-| `/tennis/tournaments` | GET | `handleTennisTournaments` | 365 | public | — | — | actif |
-| `/tennis/odds` | GET | `handleTennisOdds` | 367 | public | TheOddsAPI · ESPN | `tennis_odds_cache_v2_*` | actif |
-| `/tennis/stats` | GET | `handleTennisStats` | 369 | public | Sackmann CSV · api-tennis | `tennis_csv_stats_v12_*` · `espn_recent_v2_*` 2h/5min | actif |
-| `/tennis/_espn_probe` | GET | diagnostic ESPN tennis | 372 | public | ESPN | `espn_recent_v2_*` | debug · actif |
-| `/tennis/bot/run` | POST | trigger tennis bot | 374 | public | (multi) | `tennis_bot_last_run` 30h | actif |
-| `/tennis/bot/logs` | GET | logs tennis | 376 | public | — | `tennis_bot_log_*` 90j | actif |
-| `/tennis/bot/settle-logs` | POST | settle tennis | 378 | public | ESPN · Sackmann | `tennis_bot_log_*` 90j | actif |
+| `/tennis/sports-list` | GET | `handleTennisSportsList` | 365 | public | TheOddsAPI | — | actif · liste sports tennis simple |
+| `/tennis/provider/sports-debug` | GET | `handleTennisProviderSportsDebug` | 370 | **DEBUG_SECRET** | TheOddsAPI | — | debug · audit registre interne vs provider |
+| `/tennis/csv-test` | GET | `handleTennisCSVTest` | 367 | public | Sackmann CSV | `tennis_csv_stats_v12_*` (TTL non trouvé) | debug · actif |
+| `/tennis/tournaments` | GET | `handleTennisTournaments` | 369 | public | — | — | actif |
+| `/tennis/odds` | GET | `handleTennisOdds` | 371 | public | TheOddsAPI · ESPN | `tennis_odds_cache_v2_*` | actif |
+| `/tennis/stats` | GET | `handleTennisStats` | 373 | public | Sackmann CSV · api-tennis | `tennis_csv_stats_v12_*` · `espn_recent_v2_*` 2h/5min | actif |
+| `/tennis/_espn_probe` | GET | diagnostic ESPN tennis | 376 | **DEBUG_SECRET** (MBP-S.1) | ESPN | `espn_recent_v2_*` | debug · actif |
+| `/tennis/bot/run` | POST | trigger tennis bot | 378 | public | (multi) | `tennis_bot_last_run` 30h | actif |
+| `/tennis/bot/logs` | GET | logs tennis | 380 | public | — | `tennis_bot_log_*` 90j | actif |
+| `/tennis/bot/settle-logs` | POST | settle tennis | 382 | public | ESPN · Sackmann | `tennis_bot_log_*` 90j | actif |
 
 ## Routes Bot cross-sport (6)
 
