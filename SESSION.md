@@ -23,7 +23,7 @@ Début → "En cours" 1/N · Fin étape → +1 · Merge → vider "En cours" · 
 Update SESSION.md seulement si impact critique. Update docs dédiées à chaque merge concerné.
 
 ## En cours
-- Sync minimal `.md` mémoire post-PR #200/#201/#202/#203 (SESSION.md TODO + section nouvelles PRs · ARCHITECTURE.md infra tests + ui.bot.classifier.js + route debug tennis) · pure doc · PR à valider
+néant
 
 ## État actuel
 - Worker · `manibetpro.emmanueldelasse.workers.dev` · auto-deploy push main
