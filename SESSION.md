@@ -23,7 +23,7 @@ Début → "En cours" 1/N · Fin étape → +1 · Merge → vider "En cours" · 
 Update SESSION.md seulement si impact critique. Update docs dédiées à chaque merge concerné.
 
 ## En cours
-- Tennis · attente exécution prod de `/tennis/provider/sports-debug?secret=$DEBUG_SECRET` (mergé PR #200) · selon résultat · soit PR suivante ajout registre (scénario A) · soit stratégie fallback "tournoi non couvert" (scénario B) · soit mix (scénario C) · décision ChatGPT
+- Tennis · patch registre (PR à venir) · ajout 3 tournois confirmés TheOddsAPI · `atp_hamburg` + `wta_strasbourg` + `wta_wuhan` · scope strict · pas de moteur ni cron touché · Genève ATP + Hambourg WTA documentés P2-7 comme non couverts par TheOddsAPI · pas de patch fallback dans cette PR
 
 ## État actuel
 - Worker · `manibetpro.emmanueldelasse.workers.dev` · auto-deploy push main

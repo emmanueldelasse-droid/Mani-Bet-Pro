@@ -53,18 +53,28 @@ Source · SESSION.md + audit code + git log mai 2026.
 - Mitigation · v7.00 recalcul Elo incrémental depuis ESPN (commit `8f640e9`)
 - Mais ESPN tennis matching surname uniquement (faux positifs prénoms réglés v6.99)
 
-### P2-6 · Tennis · tournois manquants dans le registre `TENNIS_TOURNAMENTS`
-- Registre interne worker.js:6406 · 31 tournois hardcodés · cron tennis n'analyse QUE ce qui y figure
-- Manquent (à confirmer empiriquement via TheOddsAPI) ·
-  - **Geneva Open** · ATP 250 · Clay · ~17-23 mai (Gonet Geneva Open)
-  - **Hamburg European Open** · ATP 500 · Clay · début juillet
-  - **Hamburg European Open WTA** · WTA 500 · Clay · même semaine
-  - Possiblement Lyon ATP 250 · Stuttgart ATP 250 · Halle ATP 500 grass · etc.
-- Hamburg figure déjà dans la regex surface (worker.js:6785 + :10125) → quelqu'un a anticipé sans ajouter au registre
-- Conséquence · 0 reco pour ces tournois (cron skip silencieux · pas d'analyse · pas de log)
-- Investigation · route debug `/tennis/provider/sports-debug?secret=...` (ajoutée mai 2026) compare registre vs TheOddsAPI · liste `in_provider_not_in_registry` = candidats valides
-- Patch · ajouter entrées au registre seulement si `sport_key` confirmée existante par TheOddsAPI (mission ChatGPT 2026-05-17 · pas inventer de fausses keys)
-- Ref · `worker.js:6406-6448` `TENNIS_TOURNAMENTS` · `worker.js:9505-9515` `_runTennisBotCron`
+### P2-6 · Tennis · tournois manquants dans le registre `TENNIS_TOURNAMENTS` · résolu partiel
+- Registre interne worker.js:6411 · 36 tournois hardcodés (33 avant patch) · cron tennis n'analyse QUE ce qui y figure
+- Diagnostic via route debug `/tennis/provider/sports-debug?secret=...` (PR #200) ·
+  - 36 sports tennis exposés par TheOddsAPI vs 33 dans registre
+  - 3 candidats valides détectés · ATP Hamburg · WTA Strasbourg · WTA Wuhan
+- **Patch appliqué (PR #201)** · 3 entrées ajoutées au registre ·
+  - `atp_hamburg` (ATP 500 · Clay · 17-23 mai 2026 · `tennis_atp_hamburg_open`)
+  - `wta_strasbourg` (WTA 500 · Clay · 17-23 mai 2026 · `tennis_wta_strasbourg`)
+  - `wta_wuhan` (WTA 1000 · Hard · 12-18 octobre 2026 · `tennis_wta_wuhan_open`)
+- Vérif locale via vm sandbox · au 17/05/2026 · 4 tournois actifs (Rome ATP/WTA + Hamburg ATP + Strasbourg WTA)
+- Hamburg figure désormais dans le registre · cron va analyser dès le prochain run
+
+### P2-7 · Tennis · tournois non couverts par TheOddsAPI · limite provider
+- Tournois actifs mais **absents du catalogue TheOddsAPI** (vérifié via `/tennis/provider/sports-debug`) ·
+  - **Geneva ATP 250** (Gonet Geneva Open · Clay · mi-mai) · pas de `sport_key` exposée
+  - **Hamburg WTA / MSC Hamburg Ladies Open · WTA 250 · Clay · 20-26 juillet 2026 · pas de sport_key TheOddsAPI confirmée**
+- Conséquence · le bot ne peut pas analyser ces tournois · 0 reco · pas un bug code
+- Pas de patch dans cette PR · 3 options à arbitrer ChatGPT ·
+  - (a) doc seulement · status quo · accepter limite
+  - (b) ajouter au registre avec `odds_supported: false` + affichage UI "non couvert" (demande modif moteur + UI · plus invasif)
+  - (c) évaluer un autre provider cotes tennis avec couverture plus large (long terme)
+- Décision actuelle · option (a) · documentation seule
 
 ### P2-5 · Effect size Elo tennis signe douteux
 - v6.95 · Elo poids réduit à 0.10 car effect_size = 0.15 signe douteux
