@@ -26,7 +26,8 @@ index.html + src/ui/*.js (GitHub Pages front)
 - `ui.match-detail.tennis.js` · vue détail tennis
 - `ui.match-detail.teamdetail.js` · vue équipe approfondie
 - `ui.match-detail.helpers.js` · helpers communs
-- `ui.bot.js` · recos bot · helpers FR `_qualityFr` `_betTypeFr` `_fmtOdds` `_confidenceFr` `_interpretVariable` (ui.bot.js:1090-1215)
+- `ui.bot.js` · recos bot · helpers FR `_qualityFr` `_betTypeFr` `_fmtOdds` `_confidenceFr` `_interpretVariable` (ui.bot.js:1090-1215) · import classifier 3 catégories (PR #202)
+- `ui.bot.classifier.js` · NEW PR #202 · module pur sans dép navigateur · `BET_CATEGORY` (recommended_bet · value_idea_not_selected · no_bet_analysis) · `classifyLogBet` · `resolveSidePlayerName` · réutilisé par `report-tennis-best-bets.mjs`
 - `ui.history.js` · historique paris
 - `ui.lab.js` · zone test
 - `ui.settings.js` · réglages user
@@ -78,7 +79,7 @@ index.html + src/ui/*.js (GitHub Pages front)
 - `/health` · status worker · version hardcodée `6.85.0` (worker.js:419 · non sync changelog)
 - `/nba/*` · 21 routes · matches · injuries · stats · odds · team-detail · 5 debug
 - `/mlb/*` · 11 routes · matches · pitchers · standings · weather · bot
-- `/tennis/*` · 9 routes · tournaments · odds · stats · bot · _espn_probe
+- `/tennis/*` · 10 routes · tournaments · odds · stats · bot · _espn_probe · `/tennis/provider/sports-debug` (DEBUG_SECRET · PR #200 · audit registre vs TheOddsAPI)
 - `/bot/*` · 6 routes · logs · settle · calibration · run · odds-history
 - `/paper/*` · 4 routes · state · bet · reset · **aucune auth HTTP**
 
@@ -113,10 +114,17 @@ index.html + src/ui/*.js (GitHub Pages front)
 - `scripts/test-nba-engine-parity.mjs` · 492 assertions parité backend↔frontend NBA (PR #196 · MBP-A.2)
 - `scripts/test-data-quality-gate.mjs` · 44 assertions boundaries gate 6 surfaces (PR #197 · MBP-P1)
 - `scripts/test-bot-monitoring-summary.mjs` · 50 assertions rapport monitoring (PR #198)
-- `scripts/report-bot-monitoring.mjs` · CLI read-only · 3 modes (`--demo` · `--url <origin>` · `--fixture <path>`)
+- `scripts/test-bot-bet-classifier.mjs` · 34 assertions classifier UI 3 catégories (PR #202)
+- `scripts/test-tennis-best-bets-summary.mjs` · 29 assertions rapport tennis dédié (PR #203)
+- `scripts/report-bot-monitoring.mjs` · CLI read-only multi-sports · 3 modes (`--demo` · `--url <origin>` · `--fixture <path>`)
+- `scripts/report-tennis-best-bets.mjs` · CLI read-only dédié tennis best bets (PR #203) · même API 3 modes + filtre `--date`
 - `scripts/lib/dom-stub.mjs` · stub `window.location` + `localStorage` pour imports Logger en Node
 - `scripts/lib/backend-engine.mjs` · vm sandbox worker.js · expose fonctions pures `_bot*` + `_mlbEngineCompute` + `getWeightsForPhase`
+- `scripts/lib/monitoring-summary.mjs` · `summarize` + `formatReport` + `evaluateFetchErrors` (PR #198/#199)
+- `scripts/lib/tennis-best-bets-summary.mjs` · `summarizeTennisBestBets` + `formatTennisBestBetsReport` (PR #203)
+- `src/ui/ui.bot.classifier.js` · classifier UI pure réutilisable (PR #202) · importé par `ui.bot.js` ET les tests/scripts monitoring tennis
 - Aucun framework lourd (Jest/Vitest) · ESM natif Node 20+ · pas de dépendance npm
+- Total · 649 assertions actives sur 5 scripts
 
 ## Sécurité (post chantier MBP-A.4 · `SECURITY_AUDIT.md`)
 **6/6 critiques résolues** ·

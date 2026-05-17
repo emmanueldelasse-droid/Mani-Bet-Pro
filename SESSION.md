@@ -23,7 +23,7 @@ Début → "En cours" 1/N · Fin étape → +1 · Merge → vider "En cours" · 
 Update SESSION.md seulement si impact critique. Update docs dédiées à chaque merge concerné.
 
 ## En cours
-néant
+- Sync minimal `.md` mémoire post-PR #200/#201/#202/#203 (SESSION.md TODO + section nouvelles PRs · ARCHITECTURE.md infra tests + ui.bot.classifier.js + route debug tennis) · pure doc · PR à valider
 
 ## État actuel
 - Worker · `manibetpro.emmanueldelasse.workers.dev` · auto-deploy push main
@@ -69,11 +69,21 @@ néant
 - Tests · 50 assertions (`scripts/test-bot-monitoring-summary.mjs`)
 - Doc · `docs/monitoring/BOT_MONITORING.md`
 
+### Tennis · registre + classifier UI + monitoring dédié (PR #200/#201/#202/#203)
+- **PR #200** · route debug `/tennis/provider/sports-debug?secret=DEBUG_SECRET` · croise `TENNIS_TOURNAMENTS` registre vs catalogue TheOddsAPI · `in_provider_not_in_registry[]` = candidats valides
+- **PR #201** · ajout registre · `atp_hamburg` (ATP 500 Bitpanda · 17-23 mai) · `wta_strasbourg` (WTA 500 · 17-23 mai) · `wta_wuhan` (WTA 1000 · 12-18 octobre)
+- **PR #202** · classifier UI lecture produit `src/ui/ui.bot.classifier.js` · 3 catégories (`recommended_bet` · `value_idea_not_selected` · `no_bet_analysis`) · règle métier `best_side` ou `best` non null = recommended · helper `resolveSidePlayerName` (HOME→p1 tennis) · doc `BETTING_LOGIC.md` §"Lecture produit · 3 catégories"
+- **PR #203** · rapport tennis best bets dédié `scripts/report-tennis-best-bets.mjs` · exclut strictement value ideas + no_bet du hit rate · outcome canonique `best_side === result_winner` (PAS `motor_was_right` · contrarian-incompatible · voir worker.js:10573) · ROI flat stake 1 unité · 4 statuts décision (INSUFFICIENT/ALERT<50/NEUTRAL 50-54/POSITIVE>=55)
+- Tournois non couverts par TheOddsAPI documentés `KNOWN_ISSUES.md` P2-7 · Geneva ATP 250 · Hamburg WTA (MSC Hamburg Ladies Open · WTA 250 · juillet)
+
 ### Tests automatisés (Node ESM · pas de framework)
 - `scripts/test-nba-engine-parity.mjs` · 492 assertions parité backend↔frontend NBA (PR #196)
 - `scripts/test-data-quality-gate.mjs` · 44 assertions boundaries 6 surfaces gate (PR #197)
 - `scripts/test-bot-monitoring-summary.mjs` · 50 assertions monitoring (PR #198)
+- `scripts/test-bot-bet-classifier.mjs` · 34 assertions classifier UI 3 catégories (PR #202)
+- `scripts/test-tennis-best-bets-summary.mjs` · 29 assertions rapport tennis dédié (PR #203)
 - Lib partagée · `scripts/lib/dom-stub.mjs` (stub window pour import Logger) · `backend-engine.mjs` (vm sandbox worker.js)
+- Total · 649 assertions actives sur 5 scripts
 
 ## Conventions
 - Confidence · `HIGH/MEDIUM/LOW/INCONCLUSIVE` (jamais "Data quality" en UI)
@@ -87,7 +97,9 @@ néant
 ### P1 · critique
 - [x] **MBP-A.2 CRIT-1** · test parité backend/frontend NBA en place (PR #196) · `node scripts/test-nba-engine-parity.mjs` · 492 assertions · doc `docs/tests/NBA_ENGINE_PARITY.md` · stratégie "garder les 2 moteurs" validée par ChatGPT · MED-1 b2b numérique signalé KNOWN
 - [ ] Surveiller hit rate MLB v6.94 post 50 paris · si <52% désactiver bot (Option C) · outil · `node scripts/report-bot-monitoring.mjs --url <worker>` (PR #198 · décide auto LIMITER_OU_DESACTIVER sur 50 derniers settlés)
-- [ ] Surveiller hit rate tennis v6.93 post 50 paris · revert isolé si baisse · outil · `node scripts/report-bot-monitoring.mjs --url <worker>` (PR #198 · décide auto SURVEILLER_REVERT sur 50 derniers settlés)
+- [ ] Surveiller hit rate tennis v6.93 post 50 paris · revert isolé si baisse · outils ·
+  - global · `node scripts/report-bot-monitoring.mjs --url <worker>` (PR #198 · décide auto SURVEILLER_REVERT sur 50 derniers settlés tous types confondus)
+  - best bets seuls · `node scripts/report-tennis-best-bets.mjs --url <worker>` (PR #203 · exclut value ideas + no_bet · 4 statuts INSUFFICIENT/ALERT<50/NEUTRAL 50-54/POSITIVE>=55)
 - [x] **MBP-P1** · Gate `data_quality` faible (PR #197 v2) · 6 surfaces ·
   - NBA/Tennis numérique `< 0.55` → INCONCLUSIVE (`_botComputeConfidence`, `_botTennisConfidence`, `EngineCore._computeConfidenceLevel`)
   - MLB label-based `=== 'LOW'` → `recommendations: []` + `best: null` (`_mlbEngineCompute`, `_mlbAnalyzeMatch` strikeouts, `_analyzeMLBMatch` orchestrator)
