@@ -6429,6 +6429,7 @@ const TENNIS_TOURNAMENTS = [
   { key: 'atp_dubai',           label: 'Dubai Championships',    tour: 'atp', surface: 'Hard',  start: '2026-02-23', end: '2026-03-01', sport_key: 'tennis_atp_dubai' },
   { key: 'atp_qatar',           label: 'Qatar Open (Doha)',      tour: 'atp', surface: 'Hard',  start: '2026-02-16', end: '2026-02-22', sport_key: 'tennis_atp_qatar_open' },
   { key: 'atp_china',           label: 'China Open (Beijing)',   tour: 'atp', surface: 'Hard',  start: '2026-09-28', end: '2026-10-04', sport_key: 'tennis_atp_china_open' },
+  { key: 'atp_hamburg',         label: 'Bitpanda Hamburg Open',  tour: 'atp', surface: 'Clay',  start: '2026-05-17', end: '2026-05-23', sport_key: 'tennis_atp_hamburg_open' },
   // ── ATP 250 (actuellement visibles sur TheOddsAPI) ──
   { key: 'atp_munich',          label: 'BMW Open Munich',        tour: 'atp', surface: 'Clay',  start: '2026-04-20', end: '2026-04-26', sport_key: 'tennis_atp_munich' },
 
@@ -6447,9 +6448,11 @@ const TENNIS_TOURNAMENTS = [
   { key: 'wta_china',           label: 'WTA China Open',         tour: 'wta', surface: 'Hard',  start: '2026-09-28', end: '2026-10-04', sport_key: 'tennis_wta_china_open' },
   { key: 'wta_dubai',           label: 'WTA Dubai Championships',tour: 'wta', surface: 'Hard',  start: '2026-02-16', end: '2026-02-22', sport_key: 'tennis_wta_dubai' },
   { key: 'wta_qatar',           label: 'WTA Qatar Open (Doha)',  tour: 'wta', surface: 'Hard',  start: '2026-02-09', end: '2026-02-15', sport_key: 'tennis_wta_qatar_open' },
+  { key: 'wta_wuhan',           label: 'Wuhan Open',             tour: 'wta', surface: 'Hard',  start: '2026-10-12', end: '2026-10-18', sport_key: 'tennis_wta_wuhan_open' },
   // ── WTA 500 ──
   { key: 'wta_stuttgart',       label: 'WTA Stuttgart',          tour: 'wta', surface: 'Clay',  start: '2026-04-20', end: '2026-04-27', sport_key: 'tennis_wta_stuttgart_open' },
   { key: 'wta_charleston',      label: 'WTA Charleston',         tour: 'wta', surface: 'Clay',  start: '2026-03-30', end: '2026-04-05', sport_key: 'tennis_wta_charleston_open' },
+  { key: 'wta_strasbourg',      label: 'Internationaux de Strasbourg', tour: 'wta', surface: 'Clay', start: '2026-05-17', end: '2026-05-23', sport_key: 'tennis_wta_strasbourg' },
 ];
 
 function _activeTennisTournaments(dateStr) {
