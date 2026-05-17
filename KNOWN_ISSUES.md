@@ -68,7 +68,7 @@ Source · SESSION.md + audit code + git log mai 2026.
 ### P2-7 · Tennis · tournois non couverts par TheOddsAPI · limite provider
 - Tournois actifs mais **absents du catalogue TheOddsAPI** (vérifié via `/tennis/provider/sports-debug`) ·
   - **Geneva ATP 250** (Gonet Geneva Open · Clay · mi-mai) · pas de `sport_key` exposée
-  - **Hamburg WTA 500** · pas de `sport_key` exposée · catégorie/date 2026 à clarifier aussi
+  - **Hamburg WTA / MSC Hamburg Ladies Open · WTA 250 · Clay · 20-26 juillet 2026 · pas de sport_key TheOddsAPI confirmée**
 - Conséquence · le bot ne peut pas analyser ces tournois · 0 reco · pas un bug code
 - Pas de patch dans cette PR · 3 options à arbitrer ChatGPT ·
   - (a) doc seulement · status quo · accepter limite
