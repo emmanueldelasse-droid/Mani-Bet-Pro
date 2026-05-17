@@ -23,7 +23,7 @@ Début → "En cours" 1/N · Fin étape → +1 · Merge → vider "En cours" · 
 Update SESSION.md seulement si impact critique. Update docs dédiées à chaque merge concerné.
 
 ## En cours
-néant
+- Tennis · monitoring best bets dédié (PR à venir) · `scripts/report-tennis-best-bets.mjs` + pure module `scripts/lib/tennis-best-bets-summary.mjs` · réutilise classifier `ui.bot.classifier.js` · exclut strictement value ideas / no_bet du hit rate · décisions seuil 50 settled (INSUFFICIENT / ALERT<50 / NEUTRAL 50-54 / POSITIVE>=55) · ROI flat stake 1 unité · 29/29 tests · doc `docs/monitoring/BOT_MONITORING.md`
 
 ## État actuel
 - Worker · `manibetpro.emmanueldelasse.workers.dev` · auto-deploy push main

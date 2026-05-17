@@ -161,6 +161,63 @@ Pour la somme brute des raisons → champ séparé `blocked_reasons_total`.
 - Attendre 50 nouveaux paris settlés avec le gate actif avant toute décision de calibration
 - Conformité avec PROJECT_RULES.md · "Tout changement de seuil → justifier par chiffres sur logs settlés"
 
+## Monitoring best bets tennis (script dédié)
+
+Outil complémentaire focalisé sur les **vrais best bets tennis** uniquement · exclut strictement les value ideas et no_bet · répond à "le bot gagne-t-il quand il dit vraiment de jouer ?".
+
+### Lancement
+
+```
+node scripts/report-tennis-best-bets.mjs --demo
+node scripts/report-tennis-best-bets.mjs --url https://manibetpro.emmanueldelasse.workers.dev
+node scripts/report-tennis-best-bets.mjs --url <worker> --date 20260517
+node scripts/report-tennis-best-bets.mjs --fixture ./tennis-logs.json
+```
+
+### Définitions strictes (réutilise `src/ui/ui.bot.classifier.js`)
+
+- **Best bet** · `best_side` non null OU `betting_recommendations.best` non null
+- **Value idea non retenue** · `recommendations[]` non vide ET pas de `best`/`best_side` · **JAMAIS comptée dans le hit rate**
+- **No bet** · pas de `recommendations` · **JAMAIS comptée dans le hit rate**
+
+### Métriques
+
+Volume · `total_logs` · `settled_logs` · `recommended_bets_total` · `recommended_bets_settled` · `value_ideas_not_selected_total` · `no_bet_analysis_total`.
+
+Performance best bets uniquement · `hit_rate` · `wins` · `losses` · `pending` · `average_edge` · `average_kelly` · `average_data_quality` · breakdown par confidence (HIGH/MEDIUM/LOW/INCONCLUSIVE).
+
+Segments · par tournoi · par côté (HOME/AWAY) · contrarian vs non-contrarian.
+
+ROI · flat stake 1 unité par bet · gain = `odds_decimal - 1` si win · `-1` si loss · `profit_units` et `roi_pct` calculés sur best bets settlés avec `odds_decimal` disponible · sinon "ROI non calculable" affiché explicitement.
+
+### Règle de décision (validée ChatGPT 2026-05-17)
+
+| Condition | Statut | Message |
+|---|---|---|
+| `recommended_bets_settled < 50` | `INSUFFICIENT_SAMPLE` | Échantillon insuffisant · ne pas conclure sur la performance tennis. |
+| `>= 50 settled` ET `hit_rate < 50%` | `ALERT_BELOW_50` | Alerte · best bets tennis sous 50% · surveiller ou réduire exposition. |
+| `>= 50 settled` ET `50% <= hit_rate <= 54%` | `NEUTRAL_ZONE` | Zone neutre · performance à surveiller. |
+| `>= 50 settled` ET `hit_rate >= 55%` | `POSITIVE_SIGNAL` | Signal positif · best bets tennis potentiellement exploitables · à confirmer sur volume supérieur. |
+
+**Aucune promesse de rentabilité** · le ROI affiché est descriptif · pas garanti dans le futur.
+
+### Outcome best bet · règle canonique
+
+`bet_won = best_side === result_winner`
+
+**NE PAS** utiliser `motor_was_right` qui est basé sur `motor_prob > 50` (voir worker.js:10573) · faux pour les paris contrarian (motor predit AWAY mais best_side=HOME).
+
+### Limites
+
+- ROI · 1 unité plate · pas Kelly · pas variance · pas closing line value (CLV reste dans `/bot/calibration/analyze?sport=tennis`)
+- Pas de séparation surface/phase dans cette PR (peut être ajouté plus tard)
+- `result_winner` doit être 'HOME' ou 'AWAY' · si settler tennis stocke différemment · outcome = null · pas comptabilisé
+- Best bet pending (motor_was_right null) → exclu du hit rate ET du ROI
+
+### Anti-confusion produit
+
+Le rapport rappelle systématiquement en pied · "ne pas confondre best bet (pari retenu par le moteur) avec idée value (signal mathématique non retenu)".
+
 ## Tests
 
 ```
