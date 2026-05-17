@@ -53,6 +53,19 @@ Source · SESSION.md + audit code + git log mai 2026.
 - Mitigation · v7.00 recalcul Elo incrémental depuis ESPN (commit `8f640e9`)
 - Mais ESPN tennis matching surname uniquement (faux positifs prénoms réglés v6.99)
 
+### P2-6 · Tennis · tournois manquants dans le registre `TENNIS_TOURNAMENTS`
+- Registre interne worker.js:6406 · 31 tournois hardcodés · cron tennis n'analyse QUE ce qui y figure
+- Manquent (à confirmer empiriquement via TheOddsAPI) ·
+  - **Geneva Open** · ATP 250 · Clay · ~17-23 mai (Gonet Geneva Open)
+  - **Hamburg European Open** · ATP 500 · Clay · début juillet
+  - **Hamburg European Open WTA** · WTA 500 · Clay · même semaine
+  - Possiblement Lyon ATP 250 · Stuttgart ATP 250 · Halle ATP 500 grass · etc.
+- Hamburg figure déjà dans la regex surface (worker.js:6785 + :10125) → quelqu'un a anticipé sans ajouter au registre
+- Conséquence · 0 reco pour ces tournois (cron skip silencieux · pas d'analyse · pas de log)
+- Investigation · route debug `/tennis/provider/sports-debug?secret=...` (ajoutée mai 2026) compare registre vs TheOddsAPI · liste `in_provider_not_in_registry` = candidats valides
+- Patch · ajouter entrées au registre seulement si `sport_key` confirmée existante par TheOddsAPI (mission ChatGPT 2026-05-17 · pas inventer de fausses keys)
+- Ref · `worker.js:6406-6448` `TENNIS_TOURNAMENTS` · `worker.js:9505-9515` `_runTennisBotCron`
+
 ### P2-5 · Effect size Elo tennis signe douteux
 - v6.95 · Elo poids réduit à 0.10 car effect_size = 0.15 signe douteux
 - À reconfirmer post 100+ logs supplémentaires
