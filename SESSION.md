@@ -23,7 +23,7 @@ Début → "En cours" 1/N · Fin étape → +1 · Merge → vider "En cours" · 
 Update SESSION.md seulement si impact critique. Update docs dédiées à chaque merge concerné.
 
 ## En cours
-néant
+- Tennis UI · classification produit recommandations (PR à venir) · 3 catégories `recommended_bet` · `value_idea_not_selected` · `no_bet_analysis` · helper pur `src/ui/ui.bot.classifier.js` · adaptation `ui.bot.js` (badge card + section detail panel) · 34 assertions test · aucun moteur ni cron touché · doc `BETTING_LOGIC.md` §"Lecture produit · 3 catégories"
 
 ## État actuel
 - Worker · `manibetpro.emmanueldelasse.workers.dev` · auto-deploy push main
