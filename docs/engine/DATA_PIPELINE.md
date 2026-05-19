@@ -285,13 +285,13 @@ Sécu MBP-S.4 ·
 - Pas d'isolation user · single-tenant
 - Pas de lock RW sur `paper_trading_state` · corruption concurrent possible
 - Clés `bot_log_{matchId}` prédictibles (matchId ESPN public) · énumération possible
-- Détail · `SECURITY_AUDIT.md` section 7
+- Détail · `docs/decisions/DECISION-001-SECURITY-AUDIT-MBP-A4.md` section 7
 
 ## À vérifier (MBP-A.1)
 - TTL exact `tennis_csv_stats_v12_*` · `tennis_odds_cache_v2_*` (patterns dynamiques · pas trouvé en grep direct)
 - ✓ `_runMLBBotCron` worker.js:8066 (confirmé)
 - ✓ `_runTennisBotCron` worker.js:9372 (confirmé)
-- ✓ Liste routes debug → `ROUTES_AUDIT.md` (5 NBA + 1 BasketUSA)
+- ✓ Liste routes debug → `docs/monitoring/ROUTES_AUDIT.md` (5 NBA + 1 BasketUSA)
 - Écriture `ai_player_props_{date}` · semble manquer (lu mais pas écrit par worker.js)
 - `mlb_team_recent_*` write inconnu
 - `_todayParisKey()` timezone Paris vs UTC · risque drift rate limiters minuit

@@ -26,7 +26,7 @@ Source · SESSION.md + audit code + git log mai 2026.
 - **Correction claim erroné** · première version PR #197 affirmait "MLB LOW = pas de reco déjà gaté" · vérification code a montré que `_mlbEngineCompute` produisait recos peu importe `dataQuality` · ChatGPT a flaggé · gate ajouté explicitement dans le moteur
 - Tests · `node scripts/test-data-quality-gate.mjs` · 44 assertions
 - Test parité NBA toujours OK · 492 pass · 0 fail
-- Doc · `BETTING_LOGIC.md` §"Gate data_quality faible (MBP-P1)"
+- Doc · `docs/engine/BETTING_LOGIC.md` §"Gate data_quality faible (MBP-P1)"
 - Note · `src/engine/engine.mlb.betting.js` (`computeMLB`) est dead code · jamais importé en prod · non gaté (hors scope · à nettoyer en P3)
 
 ## P2 (à traiter sous quelques semaines)
@@ -274,7 +274,7 @@ Source · SESSION.md + audit code + git log mai 2026.
 
 ### MBP-A.1 · LOW-3 · Documentation routes debug lacunaire
 - Routes `*-debug` mentionnées par catégorie mais sans détail individuel pré-MBP-A.1
-- ✓ Corrigé · `ROUTES_AUDIT.md` exhaustif
+- ✓ Corrigé · `docs/monitoring/ROUTES_AUDIT.md` exhaustif
 
 ### MBP-A.1 · LOW-4 · TTL `tennis_csv_stats_v12_*` `tennis_odds_cache_v2_*` non trouvés
 - Préfixes dynamiques · grep direct ne capture pas TTL
@@ -283,7 +283,7 @@ Source · SESSION.md + audit code + git log mai 2026.
 ### MBP-A.1 · LOW-5 · Worker taille réelle vs SESSION.md
 - SESSION.md disait ~8500L
 - Audit MBP-A.1 confirme 10533 lignes
-- ✓ Corrigé `ARCHITECTURE.md`
+- ✓ Corrigé `docs/project/ARCHITECTURE.md`
 
 ### MBP-A.1 · LOW-6 · BasketUSA usage UI ambigu
 - Code vivant · `handleNBATeamDetail` (worker.js:508 appelle `_findBestBasketUSAArticle`)
@@ -303,7 +303,7 @@ Source · SESSION.md + audit code + git log mai 2026.
 
 # Écarts détectés · audit MBP-A.4 sécurité
 
-Détail complet · `SECURITY_AUDIT.md`. Résumé classification ici.
+Détail complet · `docs/decisions/DECISION-001-SECURITY-AUDIT-MBP-A4.md`. Résumé classification ici.
 
 ## Critique (à corriger urgent)
 
@@ -384,7 +384,7 @@ Détail complet · `SECURITY_AUDIT.md`. Résumé classification ici.
 
 # Écarts détectés · audit MBP-A.2 moteur NBA
 
-Détail complet · `NBA_ENGINE_AUDIT.md`. Résumé classification ici.
+Détail complet · `docs/decisions/DECISION-002-NBA-ENGINE-PARITY-MBP-A2.md`. Résumé classification ici.
 
 ## Critique
 

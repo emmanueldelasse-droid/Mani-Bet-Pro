@@ -40,7 +40,7 @@ index.html + src/ui/*.js (GitHub Pages front)
 - Router = if/else chain linéaire (pas de switch · pas de table) · lignes 248-432
 - Categories routes : 21 NBA · 11 MLB · 9 Tennis · 6 Bot · 4 Paper · 6 Debug · 2 Health → **54 routes HTTP total**
 - 7 cron handlers (scheduled)
-- Détail exhaustif · `ROUTES_AUDIT.md`
+- Détail exhaustif · `docs/monitoring/docs/monitoring/ROUTES_AUDIT.md`
 
 ## Modules src/ (importés par worker.js)
 - `src/ai/` · client Claude · contexte · garde-fous · prompts
@@ -64,7 +64,7 @@ index.html + src/ui/*.js (GitHub Pages front)
 
 ## KV Namespace `PAPER_TRADING`
 - Unique namespace · multi-usage
-- Voir DATA_PIPELINE.md section KV pour clés détaillées
+- Voir docs/engine/DATA_PIPELINE.md section KV pour clés détaillées
 
 ## Cron handler (worker.js scheduled)
 - `_runBotCron` · NBA · fenêtre dynamique ~1h avant 1er match
@@ -75,7 +75,7 @@ index.html + src/ui/*.js (GitHub Pages front)
 - `_runAIPlayerPropsCron` (worker.js:4350) · 22h UTC · Claude batch props
 - `_runCalibrationCron` (worker.js:4415) · lundi 7h UTC · Telegram résumé hebdo
 
-## Routes principales (extrait · détail `ROUTES_AUDIT.md`)
+## Routes principales (extrait · détail `docs/monitoring/docs/monitoring/ROUTES_AUDIT.md`)
 - `/health` · status worker · version hardcodée `6.85.0` (worker.js:419 · non sync changelog)
 - `/nba/*` · 21 routes · matches · injuries · stats · odds · team-detail · 5 debug
 - `/mlb/*` · 11 routes · matches · pitchers · standings · weather · bot
@@ -89,7 +89,7 @@ index.html + src/ui/*.js (GitHub Pages front)
 - Cron Cloudflare = scheduler · pas de serveur persistant
 - Pas de DB SQL · KV uniquement
 
-## 2 moteurs NBA coexistent (audit MBP-A.2 · `NBA_ENGINE_AUDIT.md`)
+## 2 moteurs NBA coexistent (audit MBP-A.2 · `docs/decisions/DECISION-002-NBA-ENGINE-PARITY-MBP-A2.md`)
 - **Backend** · `_botEngineCompute` (worker.js:5211) · appelé uniquement par cron `_runBotCron` (worker.js:3528) · sortie logs KV `bot_log_*` → calibration Alon
 - **Frontend** · `EngineCore.compute('NBA', rawData)` (`data.orchestrator.js:857`) · appelé à chaque chargement utilisateur · sortie store · affichage UI
 - **Pas de route HTTP `/nba/analyze`** · l'UI ne consomme jamais le moteur backend
@@ -126,7 +126,7 @@ index.html + src/ui/*.js (GitHub Pages front)
 - Aucun framework lourd (Jest/Vitest) · ESM natif Node 20+ · pas de dépendance npm
 - Total · 649 assertions actives sur 5 scripts
 
-## Sécurité (post chantier MBP-A.4 · `SECURITY_AUDIT.md`)
+## Sécurité (post chantier MBP-A.4 · `docs/decisions/DECISION-001-SECURITY-AUDIT-MBP-A4.md`)
 **6/6 critiques résolues** ·
 - ✓ `_denyIfNoDebugAuth(url, env, origin)` (worker.js:881) · fail-CLOSE confirmé · 5 routes NBA debug guardées + `/debug/basketusa`
 - ✓ `/tennis/_espn_probe` guard ajouté · MBP-S.1 CRIT-E (worker.js:9883)
@@ -159,12 +159,12 @@ index.html + src/ui/*.js (GitHub Pages front)
 - Build chore commits `chore: bump build YYYYMMDD-HHMMSS-hash` post merge
 
 ## Zones à vérifier (MBP-A.1 résolu pour routes)
-- ✓ Router worker.js confirmé · 54 routes HTTP · ROUTES_AUDIT.md
+- ✓ Router worker.js confirmé · 54 routes HTTP · docs/monitoring/ROUTES_AUDIT.md
 - ✓ `engine.robustness.js` documenté MBP-A.2 · perturbation systématique ±10% ±20% · sortie `analysis.robustness_score` · ne pilote plus confidence NBA (post MBP-FIX-A.2.1)
 - ✗ `provider.cache.js` / `provider.injuries.js` / `provider.nba.js` utilisation actuelle · non audité
 - ✗ Handler `/mlb/weather` inline vs fonction nommée (worker.js:350)
 - ✗ Lignes exactes handlers MLB approximatives · ré-auditer si besoin
 
 ## Audit MBP-A.1
-Voir `ROUTES_AUDIT.md` · routes + auth + provider + cache par ligne.
-Voir `KNOWN_ISSUES.md` section "Écarts MBP-A.1" · incohérences critiques.
+Voir `docs/monitoring/docs/monitoring/ROUTES_AUDIT.md` · routes + auth + provider + cache par ligne.
+Voir `docs/monitoring/docs/monitoring/KNOWN_ISSUES.md` section "Écarts MBP-A.1" · incohérences critiques.
