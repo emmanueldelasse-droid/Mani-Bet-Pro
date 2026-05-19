@@ -23,7 +23,18 @@ Début → "En cours" 1/N · Fin étape → +1 · Merge → vider "En cours" · 
 Update SESSION.md seulement si impact critique. Update docs dédiées à chaque merge concerné.
 
 ## En cours
-néant
+MBP-CATCHUP-SETTLE · settlement + recovery missed games · 9/9
+- worker.js · constantes statuts + helpers
+- 3 fonctions settle (`_botSettleDate` · `_mlbBotSettleDate` · `_tennisBotSettleDate`) enrichies (status · postponed · cancelled · audit fields)
+- Tennis · `match_confidence` HIGH/MEDIUM/LOW · LOW → `invalid_match_mapping`
+- `settlePendingBotLogs(sport, env, opts)` · wrapper sport-agnostic
+- `recoverMissedGames(sport, date, env)` · création log `missed_by_cron` minimaliste · AUCUN motor_prob retroactif
+- 2 routes admin (`GET /bot/settle` · `GET /bot/recover-missed` · guard DEBUG_SECRET · rate-limit 5min)
+- handleBotLogs · handleMLBBotLogs · handleTennisBotLogs · handleBotCalibration · filtre `STATS_EXCLUDED_STATUSES`
+- `_runBotCron` NBA · logs JSON structurés (espn_game_ids_seen · skipped_reason · phase · cron_run_id)
+- `_runNightlySettle` · délègue à `settlePendingBotLogs` (3 sports)
+- tests · `scripts/test-catchup-settle.mjs` · 86 assertions · 0 fail
+- doc · `docs/monitoring/CATCHUP_SETTLE.md` · `ROUTES_AUDIT.md` MAJ
 
 ## État actuel
 - Worker · `manibetpro.emmanueldelasse.workers.dev` · auto-deploy push main

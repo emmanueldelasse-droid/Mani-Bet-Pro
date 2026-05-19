@@ -277,6 +277,31 @@ Règle métier universelle (NBA · MLB · Tennis) pour différencier ce que le b
 
 **Pas d'impact moteur** · classification = pure lecture frontend du log existant. Aucun champ backend nouveau · aucun calcul refait.
 
+## Logs missed_by_cron · jamais comptés (MBP-CATCHUP-SETTLE)
+
+Règle absolue · les stats de performance (winrate · ROI · Brier · calibration · drawdown) sont calculées **uniquement sur les matchs réellement analysés AVANT le début du match**.
+
+Statuts log unifiés (`BOT_LOG_STATUS` · worker.js:137) ·
+| Statut | Compté stats ? |
+|---|---|
+| `pending` · log créé cron · en attente match | non |
+| `settled` · résultat appliqué · `motor_was_right` calculé | **OUI** |
+| `missed_by_cron` · match joué jamais analysé · créé via recovery | NON |
+| `recovery_failed` · détection trou cron · résultat indispo | NON |
+| `postponed` · ESPN STATUS_POSTPONED · match reporté | NON |
+| `cancelled` · ESPN STATUS_CANCELED · match annulé | NON |
+| `invalid_match_mapping` · tennis · `match_confidence='LOW'` (homonymes) | NON |
+
+`STATS_EXCLUDED_STATUSES` · 5 statuts exclus côté `handleBotLogs` · `handleMLBBotLogs` · `handleTennisBotLogs` · `handleBotCalibration`. Back-compat logs pré-PR · `_botLogStatus(log)` dérive du `motor_was_right` (null=pending sinon=settled).
+
+Recovery règles absolues ·
+- jamais de `motor_prob` retroactif
+- jamais de `betting_recommendations` retroactif
+- jamais de `variables_used` retroactif
+- match raté = `status='missed_by_cron'` · jamais transformé en `settled`
+
+Détails complets · `docs/monitoring/CATCHUP_SETTLE.md`.
+
 ## Helpers UI FR
 - `_qualityFr` · `_betTypeFr` · `_fmtOdds` · `_confidenceFr` · `_interpretVariable`
 - (ui.bot.js:1090-1215)

@@ -88,6 +88,8 @@ Note · `/nba/team/:abv/{stats,recent}` matchés par regex `^\/nba\/team\/[^/]+\
 | `/bot/settle-logs` | POST | `handleBotSettleLogs` | 391 | public | tous | logs 90j | legacy · actif |
 | `/bot/calibration/analyze` | GET | `handleBotCalibration` | 394 | public | param `sport` | `calibration_run_*` 8j | actif |
 | `/bot/run` | POST | `handleBotRun` | 397 | public | tous | `bot_last_run` 30h | actif |
+| `/bot/settle` | GET | `handleBotCatchupSettle` | 411 | DEBUG_SECRET | param `sport` · `scope` · `date` | `catchup_last_run_*` 30h · logs 90j | MBP-CATCHUP-SETTLE · actif |
+| `/bot/recover-missed` | GET | `handleBotRecoverMissed` | 414 | DEBUG_SECRET | param `sport` · `date` | `recover_last_run_*` 30h · logs 90j (missed_by_cron) | MBP-CATCHUP-SETTLE · actif |
 
 ## Routes Paper trading (4 + 1 regex)
 
