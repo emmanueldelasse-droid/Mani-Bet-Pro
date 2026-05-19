@@ -134,6 +134,69 @@ const BOT_LOG_PREFIX       = 'bot_log_';
 const BOT_RUN_KEY          = 'bot_last_run';
 const TELEGRAM_API         = 'https://api.telegram.org';
 
+// ── MBP-CATCHUP-SETTLE · statuts logs unifiés (PR catch-up settlement) ─────────
+// Statuts persistés dans log.status · règle absolue · les statuts non-settled
+// SONT EXCLUS du hit rate · ROI · Brier · calibration · monitoring.
+// Back-compat · log.status absent → dérivé de motor_was_right (null=pending sinon=settled).
+const BOT_LOG_STATUS = Object.freeze({
+  PENDING:               'pending',
+  SETTLED:               'settled',
+  MISSED_BY_CRON:        'missed_by_cron',         // match joué · jamais analysé avant
+  RECOVERY_FAILED:       'recovery_failed',         // detection trou cron · résultat indispo
+  POSTPONED:             'postponed',               // ESPN STATUS_POSTPONED · neutralisé
+  CANCELLED:             'cancelled',               // ESPN STATUS_CANCELED · neutralisé
+  INVALID_MATCH_MAPPING: 'invalid_match_mapping',   // tennis · match_confidence LOW · pas settle
+});
+
+// Statuts exclus des stats de performance (hit rate · ROI · Brier · calibration).
+// Seuls 'settled' compte. 'pending' ne compte pas car pas encore réglé.
+const STATS_EXCLUDED_STATUSES = new Set([
+  BOT_LOG_STATUS.MISSED_BY_CRON,
+  BOT_LOG_STATUS.RECOVERY_FAILED,
+  BOT_LOG_STATUS.POSTPONED,
+  BOT_LOG_STATUS.CANCELLED,
+  BOT_LOG_STATUS.INVALID_MATCH_MAPPING,
+]);
+
+// Préfixes KV rate-limit catch-up (idempotence par sport+date)
+const CATCHUP_RUN_PREFIX  = 'catchup_last_run_';
+const RECOVER_RUN_PREFIX  = 'recover_last_run_';
+const CATCHUP_MIN_GAP_MS  = 5 * 60 * 1000; // 5 min entre 2 runs même (sport,date)
+
+// Helper · retourne le statut effectif d'un log (back-compat logs pré-PR)
+function _botLogStatus(log) {
+  if (log == null) return null;
+  if (log.status) return log.status;
+  if (log.motor_was_right === null || log.motor_was_right === undefined) {
+    return BOT_LOG_STATUS.PENDING;
+  }
+  return BOT_LOG_STATUS.SETTLED;
+}
+
+// Helper · génère un cron_run_id court pour tracer les runs cron dans les logs
+function _botCronRunId() {
+  const ts = Date.now().toString(36);
+  const rnd = Math.random().toString(36).slice(2, 8);
+  return `cr_${ts}_${rnd}`;
+}
+
+// Helper · mappe ESPN STATUS_* → BOT_LOG_STATUS pertinent (ou null si non terminal)
+function _espnStatusToBotLogStatus(espnStatus) {
+  if (!espnStatus) return null;
+  const s = String(espnStatus).toUpperCase();
+  if (s === 'STATUS_FINAL' || s === 'STATUS_FINAL_OT' || s === 'STATUS_FINAL_PENALTY') return BOT_LOG_STATUS.SETTLED;
+  if (s === 'STATUS_POSTPONED' || s === 'STATUS_SUSPENDED' || s === 'STATUS_DELAYED') return BOT_LOG_STATUS.POSTPONED;
+  if (s === 'STATUS_CANCELED' || s === 'STATUS_CANCELLED' || s === 'STATUS_FORFEIT') return BOT_LOG_STATUS.CANCELLED;
+  return null; // STATUS_SCHEDULED · STATUS_IN_PROGRESS · etc → log reste pending
+}
+
+// Expose les constantes catch-up sur globalThis · permet aux tests vm sandbox
+// d'accéder · no-op effectif en prod CF Worker (globalThis y est isolé).
+if (typeof globalThis !== 'undefined') {
+  globalThis.BOT_LOG_STATUS = BOT_LOG_STATUS;
+  globalThis.STATS_EXCLUDED_STATUSES = STATS_EXCLUDED_STATUSES;
+}
+
 // ── NORMALISATION NOMS JOUEURS ────────────────────────────────────────────────
 // Résout le mismatch ESPN ↔ Tank01 : accents (Jokić→Jokic), points (P.J.→PJ),
 // apostrophes (Cam'Ron→Camron), suffixes (Jr.→Jr), espaces multiples.
@@ -406,6 +469,13 @@ export default {
 
       if (path === '/bot/run' && request.method === 'POST')
         return await handleBotRun(request, env, origin);
+
+      // MBP-CATCHUP-SETTLE · catch-up settlement + missed games recovery (guard DEBUG_SECRET)
+      if (path === '/bot/settle' && request.method === 'GET')
+        return await handleBotCatchupSettle(url, env, origin);
+
+      if (path === '/bot/recover-missed' && request.method === 'GET')
+        return await handleBotRecoverMissed(url, env, origin);
 
       // ── PAPER TRADING ─────────────────────────────────────────────────────
       // MBP-S.2 · auth X-API-Key requise (guard appliqué dans chaque handler).
@@ -3285,24 +3355,61 @@ async function handleNBAStandings(origin) {
 //     motor_was_right, clv_post_match, settled_at }
 
 async function _runBotCron(env, forceRun = false) {
-  const now     = new Date();
-  const dateStr = _botFormatDate(now);
-
-  console.log(`[BOT] Cron démarré — ${now.toISOString()}, date NBA (Paris): ${dateStr}`);
+  const now      = new Date();
+  const dateStr  = _botFormatDate(now);
+  const cronRunId = _botCronRunId();
+  const cronLog  = {
+    cron: 'nba_bot',
+    cron_run_id: cronRunId,
+    cron_started: now.toISOString(),
+    date: dateStr,
+    force_run: forceRun,
+    espn_game_ids_seen: [],
+    games_found: 0,
+    games_after_filters: 0,
+    games_skipped: 0,
+    games_analyzed: 0,
+    skipped_game_ids: [],
+    skipped_reason: [],
+    phase_detected: null,
+  };
+  console.log(`[BOT] Cron démarré — ${now.toISOString()}, date NBA (Paris): ${dateStr} · run=${cronRunId}`);
 
   // Charger les matchs du jour
   const espnData = await espnFetch(`${ESPN_SCOREBOARD}?dates=${dateStr}&limit=25`);
   if (!espnData) {
-    console.warn('[BOT] ESPN indisponible — cron annulé');
+    cronLog.error = 'espn_unavailable';
+    console.warn('[BOT-CRON-LOG]', JSON.stringify(cronLog));
     return;
   }
 
-  const matches = parseESPNMatches(espnData, dateStr).filter(m =>
-    m.status !== 'STATUS_FINAL' && m.home_team && m.away_team
-  );
+  const parsed = parseESPNMatches(espnData, dateStr);
+  cronLog.espn_game_ids_seen = parsed.map(m => ({
+    id: m.id,
+    home: m.home_team?.name ?? null,
+    away: m.away_team?.name ?? null,
+    status: m.status,
+  }));
+  cronLog.games_found = parsed.length;
+
+  const matches = parsed.filter(m => {
+    if (m.status === 'STATUS_FINAL') {
+      cronLog.skipped_game_ids.push({ id: m.id, reason: 'already_final' });
+      return false;
+    }
+    if (!m.home_team || !m.away_team) {
+      cronLog.skipped_game_ids.push({ id: m.id, reason: 'missing_team' });
+      return false;
+    }
+    return true;
+  });
+  cronLog.games_after_filters = matches.length;
+  cronLog.phase_detected = typeof _botGetNBAPhase === 'function' ? _botGetNBAPhase() : null;
 
   if (!matches.length) {
+    cronLog.skipped_reason.push('no_upcoming_matches');
     console.log('[BOT] Aucun match à venir aujourd\'hui');
+    console.log('[BOT-CRON-LOG]', JSON.stringify(cronLog));
     return;
   }
 
@@ -3439,12 +3546,23 @@ async function _runBotCron(env, forceRun = false) {
   for (const match of matches) {
     try {
       const log = await _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedData, aiInjuriesData, recentForms, env, rostersData);
-      if (!log) continue;
+      if (!log) {
+        cronLog.games_skipped++;
+        cronLog.skipped_game_ids.push({ id: match.id, reason: 'analyze_returned_null' });
+        continue;
+      }
+      // MBP-CATCHUP-SETTLE · marquer le log comme pending et tracer le run
+      log.status       = log.status ?? BOT_LOG_STATUS.PENDING;
+      log.cron_run_id  = cronRunId;
+      log.logged_at    = log.logged_at ?? new Date().toISOString();
       await _botSaveLog(env, log);
       logs.push(log);
+      cronLog.games_analyzed++;
       if (log.best_edge && log.best_edge >= 5) edgesFound.push(log);
     } catch (err) {
       console.error(`[BOT] Erreur analyse ${match.id}:`, err.message);
+      cronLog.games_skipped++;
+      cronLog.skipped_game_ids.push({ id: match.id, reason: 'analyze_error' });
     }
   }
 
@@ -3461,7 +3579,14 @@ async function _runBotCron(env, forceRun = false) {
   // Telegram
   await _botSendTelegram(env, logs, edgesFound, dateStr);
 
-  console.log(`[BOT] Terminé — ${logs.length} matchs analysés, ${edgesFound.length} edges détectés`);
+  cronLog.settled_count = 0;  // settle se fait dans le nightly cron, pas ici
+  cronLog.pending_count = logs.length;
+  cronLog.missed_games_count = 0;
+  cronLog.cron_finished = new Date().toISOString();
+  cronLog.duration_ms = Date.now() - new Date(cronLog.cron_started).getTime();
+  cronLog.edges_found = edgesFound.length;
+  console.log(`[BOT] Terminé — ${logs.length} matchs analysés, ${edgesFound.length} edges détectés · run=${cronRunId}`);
+  console.log('[BOT-CRON-LOG]', JSON.stringify(cronLog));
 }
 
 async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedData, aiInjuriesData, recentForms = {}, env = null, rostersData = null) {
@@ -3877,12 +4002,15 @@ async function handleBotLogs(url, env, origin) {
 
     logs.sort((a, b) => new Date(b.logged_at) - new Date(a.logged_at));
 
-    // Stats globales de calibration
-    const settled   = logs.filter(l => l.motor_was_right !== null);
+    // MBP-CATCHUP-SETTLE · stats calculées UNIQUEMENT sur logs réellement
+    // analysés avant le match · exclure missed_by_cron · postponed · cancelled ·
+    // invalid_match_mapping · recovery_failed.
+    const statsEligible = logs.filter(l => !STATS_EXCLUDED_STATUSES.has(_botLogStatus(l)));
+    const settled   = statsEligible.filter(l => l.motor_was_right !== null && l.motor_was_right !== undefined);
     const correct   = settled.filter(l => l.motor_was_right === true);
     const hitRate   = settled.length > 0 ? Math.round(correct.length / settled.length * 1000) / 10 : null;
-    const avgEdge   = logs.filter(l => l.best_edge).length > 0
-      ? Math.round(logs.filter(l => l.best_edge).reduce((s, l) => s + l.best_edge, 0) / logs.filter(l => l.best_edge).length * 10) / 10
+    const avgEdge   = statsEligible.filter(l => l.best_edge).length > 0
+      ? Math.round(statsEligible.filter(l => l.best_edge).reduce((s, l) => s + l.best_edge, 0) / statsEligible.filter(l => l.best_edge).length * 10) / 10
       : null;
 
     // Brier score sur les logs settled
@@ -3898,7 +4026,8 @@ async function handleBotLogs(url, env, origin) {
     }
 
     // Stats player_points : recos joueurs settlées (was_right boolean après ESPN box score)
-    const ppRecs = logs.flatMap(l =>
+    // MBP-CATCHUP-SETTLE · ne compte que les logs eligible (jamais missed/postponed/...)
+    const ppRecs = statsEligible.flatMap(l =>
       (l.betting_recommendations?.recommendations ?? [])
         .filter(r => r.type === 'PLAYER_POINTS')
     );
@@ -3911,15 +4040,24 @@ async function handleBotLogs(url, env, origin) {
       ? Math.round(ppRecs.reduce((s, r) => s + (r.edge ?? 0), 0) / ppRecs.length * 10) / 10
       : null;
 
+    // MBP-CATCHUP-SETTLE · breakdown statuts pour audit
+    const statusBreakdown = logs.reduce((acc, l) => {
+      const s = _botLogStatus(l);
+      acc[s] = (acc[s] ?? 0) + 1;
+      return acc;
+    }, {});
+
     return jsonResponse({
       available: true,
       logs,
       stats: {
-        total_analyzed:  logs.length,
+        total_analyzed:  statsEligible.length,                  // analysés avant match (eligible stats)
+        total_logs_kv:   logs.length,                            // tous logs KV inclus missed
         total_settled:   settled.length,
         hit_rate:        hitRate,
         avg_edge:        avgEdge,
         brier_score:     brierScore,
+        status_breakdown: statusBreakdown,
         player_points: {
           total_recs: ppRecs.length,
           settled:    ppSettled.length,
@@ -3933,12 +4071,24 @@ async function handleBotLogs(url, env, origin) {
 }
 
 async function _botSettleDate(env, dateStr, options = {}) {
-  const { force = false } = options;
+  const { force = false, cronRunId = null, source = 'cron_nightly' } = options;
+  const fetchStartedAt = Date.now();
   const espnData = await espnFetch(`${ESPN_SCOREBOARD}?dates=${dateStr}&limit=25`);
   if (!espnData) return { settled: 0, error: 'ESPN unavailable' };
 
-  const results = parseESPNMatches(espnData, dateStr).filter(m => m.status === 'STATUS_FINAL');
+  // MBP-CATCHUP-SETTLE · on inclut désormais postponed/cancelled pour pouvoir
+  // marquer les logs (au lieu de les laisser pending indéfiniment).
+  const parsed = parseESPNMatches(espnData, dateStr);
+  const results = parsed.filter(m => {
+    const mapped = _espnStatusToBotLogStatus(m.status);
+    return mapped === BOT_LOG_STATUS.SETTLED
+        || mapped === BOT_LOG_STATUS.POSTPONED
+        || mapped === BOT_LOG_STATUS.CANCELLED;
+  });
+  const resultFetchLatency = Date.now() - fetchStartedAt;
   let settled = 0;
+  let postponed = 0;
+  let cancelled = 0;
 
   for (const result of results) {
     const key = `${BOT_LOG_PREFIX}${result.id}`;
@@ -3946,8 +4096,29 @@ async function _botSettleDate(env, dateStr, options = {}) {
       const raw = await env.PAPER_TRADING.get(key);
       if (!raw) continue;
       const log = JSON.parse(raw);
+      const currentStatus = _botLogStatus(log);
       // force=true : re-settle même si déjà settlé (pour enrichir avec nouveaux champs)
-      if (!force && log.motor_was_right !== null) continue;
+      if (!force && currentStatus !== BOT_LOG_STATUS.PENDING) continue;
+
+      // RÈGLE ABSOLUE · ne PAS settle un log sans motor_prob (cas missed_by_cron mal créé)
+      if (log.motor_prob == null) continue;
+
+      const espnMapped = _espnStatusToBotLogStatus(result.status);
+
+      // Match reporté ou annulé · neutraliser (jamais compté dans stats)
+      if (espnMapped === BOT_LOG_STATUS.POSTPONED || espnMapped === BOT_LOG_STATUS.CANCELLED) {
+        log.status                = espnMapped;
+        log.live_status           = result.status;
+        log.match_status_source   = 'espn_scoreboard';
+        log.settlement_source     = source;
+        log.settlement_attempts   = (log.settlement_attempts ?? 0) + 1;
+        log.settled_at            = new Date().toISOString();
+        log.result_fetch_latency  = resultFetchLatency;
+        if (cronRunId) log.cron_run_id = cronRunId;
+        await env.PAPER_TRADING.put(key, JSON.stringify(log), { expirationTtl: 90 * 24 * 3600 });
+        if (espnMapped === BOT_LOG_STATUS.POSTPONED) postponed++; else cancelled++;
+        continue;
+      }
 
       const homeScore = parseInt(result.home_team?.score ?? '', 10);
       const awayScore = parseInt(result.away_team?.score ?? '', 10);
@@ -4034,14 +4205,27 @@ async function _botSettleDate(env, dateStr, options = {}) {
         const actualOver = totalPts > log.ou_line_nba;
         log.ou_model_was_right = modelOver === actualOver;
       }
-      log.settled_at        = new Date().toISOString();
+      // MBP-CATCHUP-SETTLE · enrichissement audit
+      log.status                = BOT_LOG_STATUS.SETTLED;
+      log.live_status           = result.status;
+      log.match_status_source   = 'espn_scoreboard';
+      log.settlement_source     = source;
+      log.settlement_attempts   = (log.settlement_attempts ?? 0) + 1;
+      log.result_fetch_latency  = resultFetchLatency;
+      log.settled_at            = new Date().toISOString();
+      if (cronRunId) log.cron_run_id = cronRunId;
+      // settlement_latency_minutes · délai entre fin match estimée et settle
+      const matchStartTs = log.datetime ? new Date(log.datetime).getTime() : null;
+      if (matchStartTs && Number.isFinite(matchStartTs)) {
+        log.settlement_latency_minutes = Math.round((Date.now() - matchStartTs) / 60000);
+      }
 
       await env.PAPER_TRADING.put(key, JSON.stringify(log), { expirationTtl: 90 * 24 * 3600 });
       settled++;
     } catch (err) { console.warn(`[BOT] settle log ${result.id}:`, err.message); }
   }
 
-  return { settled, date: dateStr };
+  return { settled, postponed, cancelled, date: dateStr };
 }
 
 // Fetch box score ESPN pour un eventId · retour liste { name, team, pts, mins }
@@ -4134,6 +4318,8 @@ async function handleBotCalibration(url, env, origin) {
         const raw = await env.PAPER_TRADING.get(key);
         if (!raw) return;
         const log = JSON.parse(raw);
+        // MBP-CATCHUP-SETTLE · calibration sur logs eligibles uniquement
+        if (STATS_EXCLUDED_STATUSES.has(_botLogStatus(log))) return;
         if (log.motor_was_right === null || log.motor_was_right === undefined) return;
         logs.push(log);
       } catch (_) {}
@@ -4335,42 +4521,22 @@ async function _runNightlySettle(env) {
       return;
     }
 
-    // Settler J-1 et J-2
-    const dates = [];
-    for (let d = 1; d <= 2; d++) {
-      const dt = new Date(now);
-      dt.setUTCDate(dt.getUTCDate() - d);
-      dates.push(formatDateESPN(dt));
-    }
+    // MBP-CATCHUP-SETTLE · cron_run_id partagé pour toute cette run nightly
+    const cronRunId = _botCronRunId();
+    const opts = { cronRunId, source: 'cron_nightly' };
 
-    const results = { nba: [], mlb: [], tennis: [] };
-    // NBA + MLB : ESPN temps réel, fenêtre J-2 suffit
-    for (const ds of dates) {
-      try {
-        const nba = await _botSettleDate(env, ds);
-        results.nba.push({ date: ds, settled: nba.settled, error: nba.error });
-      } catch (err) { console.warn(`[NIGHTLY SETTLE] NBA ${ds}:`, err.message); }
-      try {
-        const mlb = await _mlbBotSettleDate(env, ds);
-        results.mlb.push({ date: ds, settled: mlb.settled, error: mlb.error });
-      } catch (err) { console.warn(`[NIGHTLY SETTLE] MLB ${ds}:`, err.message); }
-    }
-
-    // Tennis : fenêtre étendue J-1 à J-10. Sackmann CSV peut publier avec
-    // 2-7j de lag · ré-essayer chaque matin jusqu'à trouver le résultat.
-    // ESPN (source 1 dans _tennisBotSettleDate) attrape la majorité dès J-1.
-    for (let d = 1; d <= 10; d++) {
-      const dt = new Date(now);
-      dt.setUTCDate(dt.getUTCDate() - d);
-      const ds = formatDateESPN(dt);
-      try {
-        const ten = await _tennisBotSettleDate(env, ds);
-        results.tennis.push({ date: ds, settled: ten.settled, error: ten.error });
-      } catch (err) { console.warn(`[NIGHTLY SETTLE] TENNIS ${ds}:`, err.message); }
-    }
+    // Settler J-1 et J-2 NBA + MLB · J-1 à J-10 Tennis · via settlePendingBotLogs
+    const nbaSummary    = await settlePendingBotLogs('NBA',    env, opts);
+    const mlbSummary    = await settlePendingBotLogs('MLB',    env, opts);
+    const tennisSummary = await settlePendingBotLogs('TENNIS', env, opts);
 
     await env.PAPER_TRADING.put(NIGHTLY_SETTLE_RUN_KEY, todayStr, { expirationTtl: 48 * 3600 });
-    console.log('[NIGHTLY SETTLE]', JSON.stringify(results));
+    console.log('[NIGHTLY SETTLE]', JSON.stringify({
+      cron_run_id: cronRunId,
+      nba:    nbaSummary,
+      mlb:    mlbSummary,
+      tennis: tennisSummary,
+    }));
   } catch (err) { console.warn('[NIGHTLY SETTLE] error:', err.message); }
 }
 
@@ -8230,8 +8396,9 @@ async function _runMLBBotCron(env, forceRun = false) {
   const dateStr = _botFormatDate(now);                  // YYYYMMDD Paris (aligné NBA)
   const dateISO = `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)}`; // YYYY-MM-DD pour MLB Stats API
   const dateESPN = dateStr;
+  const mlbCronRunId = _botCronRunId(); // MBP-CATCHUP-SETTLE
 
-  console.log(`[MLB BOT] Démarré — ${now.toISOString()}, date: ${dateStr}`);
+  console.log(`[MLB BOT] Démarré — ${now.toISOString()}, date: ${dateStr} · run=${mlbCronRunId}`);
 
   // 1. Matchs du jour
   const espnData = await espnFetch(`${ESPN_MLB_SCOREBOARD}?dates=${dateESPN}&limit=25`);
@@ -8299,6 +8466,10 @@ async function _runMLBBotCron(env, forceRun = false) {
       const weather = await _fetchWeatherForVenue(match.venue, env);
       const log = await _mlbAnalyzeMatch(match, dateStr, pitchersData, oddsData, standingsData, teamStatsData, bullpenData, weather, env);
       if (!log) continue;
+      // MBP-CATCHUP-SETTLE · marquer le log comme pending et tracer le cron
+      log.status      = log.status ?? BOT_LOG_STATUS.PENDING;
+      log.cron_run_id = log.cron_run_id ?? mlbCronRunId;
+      log.logged_at   = log.logged_at ?? new Date().toISOString();
       if (env.PAPER_TRADING) {
         await env.PAPER_TRADING.put(
           `${MLB_BOT_LOG_PREFIX}${match.id}`,
@@ -9009,11 +9180,13 @@ async function handleMLBBotLogs(url, env, origin) {
 
     logs.sort((a, b) => new Date(b.logged_at) - new Date(a.logged_at));
 
-    const settled  = logs.filter(l => l.motor_was_right !== null);
+    // MBP-CATCHUP-SETTLE · exclure missed/postponed/cancelled/invalid des stats
+    const statsEligible = logs.filter(l => !STATS_EXCLUDED_STATUSES.has(_botLogStatus(l)));
+    const settled  = statsEligible.filter(l => l.motor_was_right !== null && l.motor_was_right !== undefined);
     const correct  = settled.filter(l => l.motor_was_right === true);
     const hitRate  = settled.length > 0 ? Math.round(correct.length / settled.length * 1000) / 10 : null;
-    const avgEdge  = logs.filter(l => l.best_edge).length > 0
-      ? Math.round(logs.filter(l => l.best_edge).reduce((s, l) => s + l.best_edge, 0) / logs.filter(l => l.best_edge).length * 10) / 10
+    const avgEdge  = statsEligible.filter(l => l.best_edge).length > 0
+      ? Math.round(statsEligible.filter(l => l.best_edge).reduce((s, l) => s + l.best_edge, 0) / statsEligible.filter(l => l.best_edge).length * 10) / 10
       : null;
 
     // Brier score sur logs settled avec home_prob + result_winner
@@ -9028,14 +9201,22 @@ async function handleMLBBotLogs(url, env, origin) {
       brierScore = Math.round(sum / brierValid.length * 10000) / 10000;
     }
 
+    const statusBreakdown = logs.reduce((acc, l) => {
+      const s = _botLogStatus(l);
+      acc[s] = (acc[s] ?? 0) + 1;
+      return acc;
+    }, {});
+
     return jsonResponse({
       logs,
       stats: {
-        total_analyzed: logs.length,
+        total_analyzed: statsEligible.length,
+        total_logs_kv:  logs.length,
         total_settled:  settled.length,
         hit_rate:       hitRate,
         avg_edge:       avgEdge,
         brier_score:    brierScore,
+        status_breakdown: statusBreakdown,
       },
     }, 200, origin);
   } catch (err) { return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin); }
@@ -9043,12 +9224,22 @@ async function handleMLBBotLogs(url, env, origin) {
 
 // ── HANDLER SETTLER MLB ───────────────────────────────────────────────────────
 async function _mlbBotSettleDate(env, dateStr, options = {}) {
-  const { force = false } = options;
+  const { force = false, cronRunId = null, source = 'cron_nightly' } = options;
+  const fetchStartedAt = Date.now();
   const espnData = await espnFetch(`${ESPN_MLB_SCOREBOARD}?dates=${dateStr}&limit=25`);
   if (!espnData) return { settled: 0, error: 'ESPN unavailable' };
 
-  const results = parseESPNMLBMatches(espnData, dateStr).filter(m => m.status === 'STATUS_FINAL');
+  const parsed = parseESPNMLBMatches(espnData, dateStr);
+  const results = parsed.filter(m => {
+    const mapped = _espnStatusToBotLogStatus(m.status);
+    return mapped === BOT_LOG_STATUS.SETTLED
+        || mapped === BOT_LOG_STATUS.POSTPONED
+        || mapped === BOT_LOG_STATUS.CANCELLED;
+  });
+  const resultFetchLatency = Date.now() - fetchStartedAt;
   let settled = 0;
+  let postponed = 0;
+  let cancelled = 0;
 
   for (const result of results) {
     const key = `${MLB_BOT_LOG_PREFIX}${result.id}`;
@@ -9056,7 +9247,25 @@ async function _mlbBotSettleDate(env, dateStr, options = {}) {
       const raw = await env.PAPER_TRADING.get(key);
       if (!raw) continue;
       const log = JSON.parse(raw);
-      if (!force && log.motor_was_right !== null) continue;
+      const currentStatus = _botLogStatus(log);
+      if (!force && currentStatus !== BOT_LOG_STATUS.PENDING) continue;
+
+      if (log.home_prob == null && log.motor_prob == null) continue;
+
+      const espnMapped = _espnStatusToBotLogStatus(result.status);
+      if (espnMapped === BOT_LOG_STATUS.POSTPONED || espnMapped === BOT_LOG_STATUS.CANCELLED) {
+        log.status                = espnMapped;
+        log.live_status           = result.status;
+        log.match_status_source   = 'espn_mlb_scoreboard';
+        log.settlement_source     = source;
+        log.settlement_attempts   = (log.settlement_attempts ?? 0) + 1;
+        log.settled_at            = new Date().toISOString();
+        log.result_fetch_latency  = resultFetchLatency;
+        if (cronRunId) log.cron_run_id = cronRunId;
+        await env.PAPER_TRADING.put(key, JSON.stringify(log), { expirationTtl: 90 * 24 * 3600 });
+        if (espnMapped === BOT_LOG_STATUS.POSTPONED) postponed++; else cancelled++;
+        continue;
+      }
 
       const homeScore = parseInt(result.home_team?.score ?? '', 10);
       const awayScore = parseInt(result.away_team?.score ?? '', 10);
@@ -9144,14 +9353,26 @@ async function _mlbBotSettleDate(env, dateStr, options = {}) {
       log.ou_was_right        = ouWasRight;
       log.ou_model_was_right  = ouModelWasRight;
       log.clv_post_match      = clvPostMatch;
-      log.settled_at          = new Date().toISOString();
+      // MBP-CATCHUP-SETTLE · enrichissement audit
+      log.status                = BOT_LOG_STATUS.SETTLED;
+      log.live_status           = result.status;
+      log.match_status_source   = 'espn_mlb_scoreboard';
+      log.settlement_source     = source;
+      log.settlement_attempts   = (log.settlement_attempts ?? 0) + 1;
+      log.result_fetch_latency  = resultFetchLatency;
+      log.settled_at            = new Date().toISOString();
+      if (cronRunId) log.cron_run_id = cronRunId;
+      const matchStartTs = log.datetime ? new Date(log.datetime).getTime() : null;
+      if (matchStartTs && Number.isFinite(matchStartTs)) {
+        log.settlement_latency_minutes = Math.round((Date.now() - matchStartTs) / 60000);
+      }
 
       await env.PAPER_TRADING.put(key, JSON.stringify(log), { expirationTtl: 90 * 24 * 3600 });
       settled++;
     } catch (err) { console.warn(`[MLB BOT] settle ${result.id}:`, err.message); }
   }
 
-  return { settled, date: dateStr };
+  return { settled, postponed, cancelled, date: dateStr };
 }
 
 // Fetch boxscore MLB Stats API pour obtenir les strikeouts réels des starting pitchers
@@ -9550,7 +9771,8 @@ async function _runTennisBotCron(env, forceRun = false) {
   if (!env.PAPER_TRADING) return;
   const now     = new Date();
   const dateStr = _botFormatDate(now);
-  console.log(`[TENNIS BOT] Cron démarré — ${now.toISOString()}, date (Paris): ${dateStr}`);
+  const tennisCronRunId = _botCronRunId(); // MBP-CATCHUP-SETTLE
+  console.log(`[TENNIS BOT] Cron démarré — ${now.toISOString()}, date (Paris): ${dateStr} · run=${tennisCronRunId}`);
 
   // Idempotence horaire (sauf forceRun)
   if (!forceRun) {
@@ -9648,6 +9870,9 @@ async function _runTennisBotCron(env, forceRun = false) {
         upset:            null,
         clv_post_match:   null,
         settled_at:       null,
+        // MBP-CATCHUP-SETTLE · pending + trace cron
+        status:           BOT_LOG_STATUS.PENDING,
+        cron_run_id:      tennisCronRunId,
       };
 
       try {
@@ -10447,7 +10672,8 @@ async function _supplementLast5WithESPN(stats, players, tour, env, rankMap, surf
 
 async function _tennisBotSettleDate(env, dateStr, options = {}) {
   if (!env.PAPER_TRADING) return { settled: 0, error: 'no KV', date: dateStr };
-  const { force = false } = options;
+  const { force = false, cronRunId = null, source = 'cron_nightly' } = options;
+  const fetchStartedAt = Date.now();
 
   // Lister les logs pending pour ce dateStr.
   // v7.02 : on match sur log.match_date (date réelle match) si présente, sinon fallback log.date (date génération).
@@ -10461,7 +10687,9 @@ async function _tennisBotSettleDate(env, dateStr, options = {}) {
       const log = JSON.parse(raw);
       const logMatchDate = log.match_date ?? log.date;
       if (logMatchDate !== dateStr) return;
-      if (!force && log.motor_was_right !== null) return;
+      const currentStatus = _botLogStatus(log);
+      if (!force && currentStatus !== BOT_LOG_STATUS.PENDING) return;
+      if (log.motor_prob == null) return; // RÈGLE · pas settle sans analyse pré-match
       pending.push({ key, log });
     } catch (_) {}
   }));
@@ -10473,6 +10701,7 @@ async function _tennisBotSettleDate(env, dateStr, options = {}) {
   for (const p of pending) { (byTour[p.log.tour] ??= []).push(p); }
 
   let settled = 0;
+  let invalid_mapping = 0;
   let espn_count = 0;
   let api_tennis_count = 0;
   let sackmann_count = 0;
@@ -10516,6 +10745,37 @@ async function _tennisBotSettleDate(env, dateStr, options = {}) {
       });
       sackmann_count += sackmannRecent.length;
       return sackmannRecent;
+    };
+
+    // MBP-CATCHUP-SETTLE · match_confidence
+    // - HIGH   · event_id ou full_name 2 tokens identiques (prénom+nom)
+    // - MEDIUM · surname + initiale (ex: "M. Kostyuk" matche "Marta Kostyuk")
+    // - LOW    · surname-only match (risque homonymes · frères/sœurs) → invalid_match_mapping
+    const matchTokens = (n) => String(n || '').toLowerCase().split(/\s+/).filter(t => t.length >= 2);
+    const matchConfidenceFor = (matched, np1, np2) => {
+      const winName = _normalizeTennisName(matched.winner_name);
+      const losName = _normalizeTennisName(matched.loser_name);
+      const winTokens = matchTokens(winName);
+      const p1Tokens  = matchTokens(np1);
+      const losTokens = matchTokens(losName);
+      const p2Tokens  = matchTokens(np2);
+      // Identifiant explicite tournoi/event prioritaire
+      if (matched.event_id || matched.match_id) return { conf: 'HIGH', matched_by: 'event_id' };
+      // 2 tokens identiques sur chaque côté → full_name
+      const overlapW = winTokens.filter(t => p1Tokens.includes(t) || p2Tokens.includes(t));
+      const overlapL = losTokens.filter(t => p1Tokens.includes(t) || p2Tokens.includes(t));
+      if (overlapW.length >= 2 && overlapL.length >= 2) return { conf: 'HIGH', matched_by: 'full_name' };
+      // Surname + initiale détectée (un token court 1-2 chars = initiale)
+      const hasInitialSig = (toks) => toks.some(t => t.length <= 2) && toks.some(t => t.length >= 4);
+      if ((overlapW.length >= 1 && overlapL.length >= 1)
+          && (hasInitialSig(winTokens) || hasInitialSig(losTokens) || hasInitialSig(p1Tokens) || hasInitialSig(p2Tokens))) {
+        return { conf: 'MEDIUM', matched_by: 'surname_initial' };
+      }
+      // Surname-only · risque homonymes
+      if (overlapW.length >= 1 && overlapL.length >= 1) {
+        return { conf: 'LOW', matched_by: 'surname_only' };
+      }
+      return { conf: 'LOW', matched_by: 'fallback_csv' };
     };
 
     const findInSource = (sourceArray, np1, np2) => {
@@ -10569,6 +10829,27 @@ async function _tennisBotSettleDate(env, dateStr, options = {}) {
       else if (resultSource === 'api_tennis') matched_via_api_tennis++;
       else matched_via_sackmann++;
 
+      // MBP-CATCHUP-SETTLE · évaluer match_confidence avant de settle
+      const { conf: matchConfidence, matched_by: matchedBy } = matchConfidenceFor(matched, np1, np2);
+      if (matchConfidence === 'LOW') {
+        // Risque homonymes · ne PAS settle · marquer invalid_match_mapping
+        log.status                  = BOT_LOG_STATUS.INVALID_MATCH_MAPPING;
+        log.match_confidence        = 'LOW';
+        log.matched_by              = matchedBy;
+        log.source_matching_used    = resultSource;
+        log.settlement_source       = source;
+        log.settlement_attempts     = (log.settlement_attempts ?? 0) + 1;
+        log.result_fetch_latency    = Date.now() - fetchStartedAt;
+        log.settled_at              = new Date().toISOString();
+        if (cronRunId) log.cron_run_id = cronRunId;
+        try {
+          await env.PAPER_TRADING.put(key, JSON.stringify(log), { expirationTtl: 90 * 24 * 3600 });
+          invalid_mapping++;
+        } catch (_) {}
+        console.warn(`[TENNIS] invalid_match_mapping · ${log.p1} vs ${log.p2} · source=${resultSource} matched_by=${matchedBy}`);
+        continue;
+      }
+
       const winner = _tennisNamesMatch(_normalizeTennisName(matched.winner_name), np1) ? 'HOME' : 'AWAY';
       const motorPredictedHome = (log.motor_prob ?? 50) > 50;
       const motorWasRight = (motorPredictedHome && winner === 'HOME') ||
@@ -10591,8 +10872,22 @@ async function _tennisBotSettleDate(env, dateStr, options = {}) {
       log.prob_delta_pts  = probDelta;
       log.upset           = upset;
       log.clv_post_match  = clv;
-      log.result_source   = resultSource;  // 'espn' ou 'sackmann'
-      log.settled_at      = new Date().toISOString();
+      log.result_source   = resultSource;  // 'espn' · 'api_tennis' · 'sackmann'
+      // MBP-CATCHUP-SETTLE · enrichissement audit
+      log.status                    = BOT_LOG_STATUS.SETTLED;
+      log.match_confidence          = matchConfidence; // HIGH ou MEDIUM
+      log.matched_by                = matchedBy;
+      log.source_matching_used      = resultSource;
+      log.match_status_source       = resultSource;
+      log.settlement_source         = source;
+      log.settlement_attempts       = (log.settlement_attempts ?? 0) + 1;
+      log.result_fetch_latency      = Date.now() - fetchStartedAt;
+      log.settled_at                = new Date().toISOString();
+      if (cronRunId) log.cron_run_id = cronRunId;
+      const matchStartTs = log.commence_time ? new Date(log.commence_time).getTime() : null;
+      if (matchStartTs && Number.isFinite(matchStartTs)) {
+        log.settlement_latency_minutes = Math.round((Date.now() - matchStartTs) / 60000);
+      }
 
       try {
         await env.PAPER_TRADING.put(key, JSON.stringify(log), { expirationTtl: 90 * 24 * 3600 });
@@ -10602,7 +10897,7 @@ async function _tennisBotSettleDate(env, dateStr, options = {}) {
   }
 
   return {
-    settled, date: dateStr, pending: pending.length,
+    settled, invalid_mapping, date: dateStr, pending: pending.length,
     espn_count, api_tennis_count, sackmann_count,
     matched_via_espn, matched_via_api_tennis, matched_via_sackmann,
     unmatched_samples,
@@ -10645,10 +10940,12 @@ async function handleTennisBotLogs(url, env, origin) {
 
     logs.sort((a, b) => new Date(b.logged_at) - new Date(a.logged_at));
 
-    const settled = logs.filter(l => l.motor_was_right !== null);
+    // MBP-CATCHUP-SETTLE · exclure missed/postponed/cancelled/invalid des stats
+    const statsEligible = logs.filter(l => !STATS_EXCLUDED_STATUSES.has(_botLogStatus(l)));
+    const settled = statsEligible.filter(l => l.motor_was_right !== null && l.motor_was_right !== undefined);
     const correct = settled.filter(l => l.motor_was_right === true);
     const hitRate = settled.length > 0 ? Math.round(correct.length / settled.length * 1000) / 10 : null;
-    const edgeLogs = logs.filter(l => l.best_edge);
+    const edgeLogs = statsEligible.filter(l => l.best_edge);
     const avgEdge = edgeLogs.length ? Math.round(edgeLogs.reduce((s, l) => s + l.best_edge, 0) / edgeLogs.length * 10) / 10 : null;
 
     // Brier score
@@ -10663,14 +10960,22 @@ async function handleTennisBotLogs(url, env, origin) {
       brierScore = Math.round(sum / brierValid.length * 10000) / 10000;
     }
 
+    const statusBreakdown = logs.reduce((acc, l) => {
+      const s = _botLogStatus(l);
+      acc[s] = (acc[s] ?? 0) + 1;
+      return acc;
+    }, {});
+
     return jsonResponse({
       available: true, logs,
       stats: {
-        total_analyzed: logs.length,
+        total_analyzed: statsEligible.length,
+        total_logs_kv:  logs.length,
         total_settled:  settled.length,
         hit_rate:       hitRate,
         avg_edge:       avgEdge,
         brier_score:    brierScore,
+        status_breakdown: statusBreakdown,
       },
     }, 200, origin);
   } catch (err) { return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin); }
@@ -10713,4 +11018,382 @@ async function handleTennisBotSettleLogs(request, env, origin) {
     const totalSettled = results.reduce((s, r) => s + r.settled, 0);
     return jsonResponse({ success: true, force, total_settled: totalSettled, by_date: results }, 200, origin);
   } catch (err) { return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin); }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MBP-CATCHUP-SETTLE · catch-up settlement + missed games recovery
+// ══════════════════════════════════════════════════════════════════════════════
+//
+// Règles absolues (validées ChatGPT) ·
+//   1. Le recovery détecte UNIQUEMENT les trous du cron · jamais de recommandation
+//      rétroactive · pas de motor_prob · pas de betting_recommendations · pas
+//      de variables_used créés après le début du match.
+//   2. Un match raté → status='missed_by_cron' · jamais 'settled'.
+//   3. Les stats (winrate · ROI · Brier · calibration) EXCLUENT ·
+//        missed_by_cron · recovery_failed · postponed · cancelled ·
+//        invalid_match_mapping (cf STATS_EXCLUDED_STATUSES)
+//   4. Le settlement nécessite log.motor_prob !=null (i.e. analyse pré-match).
+//
+// API ·
+//   settlePendingBotLogs(sport, env, opts)  · clôture les logs pending sur
+//                                              une fenêtre J-N à J-1
+//   recoverMissedGames(sport, date, env)    · détecte les matchs joués
+//                                              absents des logs · crée
+//                                              missed_by_cron minimaliste
+//
+// Endpoints admin (guard DEBUG_SECRET) ·
+//   GET /bot/settle?scope=yesterday|today|date=YYYYMMDD&sport=NBA|MLB|TENNIS
+//   GET /bot/recover-missed?date=YYYYMMDD&sport=NBA|MLB|TENNIS
+
+const SPORT_LOG_PREFIX = Object.freeze({
+  NBA:    BOT_LOG_PREFIX,
+  MLB:    MLB_BOT_LOG_PREFIX,
+  TENNIS: TENNIS_BOT_LOG_PREFIX,
+});
+
+function _normalizeSportParam(raw) {
+  const s = String(raw || '').toUpperCase().trim();
+  if (s === 'NBA' || s === 'MLB' || s === 'TENNIS') return s;
+  return null;
+}
+
+// Rate-limit idempotence catch-up · skip si dernier run < CATCHUP_MIN_GAP_MS
+async function _catchupRateLimit(env, kind, sport, dateStr) {
+  if (!env.PAPER_TRADING) return { allowed: true, last_run_ms: null };
+  const prefix = kind === 'recover' ? RECOVER_RUN_PREFIX : CATCHUP_RUN_PREFIX;
+  const key = `${prefix}${sport}_${dateStr}`;
+  try {
+    const raw = await env.PAPER_TRADING.get(key);
+    if (raw) {
+      const last = parseInt(raw, 10);
+      if (Number.isFinite(last) && (Date.now() - last) < CATCHUP_MIN_GAP_MS) {
+        return { allowed: false, last_run_ms: last };
+      }
+    }
+    await env.PAPER_TRADING.put(key, String(Date.now()), { expirationTtl: 30 * 3600 });
+    return { allowed: true, last_run_ms: null };
+  } catch (_) {
+    return { allowed: true, last_run_ms: null };
+  }
+}
+
+// Dispatcher · appelle la bonne fonction settle existante pour une date
+async function _dispatchSettleDate(sport, dateStr, env, opts) {
+  if (sport === 'NBA')    return await _botSettleDate(env, dateStr, opts);
+  if (sport === 'MLB')    return await _mlbBotSettleDate(env, dateStr, opts);
+  if (sport === 'TENNIS') return await _tennisBotSettleDate(env, dateStr, opts);
+  return { settled: 0, error: 'unknown sport' };
+}
+
+/**
+ * settlePendingBotLogs · clôture les logs pending d'un sport sur une fenêtre.
+ * - sport · 'NBA' | 'MLB' | 'TENNIS'
+ * - opts.dates · array YYYYMMDD (défaut J-1 et J-2 · tennis J-1 à J-10)
+ * - opts.force · re-settle même si déjà settled
+ * - opts.cronRunId · trace
+ * - opts.source · 'cron_nightly' | 'admin_endpoint' | 'catchup_recover'
+ * Retourne { sport · cron_run_id · games_found · settled · postponed ·
+ *   cancelled · invalid_mapping · pending · errors · by_date }
+ */
+async function settlePendingBotLogs(sport, env, opts = {}) {
+  const cronRunId = opts.cronRunId ?? _botCronRunId();
+  const source = opts.source ?? 'admin_endpoint';
+  const force = opts.force === true;
+  const dates = Array.isArray(opts.dates) && opts.dates.length ? opts.dates : _defaultSettleDates(sport);
+
+  const summary = {
+    sport,
+    cron_run_id: cronRunId,
+    source,
+    dates_processed: dates,
+    games_found: 0,
+    settled_count: 0,
+    postponed_count: 0,
+    cancelled_count: 0,
+    invalid_mapping_count: 0,
+    pending_count: 0,
+    errors: [],
+    by_date: [],
+  };
+
+  for (const ds of dates) {
+    try {
+      const r = await _dispatchSettleDate(sport, ds, env, { force, cronRunId, source });
+      summary.settled_count          += (r.settled ?? 0);
+      summary.postponed_count        += (r.postponed ?? 0);
+      summary.cancelled_count        += (r.cancelled ?? 0);
+      summary.invalid_mapping_count  += (r.invalid_mapping ?? 0);
+      summary.pending_count          += (r.pending ?? 0);
+      summary.by_date.push({ date: ds, ...r });
+    } catch (err) {
+      summary.errors.push({ date: ds, error: SAFE_ERROR_MSG_500 });
+      console.warn(`[CATCHUP] ${sport} ${ds} settle error:`, err.message);
+    }
+  }
+  return summary;
+}
+
+function _defaultSettleDates(sport) {
+  const now = new Date();
+  const out = [];
+  const days = sport === 'TENNIS' ? 10 : 2;
+  for (let d = 1; d <= days; d++) {
+    const dt = new Date(now);
+    dt.setUTCDate(dt.getUTCDate() - d);
+    out.push(_botFormatDate(dt));
+  }
+  return out;
+}
+
+// Fetch helpers · lister les matchs joués pour une date (sources live)
+async function _fetchPlayedMatchesNBA(dateStr) {
+  const data = await espnFetch(`${ESPN_SCOREBOARD}?dates=${dateStr}&limit=25`);
+  if (!data) return { items: [], error: 'espn_unavailable' };
+  const parsed = parseESPNMatches(data, dateStr);
+  return {
+    items: parsed.map(m => ({
+      match_id:    m.id,
+      home:        m.home_team?.name,
+      away:        m.away_team?.name,
+      datetime:    m.datetime,
+      live_status: m.status,
+      mapped:      _espnStatusToBotLogStatus(m.status),
+      source:      'espn_scoreboard',
+    })),
+  };
+}
+
+async function _fetchPlayedMatchesMLB(dateStr) {
+  const data = await espnFetch(`${ESPN_MLB_SCOREBOARD}?dates=${dateStr}&limit=25`);
+  if (!data) return { items: [], error: 'espn_unavailable' };
+  const parsed = parseESPNMLBMatches(data, dateStr);
+  return {
+    items: parsed.map(m => ({
+      match_id:    m.id,
+      home:        m.home_team?.name,
+      away:        m.away_team?.name,
+      datetime:    m.datetime,
+      live_status: m.status,
+      mapped:      _espnStatusToBotLogStatus(m.status),
+      source:      'espn_mlb_scoreboard',
+    })),
+  };
+}
+
+// Tennis · seul ESPN tennis utilisable pour énumérer les matchs joués d'une
+// date sans clé api-tennis · Sackmann CSV listant aussi mais lag 2-7j.
+async function _fetchPlayedMatchesTennis(dateStr, env) {
+  const out = [];
+  let espnErr = null, apiErr = null;
+  for (const tour of ['atp', 'wta']) {
+    try {
+      const espnRes = await _fetchTennisResultsESPN(dateStr, tour);
+      for (const r of (espnRes ?? [])) {
+        out.push({
+          match_id:    r.event_id || `${tour}_${(_normalizeTennisName(r.winner_name) || '').replace(/\s+/g, '_')}_${(_normalizeTennisName(r.loser_name) || '').replace(/\s+/g, '_')}_${dateStr}`,
+          tour,
+          winner_name: r.winner_name,
+          loser_name:  r.loser_name,
+          datetime:    r.datetime ?? null,
+          live_status: 'STATUS_FINAL',
+          mapped:      BOT_LOG_STATUS.SETTLED,
+          source:      'espn_tennis',
+        });
+      }
+    } catch (e) { espnErr = e.message; }
+  }
+  // Fallback api-tennis si activé
+  if (env.TENNIS_API_FIXTURES_ENABLED === '1') {
+    try {
+      const apiRes = await _fetchTennisResultsApiTennis(dateStr, env);
+      for (const r of (apiRes ?? [])) {
+        out.push({
+          match_id:    r.event_id || `api_${(_normalizeTennisName(r.winner_name) || '').replace(/\s+/g, '_')}_${(_normalizeTennisName(r.loser_name) || '').replace(/\s+/g, '_')}_${dateStr}`,
+          tour:        r.tour ?? null,
+          winner_name: r.winner_name,
+          loser_name:  r.loser_name,
+          datetime:    r.datetime ?? null,
+          live_status: 'STATUS_FINAL',
+          mapped:      BOT_LOG_STATUS.SETTLED,
+          source:      'api_tennis',
+        });
+      }
+    } catch (e) { apiErr = e.message; }
+  }
+  return { items: out, error: (out.length === 0 ? (espnErr || apiErr || 'no_data') : null) };
+}
+
+async function _fetchPlayedMatches(sport, dateStr, env) {
+  if (sport === 'NBA')    return await _fetchPlayedMatchesNBA(dateStr);
+  if (sport === 'MLB')    return await _fetchPlayedMatchesMLB(dateStr);
+  if (sport === 'TENNIS') return await _fetchPlayedMatchesTennis(dateStr, env);
+  return { items: [], error: 'unknown sport' };
+}
+
+/**
+ * recoverMissedGames · détecte les matchs joués absents des logs · crée un
+ * log minimaliste status='missed_by_cron'. AUCUNE recommandation rétroactive.
+ *
+ * - sport · 'NBA' | 'MLB' | 'TENNIS'
+ * - dateStr · 'YYYYMMDD'
+ * Retourne { sport · date · found_in_live · already_logged · missed_added ·
+ *   missed_match_ids · errors }
+ */
+async function recoverMissedGames(sport, dateStr, env, opts = {}) {
+  const cronRunId = opts.cronRunId ?? _botCronRunId();
+  const prefix = SPORT_LOG_PREFIX[sport];
+  if (!prefix) return { error: 'unknown sport' };
+  if (!env.PAPER_TRADING) return { error: 'KV not configured' };
+
+  const summary = {
+    sport,
+    date: dateStr,
+    cron_run_id: cronRunId,
+    found_in_live: 0,
+    already_logged: 0,
+    missed_added: 0,
+    missed_match_ids: [],
+    errors: [],
+  };
+
+  let played;
+  try {
+    played = await _fetchPlayedMatches(sport, dateStr, env);
+  } catch (err) {
+    return { ...summary, error: 'fetch_failed', detail: SAFE_ERROR_MSG_UNAVAILABLE };
+  }
+  if (played.error && (!played.items || played.items.length === 0)) {
+    return { ...summary, error: played.error };
+  }
+  summary.found_in_live = played.items.length;
+
+  for (const game of played.items) {
+    const key = `${prefix}${game.match_id}`;
+    try {
+      const raw = await env.PAPER_TRADING.get(key);
+      if (raw) {
+        summary.already_logged++;
+        continue;
+      }
+      // Création log minimaliste · PAS de motor_prob · PAS de betting_recommendations
+      // PAS de variables_used · PAS de signals (règle absolue)
+      const nowIso = new Date().toISOString();
+      const missedLog = {
+        match_id:             game.match_id,
+        status:               BOT_LOG_STATUS.MISSED_BY_CRON,
+        missed_reason:        'no_log_at_cron_time',
+        sport,
+        date:                 dateStr,
+        match_date:           dateStr,
+        home:                 game.home ?? null,
+        away:                 game.away ?? null,
+        p1:                   game.winner_name ?? null,   // tennis · convention rapport
+        p2:                   game.loser_name ?? null,
+        tour:                 game.tour ?? null,
+        datetime:             game.datetime ?? null,
+        logged_at:            nowIso,
+        recovery_detected_at: nowIso,
+        live_status:          game.live_status,
+        match_status_source:  game.source,
+        source_recovery:      'recovery_endpoint',
+        cron_run_id:          cronRunId,
+        // Sentinelles · jamais comptées
+        motor_prob:           null,
+        motor_was_right:      null,
+        best_edge:            null,
+        best_side:            null,
+        betting_recommendations: null,
+        variables_used:       null,
+        signals:              null,
+      };
+      await env.PAPER_TRADING.put(key, JSON.stringify(missedLog), { expirationTtl: 90 * 24 * 3600 });
+      summary.missed_added++;
+      summary.missed_match_ids.push(game.match_id);
+    } catch (err) {
+      summary.errors.push({ match_id: game.match_id, error: SAFE_ERROR_MSG_500 });
+    }
+  }
+  return summary;
+}
+
+// ── ROUTES ADMIN MBP-CATCHUP-SETTLE ───────────────────────────────────────────
+
+async function handleBotCatchupSettle(url, env, origin) {
+  const denial = _denyIfNoDebugAuth(url, env, origin);
+  if (denial) return denial;
+  if (!env.PAPER_TRADING) return jsonResponse({ error: 'KV not configured' }, 500, origin);
+
+  const sport = _normalizeSportParam(url.searchParams.get('sport'));
+  if (!sport) return jsonResponse({ error: 'invalid sport · use NBA|MLB|TENNIS' }, 400, origin);
+
+  const scope = String(url.searchParams.get('scope') || 'yesterday').toLowerCase();
+  const dateParam = url.searchParams.get('date');
+  const now = new Date();
+  let dates;
+  if (dateParam && /^\d{8}$/.test(dateParam)) {
+    dates = [dateParam];
+  } else if (scope === 'today') {
+    dates = [_botFormatDate(now)];
+  } else if (scope === 'yesterday') {
+    const dt = new Date(now);
+    dt.setUTCDate(dt.getUTCDate() - 1);
+    dates = [_botFormatDate(dt)];
+  } else {
+    return jsonResponse({ error: 'invalid scope · use yesterday|today|date=YYYYMMDD' }, 400, origin);
+  }
+
+  // Rate-limit (1 run / 5min par sport+date)
+  const gate = await _catchupRateLimit(env, 'settle', sport, dates[0]);
+  if (!gate.allowed) {
+    return jsonResponse({
+      throttled: true,
+      reason: 'last_run_too_recent',
+      sport, dates,
+      retry_after_ms: CATCHUP_MIN_GAP_MS - (Date.now() - gate.last_run_ms),
+    }, 429, origin);
+  }
+
+  try {
+    const res = await settlePendingBotLogs(sport, env, {
+      dates,
+      source: 'admin_endpoint',
+      force: url.searchParams.get('force') === '1',
+    });
+    console.log('[CATCHUP-SETTLE]', JSON.stringify(res));
+    return jsonResponse({ success: true, ...res }, 200, origin);
+  } catch (err) {
+    return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin);
+  }
+}
+
+async function handleBotRecoverMissed(url, env, origin) {
+  const denial = _denyIfNoDebugAuth(url, env, origin);
+  if (denial) return denial;
+  if (!env.PAPER_TRADING) return jsonResponse({ error: 'KV not configured' }, 500, origin);
+
+  const sport = _normalizeSportParam(url.searchParams.get('sport'));
+  if (!sport) return jsonResponse({ error: 'invalid sport · use NBA|MLB|TENNIS' }, 400, origin);
+
+  const dateParam = url.searchParams.get('date');
+  if (!dateParam || !/^\d{8}$/.test(dateParam)) {
+    return jsonResponse({ error: 'invalid date · use YYYYMMDD' }, 400, origin);
+  }
+
+  const gate = await _catchupRateLimit(env, 'recover', sport, dateParam);
+  if (!gate.allowed) {
+    return jsonResponse({
+      throttled: true,
+      reason: 'last_run_too_recent',
+      sport, date: dateParam,
+      retry_after_ms: CATCHUP_MIN_GAP_MS - (Date.now() - gate.last_run_ms),
+    }, 429, origin);
+  }
+
+  try {
+    const res = await recoverMissedGames(sport, dateParam, env);
+    console.log('[CATCHUP-RECOVER]', JSON.stringify(res));
+    return jsonResponse({ success: true, ...res }, 200, origin);
+  } catch (err) {
+    return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin);
+  }
 }
