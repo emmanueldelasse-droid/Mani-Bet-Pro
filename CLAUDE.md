@@ -1,99 +1,19 @@
-# Claude · règles session Mani Bet Pro
+# Mani Bet Pro · règles Claude (pointeur)
 
-## Gouvernance
-- ChatGPT = pilote projet · valide décisions · audit · stratégie
-- Claude = exécutant · code · tests · docs · PRs
-- User = arbitre final · merge
+Ce fichier est un pointeur. Toutes les règles détaillées sont dans `docs/project/`.
 
 ## Lecture obligatoire chaque session
-1. `SESSION.md` (point d'entrée court · état · TODO)
-2. `BOT_OBJECTIVE.md` (objectif réel · règles absolues)
-3. `PROJECT_RULES.md` (workflow · interdictions)
-4. Fichiers pertinents selon tâche :
-   - moteur → `BETTING_LOGIC.md` + `NBA_ENGINE_AUDIT.md` + `src/engine/*`
-   - data → `DATA_PIPELINE.md` + `PROVIDERS_MATRIX.md`
-   - archi → `ARCHITECTURE.md`
-   - routes / API → `ROUTES_AUDIT.md`
-   - sécurité → `SECURITY_AUDIT.md`
-   - bug → `KNOWN_ISSUES.md`
-   - merge → `CHECKLIST_MERGE.md`
-5. `.claude/onboarding.md` uniquement pour deploy/setup/reprise compte
-6. `.claude/agents/alon.md` pour analyse calibration
+1. `SESSION.md` · état courant · pointeurs
+2. `docs/project/AI_WORKFLOW.md` · rôles · format réponses · communication
+3. `docs/project/MERGE_PROTOCOL.md` · workflow PR · GO/NOGO · checklist
+4. Selon tâche · `docs/project/` · `docs/engine/` · `docs/monitoring/` · `docs/decisions/`
 
-## Branches & PR
-- Branche `claude/<topic>` depuis `origin/main`
-- Avant branche : `git fetch origin main && git merge origin/main`
-- Push branche · ouvrir PR GitHub
-- **Ne jamais merger sans GO ChatGPT explicite**
-- Skip merge si user dit "ne merge pas"
-
-## Règles absolues
-- Ne jamais inventer données · blessures · cotes · stats
-- Ne jamais modifier hors périmètre demandé
-- Ne jamais changer moteur · calibration · seuils sans validation
-- Ne jamais bypasser `_denyIfNoDebugAuth`
-- Ne jamais commit secret en clair
-- Ne jamais skip checklist merge
-
-## Résumé PR obligatoire (post Claude)
-- Fichiers créés / modifiés / supprimés
-- Impacts (front · worker · moteur · provider · paper)
-- Risques identifiés
-- Tests effectués
-- Sport impacté
-- Zones incertaines (à vérifier · non confirmé)
-
-## Style fichiers .md
-- Télégraphique français · pas de prose · pas d'articles superflus · pas d'emoji
-- Listes à puces courtes · symboles `·` séparateur · `→` cause/résultat
-- Refs code : `file:line` (ex: `worker.js:5888`)
-- Jamais dupliquer info stockée ailleurs (git log · issues · onboarding.md)
-- Section > 15 lignes → extraire dans `.claude/<nom>.md` ou doc dédiée
-- Non-respect = revert
-
-## Style réponses conversationnelles user (hors .md)
-- **Toujours répondre dans un bloc unique copier-collable à GPT** (pilote du projet) · format ```` ``` ```` markdown · permet copier-coller direct user → ChatGPT pour review/validation · exception · opération de code pure sans synthèse à transmettre (commit isolé · fix typo · etc)
-- Vocabulaire simple FR courant
-- Pas de jargon brut sans explication (ex: "KV" → "base de clé-valeur Cloudflare")
-- Analogies du quotidien pour concept abstrait
-- Exemples concrets · chiffres · noms joueurs réels plutôt qu'abstrait
-- Structure visuelle : titres courts · listes · tableaux pour comparer
-- Commande CLI : préciser où la taper (Terminal Mac · PowerShell Windows · navigateur)
-- Éviter "il suffit de..." · "simplement..." · "trivial" (condescendant)
-- Si user ne sait pas un truc : expliquer · ne jamais présumer
-- Non-respect = user frustré · perte de temps
-
-## Vocabulaire imposé
-- Confidence : `HIGH/MEDIUM/LOW/INCONCLUSIVE` (jamais "Data quality" en UI)
-- Cotes : décimales européennes (1.85 · 2.10) · jamais US (-200 · +150)
-- Sports : NBA · MLB · Tennis (3 actuellement)
-
-## Périmètre interdit sans validation
-- `worker.js` moteur (`_botEngine*` · `_botCompute*` · `_botPredict*`)
-- `src/engine/*` (sauf alignement strict backend explicitement validé · ex: MBP-FIX-A.2.x)
-- `src/config/sports.config.js` (poids · seuils · normalisations)
-- Cron · KV schémas · `wrangler.jsonc`
-- Routes paris · paper · admin · cron handlers
-- Gates `confidence` · `data_quality`
-- Guards auth (`_denyIfNoDebugAuth` · `requirePaperApiKey` · `requireBotRunApiKey` · `_rateLimitIpHash`)
-- CORS Allow-Headers · ALLOWED_ORIGINS · secrets CF Dashboard
-- Algorithmes confidence (NBA aligné backend MBP-FIX-A.2.1) · `home_away_split` (aligné MBP-FIX-A.2.2)
-
-## Périmètre autorisé après GO
-- UI ciblée (`src/ui/*`)
-- Bug fix sans impact moteur
-- Docs (.md)
-- Tests
-- Logs debug
-
-## Agents disponibles
-- `alon` : analyste calibration · proactif après lots settlés
-- `code-debugger` : diagnostic bug
-- `code-reviewer` : review pré-commit
-- `Explore` : recherche code (read-only)
-
-## Update SESSION.md
-- Seulement si merge a impact critique
-- Style télégraphique
-- TODO priorisés P1/P2/P3
-- Ne pas dupliquer git log
+## Règles immédiates rappel
+- Adresser ChatGPT (`Claude → ChatGPT`)
+- Une réponse = un seul bloc markdown copier-collable
+- Validation ChatGPT obligatoire avant merge important
+- Validation créateur obligatoire changements majeurs
+- Backend = source canonique · jamais inventer data · jamais recommandation rétroactive
+- Stats EXCLUENT · `missed_by_cron` · `recovery_failed` · `postponed` · `cancelled` · `invalid_match_mapping`
+- Tests obligatoires routes critiques · rollback obligatoire PR sensibles
+- `MEMORY FILES UPDATED` obligatoire avant GO merge

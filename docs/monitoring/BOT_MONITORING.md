@@ -48,7 +48,7 @@ Fonction pure `evaluateFetchErrors(errors)` exportée par `scripts/lib/monitorin
 
 ## Sources de données
 
-Routes publiques existantes (audit ROUTES_AUDIT.md confirmé) ·
+Routes publiques existantes (audit docs/monitoring/ROUTES_AUDIT.md confirmé) ·
 - `GET /bot/logs` → `handleBotLogs` (worker.js:3855) · logs NBA depuis KV `bot_log_*`
 - `GET /mlb/bot/logs` → `handleMLBBotLogs` (worker.js:8924) · logs MLB depuis KV `mlb_bot_log_*`
 - `GET /tennis/bot/logs` → `handleTennisBotLogs` (worker.js:10558) · logs Tennis depuis KV `tennis_bot_log_*`
@@ -152,14 +152,14 @@ Pour la somme brute des raisons → champ séparé `blocked_reasons_total`.
 
 ### NBA · après 80+ logs settlés
 - Lancer `/bot/calibration/analyze?sport=nba` · audit Alon
-- Décision · garder · ajuster poids · documenter dans NBA_ENGINE_AUDIT.md
+- Décision · garder · ajuster poids · documenter dans docs/decisions/DECISION-002-NBA-ENGINE-PARITY-MBP-A2.md
 
 ## Pourquoi pas recalibrer maintenant
 
 - MBP-P1 vient de modifier le comportement des recos (gate dq) · les anciens hits/misses ne sont plus représentatifs du nouveau comportement
 - Recalibrer maintenant introduirait du bruit · les chiffres sont mélangés (pré + post gate)
 - Attendre 50 nouveaux paris settlés avec le gate actif avant toute décision de calibration
-- Conformité avec PROJECT_RULES.md · "Tout changement de seuil → justifier par chiffres sur logs settlés"
+- Conformité avec docs/project/AI_WORKFLOW.md · "Tout changement de seuil → justifier par chiffres sur logs settlés"
 
 ## Monitoring best bets tennis (script dédié)
 

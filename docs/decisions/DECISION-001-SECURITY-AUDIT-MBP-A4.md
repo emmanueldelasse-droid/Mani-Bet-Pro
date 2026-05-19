@@ -1,4 +1,38 @@
-# Security audit Mani Bet Pro · MBP-A.4
+# DECISION-001 · Security audit MBP-A.4
+
+## Statut
+**accepted · 6/6 critiques résolues**
+
+## Contexte
+Audit sécurité du worker Mani Bet Pro · 6 catégories CRIT-A à F identifiées avant traitement. Méthode · 3 agents Explore en parallèle (auth/routes · validation/CORS/erreurs · AI/KV/debug) + vérification directe.
+
+## Décision
+Résolution des 6 critiques via 4 MBP-S.X ·
+- MBP-S.1 · CRIT-B (err.message) · CRIT-C (CORS strict) · CRIT-E (`/tennis/_espn_probe` guard)
+- MBP-S.2 / S.2.1 · CRIT-A (Paper auth `X-API-Key`)
+- MBP-S.3 · CRIT-D (Bot run auth `X-Bot-Api-Key`)
+- MBP-S.4 · CRIT-F (Rate limit Claude per-IP `_rateLimitIpHash`)
+
+Restent · HAUT-1 à 9 · MOY-1 à 7 · FAI-1 à 5 (priorités P2/P3 · cf `docs/monitoring/KNOWN_ISSUES.md`).
+
+## Alternatives rejetées
+- Audit shallow · rejeté · 6 critiques cachées si non systémique
+- Auth unique JWT · rejeté · 3 systèmes en couches plus précis selon route (debug/paper/bot)
+
+## Validation
+- ChatGPT review · GO post-merge
+- Créateur GO · accepted
+
+## Références code
+- worker.js:881 · `_denyIfNoDebugAuth` (fail-CLOSE)
+- worker.js:898 · `requirePaperApiKey`
+- worker.js:914 · `requireBotRunApiKey` · `_rateLimitIpHash`
+- worker.js:207 · CORS strict
+- worker.js:233 · `SAFE_ERROR_MSG_*`
+
+---
+
+# Audit détaillé (préservé · historique)
 
 Audit documentaire uniquement · aucun code modifié.
 Méthode · 3 agents Explore en parallèle (auth/routes · validation/CORS/erreurs · AI/KV/debug) + vérification directe.

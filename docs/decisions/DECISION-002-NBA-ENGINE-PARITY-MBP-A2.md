@@ -1,4 +1,53 @@
-# NBA engine audit · MBP-A.2
+# DECISION-002 · NBA engine parity MBP-A.2
+
+## Statut
+**accepted · parité maintenue via test 492 assertions (PR #196)**
+
+## Contexte
+Mani Bet Pro héberge 2 moteurs NBA distincts qui coexistent ·
+- Backend `_botEngineCompute` worker.js · cron logs · calibration Alon
+- Frontend `EngineCore.compute` src/engine/ · UI runtime utilisateur
+
+Pas de route HTTP `/nba/analyze`. L'UI ne consomme jamais le moteur backend. Risque de dérive silencieuse.
+
+## Décision
+Garder les 2 moteurs · ajouter test parité automatisé.
+- `scripts/test-nba-engine-parity.mjs` · 492 assertions (PR #196)
+- Couvre · poids saison + playoff · 11 variables · normalisation · score · confidence · data_quality
+- CRIT-2 (confidence) résolu MBP-FIX-A.2.1 · `_computeConfidenceLevel` branche NBA distance-based identique backend
+- CRIT-3 (home_away_split) résolu MBP-FIX-A.2.2 · `computeHomeSplit` formule 4 vars clamp [-0.50, 0.50] identique backend
+- MED-1 back_to_back numérique (-0.6/+0.6 backend vs -1/+1 frontend) · reporté KNOWN-DIVERGENCE
+
+## Alternatives rejetées
+- Supprimer le backend · rejeté · cron + logs + calibration historique cassés
+- Supprimer le frontend · rejeté · UI runtime aurait latence supplémentaire (round-trip worker)
+- Refactor unique moteur · effort trop important · risque régression
+
+## Conséquences
+Positives ·
+- Stabilité préservée pendant chantiers MBP-A.2
+- Test parité automatisé · anti-régression
+- Sécurité contre dérive structurelle
+
+Négatives ·
+- Maintenance double moteur
+- Toute modification NBA doit valider parité (test obligatoire)
+- KNOWN-DIVERGENCE documentées dans le test (back_to_back)
+
+## Validation
+- ChatGPT review · stratégie "garder les 2 moteurs" validée
+- Créateur GO · accepted (PR #196 mergée)
+
+## Références code
+- worker.js · `_botEngineCompute` (backend cron)
+- src/engine/engine.core.js · `_computeConfidenceLevel`
+- src/engine/engine.nba.variables.js:262 · `computeHomeSplit`
+- scripts/test-nba-engine-parity.mjs · test 492 assertions
+- docs/tests/NBA_ENGINE_PARITY.md · doc test
+
+---
+
+# Audit détaillé (préservé · historique)
 
 Audit documentaire pur · aucun code modifié. Méthode · 3 agents Explore en parallèle (backend · frontend modules · UI rendering) + vérifications directes des appels.
 
