@@ -4,7 +4,13 @@
 `main` · auto-deploy CF/GH Pages (build f9cd992)
 
 ## En cours
-néant
+MBP-AUDIT-MLB-REAL-LOGS · outillage audit empirique 421 logs MLB
+- branche · `claude/audit-mlb-real-logs`
+- script · `scripts/audit-mlb-logs.mjs` + lib · `scripts/lib/audit-mlb-summary.mjs`
+- tests · `scripts/test-audit-mlb-logs.mjs` · 123 assertions
+- doc · `docs/monitoring/MLB_AUDIT_GUIDE.md`
+- aucun changement moteur · aucune désactivation · uniquement outil read-only
+- prochaine étape · créateur exécute audit sur dump réel · ChatGPT review formelle DECISION-003
 
 ## Derniers PR mergés
 - #205 · MBP-CATCHUP-SETTLE · settlement + recovery + protection stats (commit efc8730)
