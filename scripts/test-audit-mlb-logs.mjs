@@ -469,6 +469,66 @@ console.log('21. auditMlbLogs · orchestrateur complet');
   eq(audit3.total_logs_kv, 18, 'wrapper /mlb/bot/logs accepté');
 }
 
+// ── 22. Bandeau "DECISION REQUIRES CREATOR APPROVAL" ────────────────────────
+console.log('22. Bandeau approval · uniquement si DESACTIVATION_RECOMMANDEE');
+{
+  const { formatReport } = await import('./lib/audit-mlb-summary.mjs');
+  const BANNER = 'DECISION REQUIRES CREATOR APPROVAL · ChatGPT review obligatoire';
+
+  // Construire un summary minimal par verdict pour tester formatReport
+  function buildSummary(verdict, reasons = []) {
+    return {
+      total_logs_kv: 200, total_eligible: 200, settled_eligible: 200, pending: 0,
+      excluded_count: 0, status_breakdown: { settled: 200 },
+      hit_rate_global: { n: 200, k: 100, center_pct: 50, low_pct: 43, high_pct: 57 },
+      rolling: {
+        last_25:  { window: 25,  available: 25,  n: 25,  k: 12, center_pct: 48, low_pct: 30, high_pct: 67 },
+        last_50:  { window: 50,  available: 50,  n: 50,  k: 25, center_pct: 50, low_pct: 36, high_pct: 64 },
+        last_100: { window: 100, available: 100, n: 100, k: 50, center_pct: 50, low_pct: 40, high_pct: 60 },
+      },
+      trend_quartiles: { available: false, reason: 'sample_too_small_for_quartiles' },
+      edge_buckets: [], motor_prob_buckets: [],
+      favorite_underdog: {
+        no_odds_available: 0,
+        best_was_favorite: { wins: 0, losses: 0 },
+        best_was_underdog: { wins: 0, losses: 0 },
+        favorite_ci: { n: 0, k: 0, center_pct: null, low_pct: null, high_pct: null },
+        underdog_ci: { n: 0, k: 0, center_pct: null, low_pct: null, high_pct: null },
+      },
+      home_away: {
+        best_side_home: { n: 0, k: 0, center_pct: null, low_pct: null, high_pct: null },
+        best_side_away: { n: 0, k: 0, center_pct: null, low_pct: null, high_pct: null },
+        no_best_side: 0,
+      },
+      data_quality: {
+        HIGH:   { n: 0, k: 0, center_pct: null, low_pct: null, high_pct: null },
+        MEDIUM: { n: 0, k: 0, center_pct: null, low_pct: null, high_pct: null },
+        LOW:    { n: 0, k: 0, center_pct: null, low_pct: null, high_pct: null },
+        missing_data_quality: 0,
+      },
+      roi: { calculable: false, reason: 'no_odds_in_logs', n: 0, skipped_no_odds: 0, skipped_no_side: 0 },
+      brier: { calculable: false, n: 0, value: null },
+      drawdown: { calculable: false, reason: 'no_odds_in_logs' },
+      variables_presence: {},
+      pitcher_data_source: { available: false, reason: 'not_logged', logs_inspected: 0 },
+      conclusion: { verdict, reasons, action: 'test' },
+    };
+  }
+
+  // DESACTIVATION_RECOMMANDEE → bandeau PRÉSENT
+  const repDes = formatReport(buildSummary('DESACTIVATION_RECOMMANDEE', ['IC borne haute < 50%']));
+  assert(repDes.includes(BANNER), 'bandeau approval PRÉSENT pour DESACTIVATION_RECOMMANDEE');
+  assert(repDes.includes('1. Partager ces résultats avec ChatGPT'), 'bandeau · étape 1 ChatGPT');
+  assert(repDes.includes('3. Validation créateur EXPLICITE'),       'bandeau · étape 3 créateur explicite');
+  assert(repDes.includes('AIDE À LA DÉCISION'),                     'bandeau · clarification aide décision');
+
+  // 4 autres verdicts → bandeau ABSENT
+  for (const v of ['EDGE_DEMONTRE', 'EDGE_NON_DEMONTRE', 'MONITORING_RECOMMANDE', 'SAMPLE_INSUFFISANT']) {
+    const rep = formatReport(buildSummary(v));
+    assert(!rep.includes(BANNER), `bandeau approval ABSENT pour ${v}`);
+  }
+}
+
 // ── Résumé ────────────────────────────────────────────────────────────────────
 console.log('');
 console.log(`Total · ${assertCount} assertions · ${failCount} fail`);

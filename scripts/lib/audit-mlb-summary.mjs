@@ -757,6 +757,25 @@ export function formatReport(summary) {
     lines.push(`    · ${r}`);
   }
   lines.push(`  ACTION · ${summary.conclusion.action}`);
+
+  // Bandeau approval obligatoire si verdict touche désactivation.
+  // Rappel · le verdict est une aide à la décision · pas une décision finale.
+  // Cf docs/monitoring/MLB_AUDIT_GUIDE.md §"RÈGLE ABSOLUE".
+  if (summary.conclusion.verdict === 'DESACTIVATION_RECOMMANDEE') {
+    lines.push('');
+    lines.push(sep);
+    lines.push('DECISION REQUIRES CREATOR APPROVAL · ChatGPT review obligatoire');
+    lines.push(sep);
+    lines.push('  Le verdict ci-dessus est une AIDE À LA DÉCISION basée sur les');
+    lines.push('  chiffres et les règles STATS_RULES.md · pas une autorisation');
+    lines.push('  d\'agir. Aucune désactivation MLB ne peut être déclenchée par');
+    lines.push('  ce script seul. Workflow obligatoire ·');
+    lines.push('    1. Partager ces résultats avec ChatGPT');
+    lines.push('    2. ChatGPT review formelle DECISION-003');
+    lines.push('    3. Validation créateur EXPLICITE (MERGE_PROTOCOL.md)');
+    lines.push('    4. PR séparée avec changement moteur · scope étroit');
+  }
+
   lines.push('');
   lines.push('Référence règles · docs/project/STATS_RULES.md · docs/project/CALIBRATION_RULES.md');
   lines.push(sep);

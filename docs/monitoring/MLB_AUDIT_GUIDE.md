@@ -86,10 +86,30 @@ Le script accepte 3 formats (auto-détection) ·
 | `EDGE_DEMONTRE` | IC 95% borne basse > 52.4% | 0 | Conserver · monitoring continu · valider CLV |
 | `EDGE_NON_DEMONTRE` | IC borne basse < 52.4% mais borne haute ≥ 50% | 12 | Continuer logger · pas de décision désactivation |
 | `MONITORING_RECOMMANDE` | ROI ∈ [-5%, 0%] sur n ≥ 100 | 13 | Surveiller · pas de désactivation · attendre +200 logs |
-| `DESACTIVATION_RECOMMANDEE` | IC borne haute < 50% OU ROI < -5% sur n ≥ 100 | 10 | Désactivation moneyline + investigation |
+| `DESACTIVATION_RECOMMANDEE` | IC borne haute < 50% OU ROI < -5% sur n ≥ 100 | 10 | **Aide à la décision** · validation ChatGPT + créateur OBLIGATOIRES avant toute action |
 | `SAMPLE_INSUFFISANT` | n_settled < 100 | 11 | Continuer logger · re-auditer à 100+ logs |
 
 Le code de sortie reflète le verdict · utile pour intégration script/CI.
+
+## RÈGLE ABSOLUE · le verdict n'est PAS une décision finale
+
+Le verdict automatique produit par le script est uniquement une **aide à la décision** basée sur les chiffres et les règles statistiques (`docs/project/STATS_RULES.md`).
+
+Aucune désactivation MLB · aucune refonte moteur · aucun changement poids ne peut être déclenché par le script seul. La règle de validation reste ·
+
+1. Le script produit le verdict
+2. Le créateur partage les résultats avec ChatGPT
+3. ChatGPT review formelle (`docs/decisions/DECISION-003-MLB-V694-CALIBRATION-EDGE-510.md`)
+4. Validation créateur EXPLICITE (`docs/project/MERGE_PROTOCOL.md` § Validation créateur obligatoire · "Désactivation sport" listée)
+5. Seulement après · PR avec changement moteur (séparée · scope étroit)
+
+Si le verdict est `DESACTIVATION_RECOMMANDEE` · le rapport affiche en plus un bandeau ·
+```
+═══════════════════════════════════════════════════════════════════════
+DECISION REQUIRES CREATOR APPROVAL · ChatGPT review obligatoire
+═══════════════════════════════════════════════════════════════════════
+```
+Ce bandeau rappelle que le verdict est une aide à la décision · pas une autorisation d'agir.
 
 ## Limites connues
 
