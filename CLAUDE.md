@@ -52,6 +52,7 @@
 - Non-respect = revert
 
 ## Style réponses conversationnelles user (hors .md)
+- **Toujours répondre dans un bloc unique copier-collable à GPT** (pilote du projet) · format ```` ``` ```` markdown · permet copier-coller direct user → ChatGPT pour review/validation · exception · opération de code pure sans synthèse à transmettre (commit isolé · fix typo · etc)
 - Vocabulaire simple FR courant
 - Pas de jargon brut sans explication (ex: "KV" → "base de clé-valeur Cloudflare")
 - Analogies du quotidien pour concept abstrait
