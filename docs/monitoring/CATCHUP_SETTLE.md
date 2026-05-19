@@ -79,7 +79,9 @@ curl "$WORKER/bot/recover-missed?sport=NBA&date=20260518&secret=$DEBUG_SECRET"
 |---|---|---|
 | `HIGH` | `event_id` ESPN OU 2+ tokens identiques prénom+nom | settle normal |
 | `MEDIUM` | surname + initiale (`M. Kostyuk` vs `Marta Kostyuk`) | settle normal |
-| `LOW` | surname-only · risque homonymes · frères/sœurs | `status='invalid_match_mapping'` · **PAS settle** · log warn |
+| `LOW` | surname-only · risque homonymes · frères/sœurs | `status='invalid_match_mapping'` · `missed_reason='event_id_missing'` · **PAS settle** · log warn |
+
+Cas couverts par `event_id_missing` (validation ChatGPT review) · aucun event ESPN fiable · matching faible (surname-only) · ambiguïté homonymes · aucun mapping robuste (fallback CSV opportuniste).
 
 Champs persistés tennis post-settle · `match_confidence` · `matched_by` (`event_id`/`full_name`/`surname_initial`/`surname_only`/`fallback_csv`) · `source_matching_used` (`espn`/`api_tennis`/`sackmann`).
 
@@ -142,7 +144,7 @@ Mots-clés grep CF Dashboard · `[BOT-CRON-LOG]` (NBA). Permet d'auditer rétroa
 
 ## Tests
 
-`node scripts/test-catchup-settle.mjs` · 86 assertions ·
+`node scripts/test-catchup-settle.mjs` · 101 assertions ·
 - Constants statuts
 - Back-compat `_botLogStatus`
 - Mapping ESPN
@@ -153,8 +155,25 @@ Mots-clés grep CF Dashboard · `[BOT-CRON-LOG]` (NBA). Permet d'auditer rétroa
 - Rate-limit
 - `settlePendingBotLogs` skip si pas `motor_prob`
 - `_defaultSettleDates` par sport
+- **`monitoring-summary` · les 5 statuts EXCLUS jamais comptés** (NBA · MLB · Tennis · back-compat)
+- **Tennis `invalid_match_mapping` · `missed_reason='event_id_missing'`** (validation ChatGPT review)
 
 Tests existants 649 assertions · 0 régression (parité NBA · gate dq · monitoring · classifier · tennis best bets).
+
+## Garantie stats protégées (validation ChatGPT #4)
+
+Les 5 statuts exclus n'entrent JAMAIS dans · winrate · ROI · Brier · calibration · drawdown · monitoring-summary.
+
+| Surface | Mécanisme | Test |
+|---|---|---|
+| `handleBotLogs` NBA · `total_settled` · `hit_rate` · `brier_score` | `statsEligible = logs.filter(!STATS_EXCLUDED.has(_botLogStatus(l)))` (worker.js:3886) | catchup-settle #5 |
+| `handleMLBBotLogs` · idem | worker.js:9162 | catchup-settle #7 |
+| `handleTennisBotLogs` · idem | worker.js:10773 | catchup-settle #7 |
+| `handleBotCalibration` (effect_size + edge_buckets) | `STATS_EXCLUDED.has(_botLogStatus(log))` skip (worker.js:4188) | implicite (logs pass through) |
+| `scripts/lib/monitoring-summary.mjs · summarizeSport()` | filter via `isStatsExcluded(log)` AVANT calculs | catchup-settle #12 (NBA · MLB · Tennis · back-compat) |
+| `scripts/lib/tennis-best-bets-summary.mjs` | utilise `best_side === result_winner` · les invalid_match_mapping ont `result_winner` absent · exclus naturellement | tennis-best-bets-summary 29 |
+
+Le constant `MONITORING_EXCLUDED_STATUSES` dans `monitoring-summary.mjs` doit rester strictement aligné sur `STATS_EXCLUDED_STATUSES` dans `worker.js` · toute divergence = bug critique de pollution stats.
 
 ## Non-objectifs (hors scope cette PR)
 - Pas de cron quotidien automatique de recovery (P3 · à activer après validation manuelle)

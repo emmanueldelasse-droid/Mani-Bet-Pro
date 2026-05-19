@@ -31,6 +31,29 @@ const HIT_RATE_FLOOR_TENNIS = 50;  // proxy "baisse forte" · documenté approxi
 const MIN_SAMPLE_DECISION  = 50;   // 50 logs settlés minimum pour décision
 const NBA_RECHECK_MIN      = 80;   // SESSION.md TODO P2 · recheck NBA à 80+ logs
 
+// MBP-CATCHUP-SETTLE · statuts JAMAIS comptés dans monitoring (validation
+// ChatGPT). Doit rester strictement aligné sur STATS_EXCLUDED_STATUSES
+// dans worker.js (toute divergence = bug critique de pollution stats).
+const MONITORING_EXCLUDED_STATUSES = new Set([
+  'missed_by_cron',
+  'recovery_failed',
+  'postponed',
+  'cancelled',
+  'invalid_match_mapping',
+]);
+
+// Helper · statut effectif d'un log (back-compat logs pré-PR sans status)
+function logStatus(log) {
+  if (!log) return null;
+  if (log.status) return log.status;
+  if (log.motor_was_right === null || log.motor_was_right === undefined) return 'pending';
+  return 'settled';
+}
+
+function isStatsExcluded(log) {
+  return MONITORING_EXCLUDED_STATUSES.has(logStatus(log));
+}
+
 // ── Helpers numériques ──────────────────────────────────────────────────────
 
 function pctRound(n) {
@@ -165,8 +188,16 @@ function decideNBAStatus(perSport) {
 
 // ── Résumé par sport ────────────────────────────────────────────────────────
 
-export function summarizeSport(logs, sport) {
-  const total = Array.isArray(logs) ? logs.length : 0;
+export function summarizeSport(rawLogs, sport) {
+  const rawTotal = Array.isArray(rawLogs) ? rawLogs.length : 0;
+  // MBP-CATCHUP-SETTLE · filtrer AVANT tout calcul stats. Les statuts exclus
+  // (missed_by_cron · recovery_failed · postponed · cancelled ·
+  // invalid_match_mapping) ne doivent JAMAIS polluer hit_rate · Brier ·
+  // ROI · calibration · status (LIMITER_OU_DESACTIVER vs SURVEILLER).
+  const excludedCount = rawTotal > 0 ? rawLogs.filter(isStatsExcluded).length : 0;
+  const logs = rawTotal > 0 ? rawLogs.filter(l => !isStatsExcluded(l)) : [];
+  const total = logs.length;
+
   if (total === 0) {
     return {
       sport,
@@ -184,7 +215,8 @@ export function summarizeSport(logs, sport) {
       by_confidence:         {},
       by_bet_type:           {},
       data_quality:          { kind: sport === 'MLB' ? 'label' : 'numeric', counts: {}, average: null },
-      status:                'NO_DATA',
+      stats_excluded_count:  excludedCount,
+      status:                rawTotal === 0 ? 'NO_DATA' : 'NO_DATA',
     };
   }
 
@@ -227,6 +259,7 @@ export function summarizeSport(logs, sport) {
     by_confidence:            summarizeByConfidence(sorted),
     by_bet_type:              summarizeByBetType(sorted),
     data_quality:             summarizeDataQuality(sorted, sport),
+    stats_excluded_count:     excludedCount,  // MBP-CATCHUP-SETTLE · audit · jamais inclus dans hit rate
     status:                   'SURVEILLER',  // overridden below
   };
 

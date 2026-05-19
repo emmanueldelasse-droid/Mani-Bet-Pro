@@ -10832,8 +10832,12 @@ async function _tennisBotSettleDate(env, dateStr, options = {}) {
       // MBP-CATCHUP-SETTLE · évaluer match_confidence avant de settle
       const { conf: matchConfidence, matched_by: matchedBy } = matchConfidenceFor(matched, np1, np2);
       if (matchConfidence === 'LOW') {
-        // Risque homonymes · ne PAS settle · marquer invalid_match_mapping
+        // Risque homonymes · ne PAS settle · marquer invalid_match_mapping.
+        // Cas couverts (validation ChatGPT) · aucun event ESPN fiable ·
+        // matching faible (surname-only) · ambiguïté homonymes · aucun
+        // mapping robuste (fallback CSV opportuniste).
         log.status                  = BOT_LOG_STATUS.INVALID_MATCH_MAPPING;
+        log.missed_reason           = 'event_id_missing';
         log.match_confidence        = 'LOW';
         log.matched_by              = matchedBy;
         log.source_matching_used    = resultSource;
@@ -10846,7 +10850,7 @@ async function _tennisBotSettleDate(env, dateStr, options = {}) {
           await env.PAPER_TRADING.put(key, JSON.stringify(log), { expirationTtl: 90 * 24 * 3600 });
           invalid_mapping++;
         } catch (_) {}
-        console.warn(`[TENNIS] invalid_match_mapping · ${log.p1} vs ${log.p2} · source=${resultSource} matched_by=${matchedBy}`);
+        console.warn(`[TENNIS] invalid_match_mapping · ${log.p1} vs ${log.p2} · source=${resultSource} matched_by=${matchedBy} missed_reason=event_id_missing`);
         continue;
       }
 

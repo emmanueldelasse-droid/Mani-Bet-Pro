@@ -330,6 +330,78 @@ eq(nbaDates.length, 2, 'NBA · 2 jours (J-1, J-2)');
 eq(mlbDates.length, 2, 'MLB · 2 jours (J-1, J-2)');
 eq(tennisDates.length, 10, 'TENNIS · 10 jours (J-1 à J-10)');
 
+// ── 12. monitoring-summary · exclusion 5 statuts (ChatGPT review #4) ─────────
+console.log('12. monitoring-summary · 5 statuts JAMAIS comptés dans hit_rate');
+
+const { summarizeSport: msSummarizeSport } = await import('../scripts/lib/monitoring-summary.mjs');
+
+const monitoringLogs = [
+  { status: 'settled', motor_was_right: true,  motor_prob: 65, data_quality: 0.80, confidence_level: 'HIGH',
+    date: '20260518', logged_at: '2026-05-18T22:00:00Z',
+    betting_recommendations: { best: { type: 'MONEYLINE', edge: 7 }, recommendations: [{ type: 'MONEYLINE', edge: 7 }] } },
+  { status: 'settled', motor_was_right: false, motor_prob: 60, data_quality: 0.70, confidence_level: 'MEDIUM',
+    date: '20260518', logged_at: '2026-05-18T23:00:00Z',
+    betting_recommendations: { best: { type: 'MONEYLINE', edge: 5 }, recommendations: [{ type: 'MONEYLINE', edge: 5 }] } },
+  { status: 'missed_by_cron',         motor_was_right: null, motor_prob: null, date: '20260518', logged_at: '2026-05-19T08:00:00Z' },
+  { status: 'recovery_failed',        motor_was_right: null, motor_prob: null, date: '20260518', logged_at: '2026-05-19T08:00:00Z' },
+  { status: 'postponed',              motor_was_right: null, motor_prob: 60,   data_quality: 0.65, date: '20260518', logged_at: '2026-05-18T22:00:00Z' },
+  { status: 'cancelled',              motor_was_right: null, motor_prob: 70,   data_quality: 0.85, date: '20260518', logged_at: '2026-05-18T22:00:00Z' },
+  { status: 'invalid_match_mapping',  motor_was_right: null, motor_prob: 55,   data_quality: 0.78, date: '20260518', logged_at: '2026-05-18T22:00:00Z' },
+];
+
+const sumNBA = msSummarizeSport(monitoringLogs, 'NBA');
+eq(sumNBA.total_analyzed, 2, 'monitoring · NBA total_analyzed=2 (5 exclus)');
+eq(sumNBA.stats_excluded_count, 5, 'monitoring · NBA stats_excluded_count=5 (audit field)');
+eq(sumNBA.total_settled, 2, 'monitoring · NBA total_settled=2 (les 5 exclus jamais comptés)');
+eq(sumNBA.hit_rate, 50.0, 'monitoring · NBA hit_rate=50% (1/2 settled · les 5 exclus jamais comptés)');
+
+// Test MLB · même règle
+const mlbMonitoring = [
+  { status: 'settled', motor_was_right: true,  home_prob: 60, data_quality: 'HIGH',
+    date: '20260518', logged_at: '2026-05-18T22:00:00Z',
+    betting_recommendations: { best: { type: 'MONEYLINE', edge: 7 }, recommendations: [{ type: 'MONEYLINE', edge: 7 }] } },
+  { status: 'missed_by_cron',         motor_was_right: null, date: '20260518', logged_at: '2026-05-19T08:00:00Z' },
+  { status: 'cancelled',              motor_was_right: null, date: '20260518', logged_at: '2026-05-18T22:00:00Z' },
+];
+const sumMLB = msSummarizeSport(mlbMonitoring, 'MLB');
+eq(sumMLB.total_analyzed, 1, 'monitoring · MLB total_analyzed=1 (2 exclus)');
+eq(sumMLB.total_settled, 1, 'monitoring · MLB total_settled=1');
+eq(sumMLB.hit_rate, 100.0, 'monitoring · MLB hit_rate=100% (1/1 · cancelled+missed exclus)');
+eq(sumMLB.stats_excluded_count, 2, 'monitoring · MLB stats_excluded_count=2');
+
+// Test Tennis · invalid_match_mapping exclu
+const tennisMonitoring = [
+  { status: 'settled', motor_was_right: true,  motor_prob: 65, data_quality: 0.75, confidence_level: 'HIGH',
+    date: '20260518', logged_at: '2026-05-18T22:00:00Z',
+    betting_recommendations: { best: { type: 'MONEYLINE', edge: 7 }, recommendations: [{ type: 'MONEYLINE', edge: 7 }] } },
+  { status: 'invalid_match_mapping', missed_reason: 'event_id_missing',
+    motor_was_right: null, motor_prob: 55, date: '20260518', logged_at: '2026-05-18T22:00:00Z' },
+];
+const sumTennis = msSummarizeSport(tennisMonitoring, 'TENNIS');
+eq(sumTennis.total_analyzed, 1, 'monitoring · Tennis total_analyzed=1 (1 invalid exclus)');
+eq(sumTennis.hit_rate, 100.0, 'monitoring · Tennis hit_rate=100% (invalid_match_mapping jamais compté)');
+eq(sumTennis.stats_excluded_count, 1, 'monitoring · Tennis stats_excluded_count=1');
+
+// Back-compat · logs anciens sans status traités comme settled/pending via motor_was_right
+const backCompatLogs = [
+  { motor_was_right: true,  motor_prob: 65, date: '20260518', logged_at: '2026-05-18T22:00:00Z' },
+  { motor_was_right: false, motor_prob: 55, date: '20260518', logged_at: '2026-05-18T22:00:00Z' },
+  { motor_was_right: null,  motor_prob: null, date: '20260518', logged_at: '2026-05-18T22:00:00Z' }, // pending derivé
+];
+const sumBC = msSummarizeSport(backCompatLogs, 'NBA');
+eq(sumBC.total_analyzed, 3, 'monitoring · back-compat · 3 logs (rien exclus · pending dérivé OK)');
+eq(sumBC.total_settled, 2, 'monitoring · back-compat · 2 settled (1 pending dérivé exclu de settled)');
+eq(sumBC.stats_excluded_count, 0, 'monitoring · back-compat · 0 stats_excluded (pas de status exclu)');
+
+// ── 13. Tennis invalid_match_mapping · missed_reason='event_id_missing' (#1) ─
+console.log('13. Tennis invalid_match_mapping · missed_reason=event_id_missing');
+
+// Le code dans worker.js · _tennisBotSettleDate · doit poser missed_reason='event_id_missing'
+// quand match_confidence===LOW. On vérifie la présence de la constante dans le code source.
+const workerSrc = readFileSync(WORKER_PATH, 'utf8');
+assert(workerSrc.includes("log.missed_reason           = 'event_id_missing'"),
+  'worker.js · tennis LOW pose missed_reason=event_id_missing (validation ChatGPT #1)');
+
 // ── Résumé ────────────────────────────────────────────────────────────────────
 console.log('');
 console.log(`Total · ${assertCount} assertions · ${failCount} fail`);
