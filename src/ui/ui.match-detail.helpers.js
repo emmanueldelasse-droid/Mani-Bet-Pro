@@ -93,6 +93,7 @@ export function formatRejection(reason) {
     DATA_QUALITY_BELOW_THRESHOLD:    'Qualité des données insuffisante',
     ROBUSTNESS_BELOW_THRESHOLD:      'Analyse trop instable',
     ABSENCES_NOT_CONFIRMED:          'Absences non confirmées',
+    MISSING_ABSENCES_PLAYOFF:        'Données blessures non confirmées (playoff)',
     SPORT_NOT_SUPPORTED_OR_DISABLED: 'Sport non activé',
     ENGINE_NOT_IMPLEMENTED:          'Moteur non implémenté',
     MISSING_PITCHER_DATA:            'Données pitchers manquantes',

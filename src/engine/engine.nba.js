@@ -62,8 +62,21 @@ export class EngineNBA {
 
     // ── require_absences_confirmed en playoffs ───────────────────────────────
     if (isPlayoff && phaseConfig.require_absences_confirmed && !matchData?.absences_confirmed) {
+      // MBP-NBA-PLAYOFF-GATE-LOG · trace explicite prod (Option A · audit
+      // ks7cN). Comportement métier inchangé · ce return reste identique ·
+      // on ajoute uniquement la visibilité du rejet et `rejection_reason`.
+      Logger.warn('NBA_PLAYOFF_GATE_BLOCKED', {
+        match_id:            matchData?.match_id ?? null,
+        home:                matchData?.home_season_stats?.name ?? null,
+        away:                matchData?.away_season_stats?.name ?? null,
+        phase,
+        absences_confirmed:  matchData?.absences_confirmed ?? false,
+        has_injury_report:   Boolean(matchData?.home_injuries || matchData?.away_injuries),
+        score_method:        'MISSING_ABSENCES_PLAYOFF',
+      });
       return {
         sport: 'NBA', score: null, score_method: 'MISSING_ABSENCES_PLAYOFF',
+        rejection_reason: 'MISSING_ABSENCES_PLAYOFF',
         signals: [], volatility: null, missing_variables: missing,
         missing_critical: missingCritical, uncalibrated_weights: [],
         variables_used: variables, weights_used: weights,
