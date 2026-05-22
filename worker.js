@@ -3372,6 +3372,12 @@ async function _runBotCron(env, forceRun = false) {
     skipped_game_ids: [],
     skipped_reason: [],
     phase_detected: null,
+    // MBP-NBA-PLAYOFF-GATE-LOG · compteur d'observation pure · combien de
+    // matchs auraient été bloqués par le gate frontend (playoffs +
+    // absences non confirmées). Le backend cron n'applique pas ce gate ·
+    // ce compteur ne change pas son comportement · permet juste l'audit
+    // CF Dashboard via grep `[BOT-CRON-LOG]`.
+    playoff_gate_blocked: 0,
   };
   console.log(`[BOT] Cron démarré — ${now.toISOString()}, date NBA (Paris): ${dateStr} · run=${cronRunId}`);
 
@@ -3555,6 +3561,12 @@ async function _runBotCron(env, forceRun = false) {
       log.status       = log.status ?? BOT_LOG_STATUS.PENDING;
       log.cron_run_id  = cronRunId;
       log.logged_at    = log.logged_at ?? new Date().toISOString();
+      // MBP-NBA-PLAYOFF-GATE-LOG · lire le flag éphémère puis le supprimer
+      // pour ne jamais le persister dans le KV. Observation pure · le
+      // backend n'applique pas le gate · le compteur ne change rien au
+      // comportement.
+      if (log._meta_playoff_gate_would_block) cronLog.playoff_gate_blocked++;
+      delete log._meta_playoff_gate_would_block;
       await _botSaveLog(env, log);
       logs.push(log);
       cronLog.games_analyzed++;
@@ -3753,6 +3765,12 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
     } catch { /* skip */ }
   }
 
+  // MBP-NBA-PLAYOFF-GATE-LOG · flag éphémère lu par _runBotCron pour
+  // incrémenter le compteur d'observation `playoff_gate_blocked`. Supprimé
+  // avant `_botSaveLog` · n'entre jamais dans le KV.
+  const _isPlayoffPhase = analysis.nba_phase === 'playoff' || analysis.nba_phase === 'playin';
+  const _metaPlayoffGateWouldBlock = _isPlayoffPhase && !matchData.absences_confirmed;
+
   return {
     // Identité
     logged_at:   new Date().toISOString(),
@@ -3762,6 +3780,7 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
     date:        dateStr,
     datetime:    match.datetime ?? null,
     nba_phase:   analysis.nba_phase ?? null,
+    _meta_playoff_gate_would_block: _metaPlayoffGateWouldBlock,
 
     // Analyse moteur complète
     motor_prob:            analysis.score !== null ? Math.round(analysis.score * 100) : null,

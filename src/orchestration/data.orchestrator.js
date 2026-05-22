@@ -181,6 +181,27 @@ export class DataOrchestrator {
       const mergedInjuryReport = _mergeInjuryReports(injuryReport, aiInjuries);
       store.set({ injuryReport: mergedInjuryReport });
 
+      // MBP-NBA-PLAYOFF-GATE-LOG · trace explicite quand ESPN ET Claude sont
+      // tous deux vides. Permet de différencier en prod · "API cassée" vs
+      // "aucune blessure" vs "Claude vide" vs "timeout". Aucun changement
+      // métier · sert uniquement à l'audit.
+      const _espnTeamsCount = injuryReport && injuryReport.by_team
+        ? Object.keys(injuryReport.by_team).length : 0;
+      const _aiByTeam = aiInjuries && aiInjuries.by_team
+        ? aiInjuries.by_team
+        : (aiInjuries && typeof aiInjuries === 'object' ? aiInjuries : null);
+      const _aiTeamsCount = _aiByTeam && typeof _aiByTeam === 'object'
+        ? Object.keys(_aiByTeam).length : 0;
+      if (_espnTeamsCount === 0 && _aiTeamsCount === 0) {
+        Logger.warn('INJURIES_EMPTY_BOTH_SOURCES', {
+          date,
+          espn_teams: _espnTeamsCount,
+          ai_teams:   _aiTeamsCount,
+          espn_report_present: injuryReport !== null,
+          ai_report_present:   aiInjuries !== null,
+        });
+      }
+
       // Pré-charger teamDetail pour tous les matchs (non bloquant)
       _preloadTeamDetails(matches).then(function(teamDetails) {
         store.set({ teamDetails });
@@ -875,6 +896,19 @@ async function _analyzeMatches(matches, recentForms, injuryReport, oddsCompariso
         }, 100);
         conclusive++;
       } else {
+        // MBP-NBA-PLAYOFF-GATE-LOG · trace match par match au lieu d'un
+        // simple compteur agrégé. Permet de grep en prod
+        // `NBA_MATCH_REJECTED_FOR_HISTORY` et retrouver le matchId + raison.
+        // Aucun changement comportement · history reste non poussée.
+        Logger.info('NBA_MATCH_REJECTED_FOR_HISTORY', {
+          match_id:         match.id,
+          home:             (match.home_team && match.home_team.name) || '-',
+          away:             (match.away_team && match.away_team.name) || '-',
+          confidence_level: analysis.confidence_level ?? null,
+          rejection_reason: analysis.rejection_reason ?? null,
+          score_method:     analysis.score_method ?? null,
+          decision:         analysis.decision ?? null,
+        });
         rejected++;
       }
 
