@@ -4549,12 +4549,28 @@ async function _runNightlySettle(env) {
     const mlbSummary    = await settlePendingBotLogs('MLB',    env, opts);
     const tennisSummary = await settlePendingBotLogs('TENNIS', env, opts);
 
+    // MBP-PLAYOFF-GATE-FIX (Fix #4) · recovery AUTOMATIQUE des matchs NBA joués
+    // absents des logs (trous du cron pré-match). Sans cela, recoverMissedGames
+    // n'était appelé que manuellement (/bot/recover-missed) → trous permanents
+    // (ex. finales de conférence · un seul match récupéré à la main). Crée
+    // uniquement des logs `missed_by_cron` (exclus des stats · STATS_EXCLUDED_
+    // STATUSES) · AUCUNE recommandation rétroactive. Scanne J-1..J-3 pour absorber
+    // la frontière de date Paris/US. Idempotent par match_id (already_logged).
+    const nbaRecover = [];
+    for (let back = 1; back <= 3; back++) {
+      const recDate = formatDateESPN(new Date(now.getTime() - back * 24 * 3600 * 1000));
+      try {
+        nbaRecover.push(await recoverMissedGames('NBA', recDate, env, opts));
+      } catch (err) { console.warn('[NIGHTLY RECOVER] NBA', recDate, err.message); }
+    }
+
     await env.PAPER_TRADING.put(NIGHTLY_SETTLE_RUN_KEY, todayStr, { expirationTtl: 48 * 3600 });
     console.log('[NIGHTLY SETTLE]', JSON.stringify({
       cron_run_id: cronRunId,
       nba:    nbaSummary,
       mlb:    mlbSummary,
       tennis: tennisSummary,
+      nba_recover: nbaRecover,
     }));
   } catch (err) { console.warn('[NIGHTLY SETTLE] error:', err.message); }
 }

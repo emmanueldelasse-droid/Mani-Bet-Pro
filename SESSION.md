@@ -4,7 +4,15 @@
 `main` · auto-deploy CF/GH Pages (build f9cd992)
 
 ## En cours
-(rien · incident Playoff Gate clôturé · cf. ci-dessous)
+[P1] Fix #4 recovery auto cron nightly · MBP-PLAYOFF-GATE-FIX #4 · ⏳ DRAFT · merge BLOQUÉ tant que `[BOT-CRON-LOG]` post-15/05 non vérifié (cron vivant ?)
+- audit playoffs manquants · cause = `recoverMissedGames` jamais appelé par un cron (manuel-only via `/bot/recover-missed`) → trous permanents (finales de conférence)
+- correction `worker.js` · `_runNightlySettle` appelle `recoverMissedGames('NBA', J-1..J-3)` · crée logs `missed_by_cron` (exclus stats) · aucune reco rétroactive · idempotent par match_id
+- périmètre · `worker.js` · `_runNightlySettle` uniquement · aucun impact scoring/gate/calibration/settle existant
+- test · `scripts/test-nightly-recover.mjs` · 10 assertions (backfill, non-écrasement, idempotence multi-jours, hors-fenêtre)
+- régression · 0 fail sur 12 suites
+- garde-fou · Fix #4 vit DANS le cron `scheduled()` → si le cron est mort il ne s'exécute pas → ne peut PAS masquer un cron mort
+- pré-requis merge (contrainte ChatGPT) · vérifier dans CF logs que le cron tourne après le 15/05 · si vivant → GO · si mort → réparer le cron d'abord
+- ⚠️ vérification CF non exécutable en session (réseau bloqué) · à faire par le créateur
 
 ## Incident Playoff Gate · CLÔTURÉ (2026-06-02)
 Cause #3 confirmée via curl prod · `401873197` = `missed_by_cron` (motor_prob null · motor_was_right null · pas de confidence_level). Hypothèse cause #3 validée · aucun audit data-quality nécessaire.
@@ -88,5 +96,5 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
 - Décisions ADR · `docs/decisions/` (001 sécu · 002 NBA parity · 003 MLB proposed · 004 catchup · 005 NBA playoff gate observabilité)
 - Tests · `docs/tests/NBA_ENGINE_PARITY.md`
 
-## Tests automatisés · 948 assertions · 0 fail
-`scripts/test-{nba-engine-parity,nba-playoff-gate,data-quality-gate,bot-monitoring-summary,bot-bet-classifier,tennis-best-bets-summary,catchup-settle,audit-mlb-logs,merge-injury-reports,absences-confirmed-front,bot-log-status-ui}.mjs`
+## Tests automatisés · 958 assertions · 0 fail
+`scripts/test-{nba-engine-parity,nba-playoff-gate,data-quality-gate,bot-monitoring-summary,bot-bet-classifier,tennis-best-bets-summary,catchup-settle,audit-mlb-logs,merge-injury-reports,absences-confirmed-front,bot-log-status-ui,nightly-recover}.mjs`
