@@ -4,18 +4,22 @@
 `main` · auto-deploy CF/GH Pages (build f9cd992)
 
 ## En cours
-[P1] Fix #4 recovery auto cron nightly · MBP-PLAYOFF-GATE-FIX #4 · ⏳ DRAFT · merge BLOQUÉ tant que `[BOT-CRON-LOG]` post-15/05 non vérifié (cron vivant ?)
-- audit playoffs manquants · cause = `recoverMissedGames` jamais appelé par un cron (manuel-only via `/bot/recover-missed`) → trous permanents (finales de conférence)
-- correction `worker.js` · `_runNightlySettle` appelle `recoverMissedGames('NBA', J-1..J-3)` · crée logs `missed_by_cron` (exclus stats) · aucune reco rétroactive · idempotent par match_id
-- périmètre · `worker.js` · `_runNightlySettle` uniquement · aucun impact scoring/gate/calibration/settle existant
-- test · `scripts/test-nightly-recover.mjs` · 10 assertions (backfill, non-écrasement, idempotence multi-jours, hors-fenêtre)
-- régression · 0 fail sur 12 suites
-- garde-fou · Fix #4 vit DANS le cron `scheduled()` → si le cron est mort il ne s'exécute pas → ne peut PAS masquer un cron mort
-- pré-requis merge (contrainte ChatGPT) · vérifier dans CF logs que le cron tourne après le 15/05 · si vivant → GO · si mort → réparer le cron d'abord
-- ⚠️ vérification CF non exécutable en session (réseau bloqué) · à faire par le créateur
+[P2] Fix #5 (optionnel) · cause amont du raté pré-match NBA · NON démarré
+- symptôme · `bot_last_run` absente du KV (cron NBA pré-match `_runBotCron` n'écrit plus depuis >30h) alors que le nightly est vivant
+- pistes · date Paris vs slate US (`_botFormatDate` Paris vs `?dates=` ESPN US) · fenêtre 2h + run unique/jour (`BOT_RUN_KEY`) · filtre `already_final`
+- à arbitrer APRÈS observation d'1-2 nightly post-Fix#4 (les finales doivent réapparaître en `missed_by_cron`)
+- décision Fix #5 seulement si on veut l'analyse pré-match réelle des finales (pas juste le rattrapage)
+
+## Validation post-Fix#4 (à faire · prochain nightly ~10-11h UTC)
+- vérifier que les matchs playoffs manquants réapparaissent en `missed_by_cron` dans `/bot/logs`
+- `curl /bot/logs | jq '.stats.status_breakdown'` → `missed_by_cron` doit augmenter
+- `[NIGHTLY SETTLE]` doit contenir `nba_recover: [...]` avec `missed_added > 0`
 
 ## Incident Playoff Gate · CLÔTURÉ (2026-06-02)
 Cause #3 confirmée via curl prod · `401873197` = `missed_by_cron` (motor_prob null · motor_was_right null · pas de confidence_level). Hypothèse cause #3 validée · aucun audit data-quality nécessaire.
+
+Quatre causes traitées et mergées :
+- **Fix #4** · recovery auto dans `_runNightlySettle` (`recoverMissedGames` NBA J-1..J-3) · MERGÉ PR #215 (c221c28) · cron vivant confirmé KV `bot_nightly_settle_last_run=20260602`
 
 Trois causes traitées et mergées :
 - **Fix #1** · ESPN-null dans `_mergeInjuryReports` · MERGÉ PR #211 (094ad5b)
@@ -58,6 +62,8 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
 - prochaine étape · ChatGPT review formelle PR · validation créateur · monitoring prod 24h sur cas OKC vs SAS 18/05/2026
 
 ## Derniers PR mergés
+- #215 · Playoff Gate Fix #4 · recovery auto NBA dans nightly settle (c221c28)
+- #214 · docs · clôture incident Playoff Gate Fix #1/#2/#3 (e41ce43)
 - #213 · Playoff Gate Fix #3 · badge statuts logs recovery UI (5e3673b)
 - #212 · Playoff Gate Fix #2 · absences_confirmed front↔backend par équipe (c593e69)
 - #211 · Playoff Gate Fix #1 · `_mergeInjuryReports` ESPN-null utilise l'IA (094ad5b)
