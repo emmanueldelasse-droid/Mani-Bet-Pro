@@ -1,12 +1,13 @@
 # Mani Bet Pro · règles Claude (pointeur)
 
-Ce fichier est un pointeur. Toutes les règles détaillées sont dans `docs/project/`.
+Ce fichier est un pointeur. Gouvernance racine dans `GOVERNANCE.md` · `BOT_OBJECTIVE.md` · `PROJECT_RULES.md`. Règles détaillées dans `docs/project/`.
 
 ## Lecture obligatoire chaque session
-1. `SESSION.md` · état courant · pointeurs
-2. `docs/project/AI_WORKFLOW.md` · rôles · format réponses · communication
-3. `docs/project/MERGE_PROTOCOL.md` · workflow PR · GO/NOGO · checklist
-4. Selon tâche · `docs/project/` · `docs/engine/` · `docs/monitoring/` · `docs/decisions/`
+1. `GOVERNANCE.md` · gouvernance racine · rôles · priorités · interdictions · fallback · philosophie
+2. `BOT_OBJECTIVE.md` · objectif bot · scope · métriques cibles · statut paper trading
+3. `PROJECT_RULES.md` · workflow · logs · données réelles vs estimées · états dégradés · tests · mémoire · docs
+4. Selon tâche · fichiers spécialisés · `docs/project/` · `docs/engine/` · `docs/monitoring/` · `docs/decisions/`
+5. `SESSION.md` · état courant · pointeurs
 
 ## Règles immédiates rappel
 - Adresser ChatGPT (`Claude → ChatGPT`)
