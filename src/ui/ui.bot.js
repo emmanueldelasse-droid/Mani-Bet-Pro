@@ -23,6 +23,29 @@ import {
 
 const WORKER = API_CONFIG.WORKER_BASE_URL;
 
+// MBP-PLAYOFF-GATE-FIX (Fix #3 · mapping statuts logs · affichage seul) ·
+// statuts exclus des stats côté backend (STATS_EXCLUDED_STATUSES · worker.js).
+// Le front affichait ces logs comme « INCONCLUSIVE · En attente » faute de lire
+// `log.status` ; on leur donne désormais un badge dédié.
+const FRONT_EXCLUDED_STATUSES = new Set([
+  'missed_by_cron', 'recovery_failed', 'postponed', 'cancelled', 'invalid_match_mapping',
+]);
+const LOG_STATUS_LABEL = {
+  missed_by_cron:        'Match raté (cron) · exclu stats',
+  recovery_failed:       'Récupération échouée · exclu stats',
+  postponed:             'Reporté · exclu stats',
+  cancelled:             'Annulé · exclu stats',
+  invalid_match_mapping: 'Mapping incertain · exclu stats',
+};
+// Miroir front de `_botLogStatus` (worker.js) · back-compat logs pré-statut
+// (status dérivé de motor_was_right si le champ status est absent).
+export function _frontLogStatus(log) {
+  if (!log) return null;
+  if (log.status) return log.status;
+  return (log.motor_was_right === null || log.motor_was_right === undefined)
+    ? 'pending' : 'settled';
+}
+
 // ── POINT D'ENTRÉE ────────────────────────────────────────────────────────────
 
 export async function render(container, storeInstance) {
@@ -145,6 +168,7 @@ function _renderShell() {
       .bot-badge--wrong    { background: rgba(239,68,68,0.15);  color: var(--color-danger); }
       .bot-badge--pending  { background: rgba(107,114,128,0.15);color: var(--color-muted); }
       .bot-badge--phase    { background: rgba(168,85,247,0.15); color: var(--color-volatility); }
+      .bot-badge--excluded { background: rgba(245,158,11,0.15); color: var(--color-robust-mid); }
 
       .bot-log-body { padding: 0 16px 14px; display: flex; flex-direction: column; gap: 10px; }
 
@@ -255,9 +279,13 @@ async function _loadAndRender(container, filter = 'all') {
   }
 }
 
-function _filterLogs(logs, filter) {
+export function _filterLogs(logs, filter) {
   switch (filter) {
-    case 'pending':  return logs.filter(l => l.motor_was_right === null);
+    // MBP-PLAYOFF-GATE-FIX (Fix #3) · un log missed_by_cron/postponed/... a
+    // motor_was_right=null mais n'est PAS « en attente de résultat » · on
+    // l'exclut du filtre pending (cohérent avec STATS_EXCLUDED_STATUSES backend).
+    case 'pending':  return logs.filter(l => l.motor_was_right === null
+                                          && !FRONT_EXCLUDED_STATUSES.has(_frontLogStatus(l)));
     case 'settled':  return logs.filter(l => l.motor_was_right !== null);
     case 'edge':     return logs.filter(l => l.best_edge && l.best_edge >= 5 && (l.confidence_level ?? 'INCONCLUSIVE') !== 'INCONCLUSIVE');
     default:         return logs;
@@ -777,11 +805,15 @@ function _bindAnalysisPhaseToggle(analysisEl, allLogs, sport = 'nba') {
 
 // ── CARTE LOG ─────────────────────────────────────────────────────────────────
 
-function _renderLogCard(log) {
+export function _renderLogCard(log) {
   const motorProb  = log.motor_prob ?? null;
   const conf       = log.confidence_level ?? 'INCONCLUSIVE';
   const phase      = log.nba_phase ?? null;
   const isSettled  = log.motor_was_right !== null;
+  // MBP-PLAYOFF-GATE-FIX (Fix #3) · statut réel du log · les statuts recovery
+  // (missed_by_cron, postponed, ...) ne doivent PAS afficher INCONCLUSIVE/En attente.
+  const status     = _frontLogStatus(log);
+  const isExcluded = FRONT_EXCLUDED_STATUSES.has(status);
   // INCONCLUSIVE = bot n'a pas pu prédire (variables manquantes), score 50/50.
   // Le best_edge calculé contre la cote bookmaker est un artefact mathématique,
   // pas une vraie reco actionnable. On masque l'edge dans ce cas.
@@ -810,7 +842,9 @@ function _renderLogCard(log) {
           <div class="bot-log-date">${dateFmt}${timeFmt ? ' · ' + timeFmt : ''}${log.tournament ? ' · ' + log.tournament + (log.surface ? ' (' + surfaceFr(log.surface) + ')' : '') : ''}</div>
         </div>
         <div class="bot-log-badges">
-          ${phase ? `<span class="bot-badge bot-badge--phase">${phase}</span>` : ''}
+          ${isExcluded
+            ? `<span class="bot-badge bot-badge--excluded" title="Match non analysé avant le coup d'envoi · exclu des stats de calibration">${LOG_STATUS_LABEL[status] ?? status}</span>`
+            : `${phase ? `<span class="bot-badge bot-badge--phase">${phase}</span>` : ''}
           ${_renderConfBadge(conf)}
           ${_renderCategoryBadge(betCategory)}
           ${hasEdge ? `<span class="bot-badge bot-badge--edge" title="Le bot estime que la cote sous-évalue cette prédiction">+${log.best_edge}% cote sous-évaluée</span>` : ''}
@@ -818,7 +852,7 @@ function _renderLogCard(log) {
             ? log.motor_was_right
               ? `<span class="bot-badge bot-badge--right">✓ Correct</span>`
               : `<span class="bot-badge bot-badge--wrong">✗ Raté</span>`
-            : `<span class="bot-badge bot-badge--pending">En attente</span>`}
+            : `<span class="bot-badge bot-badge--pending">En attente</span>`}`}
         </div>
       </div>
 
