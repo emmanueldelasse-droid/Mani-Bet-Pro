@@ -34,12 +34,16 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
 - [ ] P1 · validation prod endpoints catchup PR #205 · 4 curl tests documentés `docs/monitoring/CATCHUP_SETTLE.md`
 - [ ] P1 · debug OKC vs SAS 18/05/2026 via `/bot/recover-missed?sport=NBA&date=20260518` (post-Option A · grep CF `NBA_PLAYOFF_GATE_BLOCKED`)
 - [ ] P1 · ChatGPT review + merge PR DECISION-005 NBA playoff gate observabilité
-- [ ] P1 · gouvernance projet · `GOVERNANCE.md` + `BOT_OBJECTIVE.md` + `PROJECT_RULES.md` à créer · ADR proposed · validation ChatGPT requise · structure ·
-  - racine `GOVERNANCE.md` pointeur 5 sections · règles absolues · priorités · interdictions · philosophie · fallback policy
-  - racine `BOT_OBJECTIVE.md` · objectif moteur · scope sports · cibles métriques
-  - racine `PROJECT_RULES.md` · workflow · logs · états dégradés · données réelles vs estimées
-  - réordonner `CLAUDE.md` lecture obligatoire · `GOVERNANCE → BOT_OBJECTIVE → PROJECT_RULES → fichiers spécialisés → SESSION.md`
-  - risque doublon · `docs/project/PROJECT_VISION.md` · `PROD_SAFETY_RULES.md` · `AI_WORKFLOW.md` existent · ChatGPT arbitre nouveau fichier vs enrichissement
+- [x] P1 · gouvernance projet · `GOVERNANCE.md` créé
+- [x] P1 · gouvernance projet · `BOT_OBJECTIVE.md` créé
+- [x] P1 · gouvernance projet · `PROJECT_RULES.md` créé
+- [x] P1 · `CLAUDE.md` réordonné
+- [x] P1 · ordre lecture officiel ·
+  - `GOVERNANCE.md`
+  - `BOT_OBJECTIVE.md`
+  - `PROJECT_RULES.md`
+  - fichiers spécialisés nécessaires
+  - `SESSION.md`
 - [ ] P2 · NBA recheck calib à 80+ logs (actuel 53 v6.79)
 - [ ] P2 · Tennis `/bot/calibration/analyze?sport=tennis` post 50+ logs v6.95+
 - [ ] P2 · logger `pitcher_data_source` MLB · `engine_version` global · `closing_odds`
@@ -48,6 +52,7 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
 - [ ] P3 · supprimer code mort (5 vars NBA orphelines · `engine.mlb.betting.js` · `NBA_INJURY_BASE` · `MLB_PITCHER_KV_KEY`)
 
 ## Documentation
+- Gouvernance racine · `GOVERNANCE.md` · `BOT_OBJECTIVE.md` · `PROJECT_RULES.md` (pointeurs · ordre lecture officiel via `CLAUDE.md`)
 - Vision & règles · `docs/project/` (PROJECT_VISION · ARCHITECTURE · AI_WORKFLOW · MERGE_PROTOCOL · STATS_RULES · PROD_SAFETY_RULES · CALIBRATION_RULES · EXPERIMENTAL_FEATURES)
 - Moteur · `docs/engine/` (BETTING_LOGIC · DATA_PIPELINE)
 - Monitoring · `docs/monitoring/` (KNOWN_ISSUES · PROVIDERS_MATRIX · ROUTES_AUDIT · BOT_MONITORING · CATCHUP_SETTLE)
