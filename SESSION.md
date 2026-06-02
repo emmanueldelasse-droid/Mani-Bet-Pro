@@ -4,18 +4,22 @@
 `main` · auto-deploy CF/GH Pages (build f9cd992)
 
 ## En cours
-[P1] Fix Playoff Gate ESPN-null · MBP-PLAYOFF-GATE-FIX
-- correction `_mergeInjuryReports` (`src/orchestration/data.orchestrator.js`)
-- données IA utilisées lorsque ESPN absent (synthèse base `{ by_team: {} }`)
+[P1] Fix Playoff Gate absences_confirmed front/back · MBP-PLAYOFF-GATE-FIX #2
+- alignement frontend/backend de `absences_confirmed` (`src/orchestration/data.orchestrator.js` · `buildRawData`)
+- définition par équipe : `homeInjuries || awayInjuries` (au lieu du booléen global `injuryReport !== null`)
 - Playoff Gate inchangé
 - scoring inchangé
 - calibration inchangée
 - branche · `claude/gallant-hamilton-XypYb`
-- test · `scripts/test-merge-injury-reports.mjs` · 17 assertions · 4 cas obligatoires + 2 gardes
-- périmètre · 1 fichier · `_mergeInjuryReports()` uniquement (+ export pour test, convention `_analyzeMLBMatch`)
-- régression · 0 fail sur 8 suites existantes · parité backend↔frontend 492 passed
-- impact attendu · Finales Est/Ouest réintègrent le History quand l'IA fournit les absences malgré ESPN vide
+- test · `scripts/test-absences-confirmed-front.mjs` · 9 assertions · 5 cas obligatoires + gardes + alignement
+- périmètre · 1 fichier · construction `absences_confirmed` NBA uniquement
+- régression · 0 fail sur 9 suites existantes · parité backend↔frontend 492 passed
+- cas témoin · OKC vs SAS (401873197) 20260518 · ne reste plus bloqué par divergence front/back
 - prochaine étape · ChatGPT review PR · validation finale avant merge (ne rien fusionner sans GO)
+
+[P1] Fix Playoff Gate ESPN-null · MBP-PLAYOFF-GATE-FIX #1 · MERGÉ PR #211 (094ad5b)
+- correction `_mergeInjuryReports` · données IA utilisées lorsque ESPN absent
+- Playoff Gate / scoring / calibration inchangés · test `scripts/test-merge-injury-reports.mjs` · 17 assertions
 
 MBP-AUDIT-MLB-REAL-LOGS · outillage audit empirique 421 logs MLB
 - branche · `claude/audit-mlb-real-logs`
@@ -72,5 +76,5 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
 - Décisions ADR · `docs/decisions/` (001 sécu · 002 NBA parity · 003 MLB proposed · 004 catchup · 005 NBA playoff gate observabilité)
 - Tests · `docs/tests/NBA_ENGINE_PARITY.md`
 
-## Tests automatisés · 919 assertions · 0 fail
-`scripts/test-{nba-engine-parity,nba-playoff-gate,data-quality-gate,bot-monitoring-summary,bot-bet-classifier,tennis-best-bets-summary,catchup-settle,audit-mlb-logs,merge-injury-reports}.mjs`
+## Tests automatisés · 928 assertions · 0 fail
+`scripts/test-{nba-engine-parity,nba-playoff-gate,data-quality-gate,bot-monitoring-summary,bot-bet-classifier,tennis-best-bets-summary,catchup-settle,audit-mlb-logs,merge-injury-reports,absences-confirmed-front}.mjs`
