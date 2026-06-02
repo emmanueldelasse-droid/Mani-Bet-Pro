@@ -265,7 +265,15 @@ export class DataOrchestrator {
       home_injuries:        homeInjuries && homeInjuries.length > 0 ? homeInjuries : null,
       away_injuries:        awayInjuries && awayInjuries.length > 0 ? awayInjuries : null,
       odds:                 match.odds || null,
-      absences_confirmed:   injuryReport !== null,
+      // MBP-PLAYOFF-GATE-FIX (Fix #2 · alignement front↔backend) · absences_confirmed
+      // défini PAR ÉQUIPE comme le backend (worker.js _botAnalyzeMatch:3654
+      // `homeInjuries !== null || awayInjuries !== null`). Le booléen global
+      // `injuryReport !== null` ne suffit plus : un rapport non-null mais sans
+      // absence exploitable home/away ⇒ false. Supprime la divergence MBP-A.2
+      // CRIT-1 (front masquait pendant que le backend scorait/loggait).
+      // Playoff Gate, scoring, confidence, calibration : inchangés.
+      absences_confirmed:   !!((homeInjuries && homeInjuries.length > 0) ||
+                               (awayInjuries && awayInjuries.length > 0)),
       advanced_stats:       advancedStats || null,
       market_odds:          null,
       home_back_to_back:    _isBackToBack(homeRecent, match.date || match.datetime),
