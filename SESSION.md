@@ -4,16 +4,22 @@
 `main` · auto-deploy CF/GH Pages (build f9cd992)
 
 ## En cours
-[P1] Fix #3 mapping statuts logs UI · MBP-PLAYOFF-GATE-FIX #3 · ⏳ PR ouverte · merge EN ATTENTE confirmation curl 401873197
-- audit cause #3 · le Bot tab lit `/bot/logs` (pas `mbp_store`) · `_renderLogCard` ignorait `log.status`
-- correction affichage `src/ui/ui.bot.js` · badge dédié pour missed_by_cron/recovery_failed/postponed/cancelled/invalid_match_mapping
-- `_filterLogs` pending exclut désormais ces statuts · helper `_frontLogStatus` (miroir `_botLogStatus` backend)
-- AUCUN impact scoring / gate / calibration / orchestrateur / backend / worker · affichage UI seul
-- branche · `claude/gallant-hamilton-XypYb`
-- test · `scripts/test-bot-log-status-ui.mjs` · 20 assertions
-- régression · 0 fail sur 11 suites
-- pré-requis merge · confirmer `status` réel de 401873197 via `curl /bot/logs` (cf. rapport audit cause #3)
-- prochaine étape · validation ChatGPT après curl · ne rien fusionner sans GO
+(rien · incident Playoff Gate clôturé · cf. ci-dessous)
+
+## Incident Playoff Gate · CLÔTURÉ (2026-06-02)
+Cause #3 confirmée via curl prod · `401873197` = `missed_by_cron` (motor_prob null · motor_was_right null · pas de confidence_level). Hypothèse cause #3 validée · aucun audit data-quality nécessaire.
+
+Trois causes traitées et mergées :
+- **Fix #1** · ESPN-null dans `_mergeInjuryReports` · MERGÉ PR #211 (094ad5b)
+- **Fix #2** · `absences_confirmed` aligné front↔backend par équipe · MERGÉ PR #212 (c593e69)
+- **Fix #3** · mapping statuts logs UI (`missed_by_cron`…) badge dédié · MERGÉ PR #213 (5e3673b)
+
+Synthèse cause #3 · le Bot tab lit `/bot/logs` en direct (pas `mbp_store` · clé réelle `mbp_state`) · `_renderLogCard` ignorait `log.status` → un log `missed_by_cron` s'affichait « INCONCLUSIVE · En attente ». Désormais badge « Match raté (cron) · exclu stats » + exclusion du filtre pending (`src/ui/ui.bot.js`). Aucun impact scoring/gate/calibration/backend.
+
+Validation prod post-déploiement (créateur · non exécutable en session · réseau bloqué) ·
+- purge cache navigateur + reload
+- `401873197` ne doit plus afficher « INCONCLUSIVE · EN ATTENTE »
+- doit afficher le badge « Match raté (cron) · Exclu stats »
 
 [P1] Fix Playoff Gate absences_confirmed front/back · MBP-PLAYOFF-GATE-FIX #2 · MERGÉ PR #212 (c593e69)
 - alignement frontend/backend de `absences_confirmed` (`src/orchestration/data.orchestrator.js` · `buildRawData`)
@@ -44,6 +50,9 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
 - prochaine étape · ChatGPT review formelle PR · validation créateur · monitoring prod 24h sur cas OKC vs SAS 18/05/2026
 
 ## Derniers PR mergés
+- #213 · Playoff Gate Fix #3 · badge statuts logs recovery UI (5e3673b)
+- #212 · Playoff Gate Fix #2 · absences_confirmed front↔backend par équipe (c593e69)
+- #211 · Playoff Gate Fix #1 · `_mergeInjuryReports` ESPN-null utilise l'IA (094ad5b)
 - #205 · MBP-CATCHUP-SETTLE · settlement + recovery + protection stats (commit efc8730)
 - #198 · MBP-monitoring · rapport read-only
 - #197 · MBP-P1 · gate data_quality
