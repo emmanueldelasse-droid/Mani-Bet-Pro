@@ -605,7 +605,7 @@ function _mergeBatchAiPlayers(target, players, homeAbv, awayAbv) {
  * @param {object|null} aiByTeam   - données IA { [espnTeamName]: [players] }
  * @returns {object|null} rapport fusionné
  */
-function _mergeInjuryReports(espnReport, aiData) {
+export function _mergeInjuryReports(espnReport, aiData) {
   // aiData peut être null, un objet { by_team, team_context, market_signal }
   // ou (ancien format) directement un objet by_team
   var aiByTeam     = null;
@@ -613,7 +613,24 @@ function _mergeInjuryReports(espnReport, aiData) {
   var aiMarketSig  = null;
 
   if (!aiData) return espnReport;
-  if (!espnReport || !espnReport.by_team) return espnReport;
+
+  // MBP-PLAYOFF-GATE-FIX (Fix #1 · audit Playoff Gate) · Quand ESPN est vide
+  // (espnReport null ou sans by_team) mais que l'IA fournit des absences, on
+  // synthétise une base vide { by_team: {} } pour que le merge ci-dessous
+  // construise un injuryReport NON-null depuis l'IA. Sans ce correctif, ESPN
+  // null court-circuitait le merge → injuryReport null → absences_confirmed
+  // false → Playoff Gate déclenché → match exclu du History.
+  // Comportements inchangés : ESPN valide (merge normal), ESPN null + IA sans
+  // joueurs (return espnReport), ESPN null + IA null (return null via L615).
+  if (!espnReport || !espnReport.by_team) {
+    var _aiByTeamRaw = (aiData.by_team && typeof aiData.by_team === 'object')
+      ? aiData.by_team
+      : aiData;
+    var _aiHasPlayers = _aiByTeamRaw && typeof _aiByTeamRaw === 'object'
+      && Object.keys(_aiByTeamRaw).length > 0;
+    if (!_aiHasPlayers) return espnReport;
+    espnReport = { by_team: {}, source: 'ai_only' };
+  }
 
   // Détecter le format : nouveau ({ by_team, team_context }) ou ancien (objet direct)
   if (aiData.by_team && typeof aiData.by_team === 'object') {
