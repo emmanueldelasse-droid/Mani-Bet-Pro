@@ -4,18 +4,21 @@
 `main` · auto-deploy CF/GH Pages (build f9cd992)
 
 ## En cours
-[P1] Fix Playoff Gate absences_confirmed front/back · MBP-PLAYOFF-GATE-FIX #2
+[P1] Fix #3 mapping statuts logs UI · MBP-PLAYOFF-GATE-FIX #3 · ⏳ PR ouverte · merge EN ATTENTE confirmation curl 401873197
+- audit cause #3 · le Bot tab lit `/bot/logs` (pas `mbp_store`) · `_renderLogCard` ignorait `log.status`
+- correction affichage `src/ui/ui.bot.js` · badge dédié pour missed_by_cron/recovery_failed/postponed/cancelled/invalid_match_mapping
+- `_filterLogs` pending exclut désormais ces statuts · helper `_frontLogStatus` (miroir `_botLogStatus` backend)
+- AUCUN impact scoring / gate / calibration / orchestrateur / backend / worker · affichage UI seul
+- branche · `claude/gallant-hamilton-XypYb`
+- test · `scripts/test-bot-log-status-ui.mjs` · 20 assertions
+- régression · 0 fail sur 11 suites
+- pré-requis merge · confirmer `status` réel de 401873197 via `curl /bot/logs` (cf. rapport audit cause #3)
+- prochaine étape · validation ChatGPT après curl · ne rien fusionner sans GO
+
+[P1] Fix Playoff Gate absences_confirmed front/back · MBP-PLAYOFF-GATE-FIX #2 · MERGÉ PR #212 (c593e69)
 - alignement frontend/backend de `absences_confirmed` (`src/orchestration/data.orchestrator.js` · `buildRawData`)
 - définition par équipe : `homeInjuries || awayInjuries` (au lieu du booléen global `injuryReport !== null`)
-- Playoff Gate inchangé
-- scoring inchangé
-- calibration inchangée
-- branche · `claude/gallant-hamilton-XypYb`
-- test · `scripts/test-absences-confirmed-front.mjs` · 9 assertions · 5 cas obligatoires + gardes + alignement
-- périmètre · 1 fichier · construction `absences_confirmed` NBA uniquement
-- régression · 0 fail sur 9 suites existantes · parité backend↔frontend 492 passed
-- cas témoin · OKC vs SAS (401873197) 20260518 · ne reste plus bloqué par divergence front/back
-- prochaine étape · ChatGPT review PR · validation finale avant merge (ne rien fusionner sans GO)
+- Playoff Gate / scoring / calibration inchangés · test `scripts/test-absences-confirmed-front.mjs` · 9 assertions
 
 [P1] Fix Playoff Gate ESPN-null · MBP-PLAYOFF-GATE-FIX #1 · MERGÉ PR #211 (094ad5b)
 - correction `_mergeInjuryReports` · données IA utilisées lorsque ESPN absent
@@ -76,5 +79,5 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
 - Décisions ADR · `docs/decisions/` (001 sécu · 002 NBA parity · 003 MLB proposed · 004 catchup · 005 NBA playoff gate observabilité)
 - Tests · `docs/tests/NBA_ENGINE_PARITY.md`
 
-## Tests automatisés · 928 assertions · 0 fail
-`scripts/test-{nba-engine-parity,nba-playoff-gate,data-quality-gate,bot-monitoring-summary,bot-bet-classifier,tennis-best-bets-summary,catchup-settle,audit-mlb-logs,merge-injury-reports,absences-confirmed-front}.mjs`
+## Tests automatisés · 948 assertions · 0 fail
+`scripts/test-{nba-engine-parity,nba-playoff-gate,data-quality-gate,bot-monitoring-summary,bot-bet-classifier,tennis-best-bets-summary,catchup-settle,audit-mlb-logs,merge-injury-reports,absences-confirmed-front,bot-log-status-ui}.mjs`
