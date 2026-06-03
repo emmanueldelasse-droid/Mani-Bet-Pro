@@ -4,11 +4,14 @@
 `main` · auto-deploy CF/GH Pages (build f9cd992)
 
 ## En cours
-[P2] Fix #5 (optionnel) · cause amont du raté pré-match NBA · NON démarré
-- symptôme · `bot_last_run` absente du KV (cron NBA pré-match `_runBotCron` n'écrit plus depuis >30h) alors que le nightly est vivant
-- pistes · date Paris vs slate US (`_botFormatDate` Paris vs `?dates=` ESPN US) · fenêtre 2h + run unique/jour (`BOT_RUN_KEY`) · filtre `already_final`
-- à arbitrer APRÈS observation d'1-2 nightly post-Fix#4 (les finales doivent réapparaître en `missed_by_cron`)
-- décision Fix #5 seulement si on veut l'analyse pré-match réelle des finales (pas juste le rattrapage)
+[P1] Fix #5 cron date prime-time NBA · MBP-PLAYOFF-GATE-FIX #5 · ⏳ DRAFT · merge BLOQUÉ jusqu'à preuve runtime
+- cause amont · `_runBotCron` interroge ESPN sur la date Paris (`_botFormatDate` Paris) alors qu'ESPN classe les matchs prime-time US sous la date US (= veille Paris) → `games_found=0` → matchs nuit (finales) jamais loggés pré-match → `bot_last_run` absente
+- correction `worker.js` · `_runBotCron` uniquement · fetch scoreboard date Paris **+** date Paris-1 · merge + dédup par `match_id`
+- périmètre · zone fetch (~ligne 3385) · aucun impact scoring/gate/calibration/confidence/recovery(Fix#4)/front/MLB/Tennis
+- test · `scripts/test-bot-cron-prime-date.mjs` · 6 assertions (prime-time slate Paris-1 analysé · non-régression après-midi · dédup · STATUS_FINAL filtré · fetch 2 dates)
+- régression · 0 fail sur 13 suites
+- merge BLOQUÉ jusqu'à preuve runtime (1 des 3) · `[BOT-CRON-LOG]` avec `games_found` cohérent · OU `bot_last_run` réapparue · OU match prime-time visible dans le Bot avant tip
+- ⚠️ preuve runtime non exécutable en session (réseau bloqué) · à fournir par le créateur · ne rien fusionner sans GO final ChatGPT
 
 ## Validation post-Fix#4 (à faire · prochain nightly ~10-11h UTC)
 - vérifier que les matchs playoffs manquants réapparaissent en `missed_by_cron` dans `/bot/logs`
@@ -102,5 +105,5 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
 - Décisions ADR · `docs/decisions/` (001 sécu · 002 NBA parity · 003 MLB proposed · 004 catchup · 005 NBA playoff gate observabilité)
 - Tests · `docs/tests/NBA_ENGINE_PARITY.md`
 
-## Tests automatisés · 958 assertions · 0 fail
-`scripts/test-{nba-engine-parity,nba-playoff-gate,data-quality-gate,bot-monitoring-summary,bot-bet-classifier,tennis-best-bets-summary,catchup-settle,audit-mlb-logs,merge-injury-reports,absences-confirmed-front,bot-log-status-ui,nightly-recover}.mjs`
+## Tests automatisés · 964 assertions · 0 fail
+`scripts/test-{nba-engine-parity,nba-playoff-gate,data-quality-gate,bot-monitoring-summary,bot-bet-classifier,tennis-best-bets-summary,catchup-settle,audit-mlb-logs,merge-injury-reports,absences-confirmed-front,bot-log-status-ui,nightly-recover,bot-cron-prime-date}.mjs`

@@ -3381,15 +3381,34 @@ async function _runBotCron(env, forceRun = false) {
   };
   console.log(`[BOT] Cron démarré — ${now.toISOString()}, date NBA (Paris): ${dateStr} · run=${cronRunId}`);
 
-  // Charger les matchs du jour
-  const espnData = await espnFetch(`${ESPN_SCOREBOARD}?dates=${dateStr}&limit=25`);
-  if (!espnData) {
+  // Charger les matchs du jour (date Paris) + la veille (date Paris-1).
+  // MBP-PLAYOFF-GATE-FIX (Fix #5) · ESPN classe les matchs prime-time US sous
+  // leur date US (ET), qui correspond à la VEILLE en heure de Paris (un match
+  // ~02h30 Paris = ~20h30 ET la veille). Sans le slate Paris-1, ces matchs
+  // (finales de conférence / Finales · quasi tous en prime-time) sont invisibles
+  // → games_found=0 → jamais loggés pré-match. On fusionne les 2 slates et on
+  // déduplique par match_id (id ESPN unique). Aucun autre comportement modifié.
+  const prevDateStr = _botFormatDate(new Date(now.getTime() - 24 * 3600 * 1000));
+  const [espnData, espnDataPrev] = await Promise.all([
+    espnFetch(`${ESPN_SCOREBOARD}?dates=${dateStr}&limit=25`),
+    espnFetch(`${ESPN_SCOREBOARD}?dates=${prevDateStr}&limit=25`),
+  ]);
+  if (!espnData && !espnDataPrev) {
     cronLog.error = 'espn_unavailable';
     console.warn('[BOT-CRON-LOG]', JSON.stringify(cronLog));
     return;
   }
 
-  const parsed = parseESPNMatches(espnData, dateStr);
+  // Fusion + déduplication par match_id (le slate du jour a priorité en cas de
+  // doublon · un match présent dans les 2 slates n'est traité qu'une fois).
+  const parsedCurr = espnData     ? parseESPNMatches(espnData,     dateStr)     : [];
+  const parsedPrev = espnDataPrev ? parseESPNMatches(espnDataPrev, prevDateStr) : [];
+  const byMatchId  = new Map();
+  for (const m of [...parsedCurr, ...parsedPrev]) {
+    if (!byMatchId.has(m.id)) byMatchId.set(m.id, m);
+  }
+  const parsed = [...byMatchId.values()];
+  cronLog.fetch_dates = [dateStr, prevDateStr];
   cronLog.espn_game_ids_seen = parsed.map(m => ({
     id: m.id,
     home: m.home_team?.name ?? null,
