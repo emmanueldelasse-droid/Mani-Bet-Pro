@@ -149,6 +149,21 @@ console output formaté (formatReport)
 ```
 Doc · `docs/monitoring/BOT_MONITORING.md`.
 
+## NBA Season ID · identité canonique
+
+Chaque match NBA porte désormais un `season_id` au format `YYYY-YY` dérivé de la **date réelle du match** :
+
+- octobre 2026 → `2026-27`
+- janvier 2027 → `2026-27`
+- mai 2027 → `2026-27`
+- septembre 2026 (offseason) → `2025-26`
+
+La même convention fournit `start_year` pour BallDontLie : `season=2026` correspond à `season_id=2026-27`.
+
+Propagation : ESPN parser → ProviderNBA → DataOrchestrator rawData → EngineNBA/EngineCore → Worker analysis → logs KV → export CSV. Le cache `bdl_recent_{teamId}_{season}` reste naturellement partitionné par année de début et stocke aussi `season_id` dans son payload.
+
+Correction associée : la saison BallDontLie est maintenant calculée depuis **la date analysée**, plus depuis l'horloge système. Cela évite par exemple qu'une analyse du 03/10/2026 lancée le 30/09/2026 charge encore les données de la saison 2025-26.
+
 ## NBA Data Quality · observation pondérée
 
 Le Worker conserve temporairement deux lectures distinctes afin de ne pas modifier le comportement prédictif sans preuve :
