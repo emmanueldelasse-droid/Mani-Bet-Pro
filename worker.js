@@ -173,6 +173,24 @@ function _botLogStatus(log) {
   return BOT_LOG_STATUS.SETTLED;
 }
 
+// Pré-saison NBA : visible et settlable en shadow mode, mais JAMAIS incluse
+// dans les métriques/calibrations de saison régulière.
+function _isNBAPreseasonLog(log) {
+  if (!log) return false;
+  const eventType = String(log.event_type ?? '').trim().toUpperCase();
+  const seasonType = Number(log.season_type);
+  return eventType === 'PRESEASON'
+    || seasonType === 1
+    || String(log.nba_phase ?? '').toLowerCase() === 'preseason';
+}
+
+function _isNBAStatsEligibleLog(log) {
+  if (!log) return false;
+  if (STATS_EXCLUDED_STATUSES.has(_botLogStatus(log))) return false;
+  if (_isNBAPreseasonLog(log)) return false;
+  return true;
+}
+
 // Helper · génère un cron_run_id court pour tracer les runs cron dans les logs
 function _botCronRunId() {
   const ts = Date.now().toString(36);
@@ -4032,7 +4050,8 @@ async function handleBotLogs(url, env, origin) {
     // MBP-CATCHUP-SETTLE · stats calculées UNIQUEMENT sur logs réellement
     // analysés avant le match · exclure missed_by_cron · postponed · cancelled ·
     // invalid_match_mapping · recovery_failed.
-    const statsEligible = logs.filter(l => !STATS_EXCLUDED_STATUSES.has(_botLogStatus(l)));
+    const preseasonExcluded = logs.filter(_isNBAPreseasonLog).length;
+    const statsEligible = logs.filter(_isNBAStatsEligibleLog);
     const settled   = statsEligible.filter(l => l.motor_was_right !== null && l.motor_was_right !== undefined);
     const correct   = settled.filter(l => l.motor_was_right === true);
     const hitRate   = settled.length > 0 ? Math.round(correct.length / settled.length * 1000) / 10 : null;
@@ -4084,6 +4103,8 @@ async function handleBotLogs(url, env, origin) {
         hit_rate:        hitRate,
         avg_edge:        avgEdge,
         brier_score:     brierScore,
+        stats_scope:      'REGULAR_AND_POSTSEASON',
+        preseason_logs_excluded: preseasonExcluded,
         status_breakdown: statusBreakdown,
         player_points: {
           total_recs: ppRecs.length,
@@ -4345,8 +4366,14 @@ async function handleBotCalibration(url, env, origin) {
         const raw = await env.PAPER_TRADING.get(key);
         if (!raw) return;
         const log = JSON.parse(raw);
-        // MBP-CATCHUP-SETTLE · calibration sur logs eligibles uniquement
-        if (STATS_EXCLUDED_STATUSES.has(_botLogStatus(log))) return;
+        // Calibration : statuts invalides exclus partout. Pour NBA, la
+        // pré-saison reste disponible en shadow mais n'entre jamais dans la
+        // calibration regular/postseason.
+        if (sport === 'nba') {
+          if (!_isNBAStatsEligibleLog(log)) return;
+        } else if (STATS_EXCLUDED_STATUSES.has(_botLogStatus(log))) {
+          return;
+        }
         if (log.motor_was_right === null || log.motor_was_right === undefined) return;
         logs.push(log);
       } catch (_) {}
@@ -4468,6 +4495,7 @@ async function handleBotCalibration(url, env, origin) {
     return jsonResponse({
       sport,
       logs_analyzed: logs.length,
+      stats_scope: sport === 'nba' ? 'REGULAR_AND_POSTSEASON' : 'ALL_ELIGIBLE',
       small_sample:  isSmall,
       small_sample_note: isSmall ? `Moins de ${MIN_SAMPLE} matchs — résultats à prendre avec prudence.` : null,
       global: {
@@ -5066,6 +5094,7 @@ async function handleBotLogsExportCSV(url, env, origin) {
       'est_total_nba', 'ou_line_nba', 'ou_diff_nba', 'ou_prediction_side', 'ou_prediction_edge',
     ];
     const colsNbaExtra = [
+      'season_type', 'event_type', 'nba_phase',
       'var_net_rating_diff', 'var_efg_diff', 'var_ts_pct', 'var_win_pct_diff',
       'var_home_away_split', 'var_recent_form_ema', 'var_absences_impact',
       'var_pace_diff', 'var_rest_days_diff', 'home_out', 'away_out',
