@@ -54,6 +54,15 @@ function isStatsExcluded(log) {
   return MONITORING_EXCLUDED_STATUSES.has(logStatus(log));
 }
 
+function isNBAPreseason(log) {
+  if (!log) return false;
+  const eventType = String(log.event_type ?? '').trim().toUpperCase();
+  const seasonType = Number(log.season_type);
+  return eventType === 'PRESEASON'
+    || seasonType === 1
+    || String(log.nba_phase ?? '').toLowerCase() === 'preseason';
+}
+
 // ── Helpers numériques ──────────────────────────────────────────────────────
 
 function pctRound(n) {
@@ -194,8 +203,14 @@ export function summarizeSport(rawLogs, sport) {
   // (missed_by_cron · recovery_failed · postponed · cancelled ·
   // invalid_match_mapping) ne doivent JAMAIS polluer hit_rate · Brier ·
   // ROI · calibration · status (LIMITER_OU_DESACTIVER vs SURVEILLER).
-  const excludedCount = rawTotal > 0 ? rawLogs.filter(isStatsExcluded).length : 0;
-  const logs = rawTotal > 0 ? rawLogs.filter(l => !isStatsExcluded(l)) : [];
+  const statusExcludedCount = rawTotal > 0 ? rawLogs.filter(isStatsExcluded).length : 0;
+  const preseasonExcludedCount = sport === 'NBA' && rawTotal > 0
+    ? rawLogs.filter(l => !isStatsExcluded(l) && isNBAPreseason(l)).length
+    : 0;
+  const logs = rawTotal > 0
+    ? rawLogs.filter(l => !isStatsExcluded(l) && !(sport === 'NBA' && isNBAPreseason(l)))
+    : [];
+  const excludedCount = statusExcludedCount + preseasonExcludedCount;
   const total = logs.length;
 
   if (total === 0) {
@@ -216,6 +231,8 @@ export function summarizeSport(rawLogs, sport) {
       by_bet_type:           {},
       data_quality:          { kind: sport === 'MLB' ? 'label' : 'numeric', counts: {}, average: null },
       stats_excluded_count:  excludedCount,
+      status_excluded_count: statusExcludedCount,
+      preseason_excluded_count: preseasonExcludedCount,
       status:                rawTotal === 0 ? 'NO_DATA' : 'NO_DATA',
     };
   }
@@ -259,7 +276,9 @@ export function summarizeSport(rawLogs, sport) {
     by_confidence:            summarizeByConfidence(sorted),
     by_bet_type:              summarizeByBetType(sorted),
     data_quality:             summarizeDataQuality(sorted, sport),
-    stats_excluded_count:     excludedCount,  // MBP-CATCHUP-SETTLE · audit · jamais inclus dans hit rate
+    stats_excluded_count:     excludedCount,  // statuts invalides + preseason NBA
+    status_excluded_count:    statusExcludedCount,
+    preseason_excluded_count: preseasonExcludedCount,
     status:                   'SURVEILLER',  // overridden below
   };
 
