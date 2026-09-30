@@ -38,6 +38,21 @@ Tailles d'échantillon · ordre de grandeur IC ·
 - Si `odds_at_analysis` indisponible · DIRE "ROI non calculable" · jamais extrapoler
 - Mise unitaire = 1 unité par pari (flat) · ne pas mélanger avec Kelly réel
 
+## Sémantique des probabilités et du marché NBA
+
+Toujours distinguer les champs suivants :
+
+- `model_raw_score` · sortie du moteur après ses règles internes (dont blessures/cap), **avant** incorporation du marché. Ce score est borné [0,1] mais n'est pas appelé probabilité calibrée.
+- `model_calibrated_prob` · réservé à une vraie calibration statistique validée out-of-sample. Tant qu'elle n'existe pas : `null`.
+- `decision_prob` · valeur effectivement utilisée par la décision après les garde-fous éventuels, dont market shrinkage historique.
+- `market_raw_prob` · probabilité implicite brute `1 / cote_décimale`, donc avec vig.
+- `market_fair_prob_no_vig` · probabilité implicite renormalisée après retrait du vig entre les deux côtés du même marché.
+- `expected_value` · `decision_prob × cote_décimale − 1`.
+- `edge` · champ legacy utilisé par les décisions actuelles ; ne pas changer sa formule sans PR/calibration dédiée.
+- `edge_no_vig` · mesure d'observation contre la probabilité fair no-vig ; elle ne modifie pas encore le gate.
+
+Règle : exposer une mesure no-vig/EV n'autorise pas à modifier automatiquement les seuils ou recommandations.
+
 ## CLV · Closing Line Value
 
 - Le CLV compare **le prix obtenu au moment du pari** au **prix de clôture du même marché**. Il ne compare jamais `motor_prob` au marché.
