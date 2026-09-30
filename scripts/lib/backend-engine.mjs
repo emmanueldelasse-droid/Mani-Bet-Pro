@@ -76,6 +76,7 @@ function loadBackendSandbox() {
   vm.runInContext(patched, sandbox, { filename: 'worker.js' });
 
   const required = [
+    'parseESPNMatches',
     '_botGetNBAPhase',
     '_botGetWeights',
     '_botExtractVariables',
@@ -109,7 +110,7 @@ function loadBackendSandbox() {
    * hardcodée côté test).
    */
   exported.getWeightsForPhase = (phase) => {
-    if (!['regular', 'playin', 'playoff', 'offseason'].includes(phase)) {
+    if (!['preseason', 'regular', 'playin', 'playoff', 'offseason'].includes(phase)) {
       throw new Error(`getWeightsForPhase · phase invalide · ${phase}`);
     }
     const original = sandbox._botGetNBAPhase;
