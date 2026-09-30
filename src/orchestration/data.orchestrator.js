@@ -258,6 +258,10 @@ export class DataOrchestrator {
 
     return {
       match_id:             match.id,
+      event_type:           match.event_type ?? null,
+      season_type:          match.season_type ?? null,
+      game_datetime:        match.datetime ?? null,
+      game_date:            match.date ?? null,
       home_season_stats:    Object.assign({}, match.home_season_stats || {}, { name: homeTeamName }),
       away_season_stats:    Object.assign({}, match.away_season_stats || {}, { name: awayTeamName }),
       home_recent:          homeRecent,

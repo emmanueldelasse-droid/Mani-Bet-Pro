@@ -396,17 +396,34 @@ export function getNBABdlIdFromEspn(espnName) {
  *
  * @returns {'regular' | 'playin' | 'playoff' | 'offseason'}
  */
-export function getNBAPhase(date = new Date()) {
-  const month = date.getMonth() + 1; // 1-12
-  const day   = date.getDate();
+export function getNBAPhase(date = new Date(), eventMeta = null) {
+  const rawSeasonType = eventMeta?.season_type ?? eventMeta?.seasonType ?? null;
+  const parsedSeasonType = Number(rawSeasonType);
+  const seasonType = Number.isFinite(parsedSeasonType) ? parsedSeasonType : null;
+  const eventType = String(eventMeta?.event_type ?? '').trim().toUpperCase();
 
+  if (seasonType === 1 || eventType === 'PRESEASON') return 'preseason';
+  if (seasonType === 2 || eventType === 'REGULAR') return 'regular';
+  if (seasonType === 4 || eventType === 'OFFSEASON') return 'offseason';
+
+  const refDate = date instanceof Date && !Number.isNaN(date.getTime()) ? date : new Date();
+  const month = refDate.getMonth() + 1; // 1-12
+  const day   = refDate.getDate();
+
+  if (seasonType === 3 || eventType === 'POSTSEASON' || eventType === 'PLAYIN' || eventType === 'PLAYOFF') {
+    if (eventType === 'PLAYIN') return 'playin';
+    if (eventType === 'PLAYOFF') return 'playoff';
+    return month === 4 && day < 22 ? 'playin' : 'playoff';
+  }
+
+  // Fallback historique si le provider n'a fourni aucun type d'événement.
   if (month >= 10) return 'regular';                          // oct-déc
   if (month <= 3)  return 'regular';                          // jan-mars
   if (month === 4 && day < 15) return 'regular';              // début avril
   if (month === 4 && day < 22) return 'playin';               // ~15-21 avril
-  if (month === 4 || month === 5) return 'playoff';            // fin avril + mai
+  if (month === 4 || month === 5) return 'playoff';           // fin avril + mai
   if (month === 6 && day <= 20) return 'playoff';             // début juin
-  return 'offseason';                                          // fin juin-sept
+  return 'offseason';                                         // fin juin-sept
 }
 
 /**
@@ -417,8 +434,8 @@ export function getNBAPhase(date = new Date()) {
  * @param {Date} [date] - date de référence (défaut : maintenant)
  * @returns {object} weights
  */
-export function getNBAWeights(date = new Date()) {
-  const phase     = getNBAPhase(date);
+export function getNBAWeights(date = new Date(), eventMeta = null) {
+  const phase     = getNBAPhase(date, eventMeta);
   const config    = SPORTS_CONFIG.NBA;
   const isPlayoff = phase === 'playin' || phase === 'playoff';
 
