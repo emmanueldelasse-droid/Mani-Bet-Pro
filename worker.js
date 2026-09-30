@@ -134,6 +134,8 @@ const BOT_LOG_PREFIX       = 'bot_log_';
 const BOT_RUN_KEY          = 'bot_last_run'; // telemetry only · no longer blocks a full day
 const NBA_CHECKPOINT_PREFIX = 'nba_checkpoint_';
 const NBA_CHECKPOINT_TTL_SECONDS = 72 * 3600;
+const NBA_CRON_HEARTBEAT_KEY = 'nba_cron_heartbeat_v1';
+const ODDS_SNAPSHOT_HEARTBEAT_KEY = 'odds_snapshot_heartbeat_v1';
 const NBA_CHECKPOINT_WINDOWS = Object.freeze([
   { id: 'H6', min_exclusive: 300, max_inclusive: 420 },
   { id: 'H4', min_exclusive: 180, max_inclusive: 300 },
@@ -3472,6 +3474,19 @@ async function _runBotCron(env, forceRun = false) {
   };
   console.log(`[BOT] Cron démarré — ${now.toISOString()}, date NBA (Paris): ${dateStr} · run=${cronRunId}`);
 
+  // Heartbeat indépendant de la présence de matchs/checkpoints.
+  // Permet à /health de distinguer "cron vivant mais rien à analyser" de
+  // "scheduler Cloudflare qui ne tourne plus".
+  if (env?.PAPER_TRADING) {
+    try {
+      await env.PAPER_TRADING.put(NBA_CRON_HEARTBEAT_KEY, JSON.stringify({
+        ran_at: now.toISOString(),
+        date: dateStr,
+        cron_run_id: cronRunId,
+      }), { expirationTtl: 3 * 3600 });
+    } catch (err) { console.warn('[BOT] heartbeat write error:', err.message); }
+  }
+
   // Charger les matchs du jour
   const espnData = await espnFetch(`${ESPN_SCOREBOARD}?dates=${dateStr}&limit=25`);
   if (!espnData) {
@@ -5061,7 +5076,18 @@ async function _runOddsSnapshot(env) {
     const nba2 = await snapshot(`${ESPN_SCOREBOARD}?dates=${tomorrow}&limit=25`, ODDS_SNAP_PREFIX);
     const mlb1 = await snapshot(`${ESPN_MLB_SCOREBOARD}?dates=${today}&limit=25`, ODDS_SNAP_PREFIX);
     const mlb2 = await snapshot(`${ESPN_MLB_SCOREBOARD}?dates=${tomorrow}&limit=25`, ODDS_SNAP_PREFIX);
-    console.log(`[ODDS SNAP] NBA=${nba1 + nba2} MLB=${mlb1 + mlb2}`);
+    const nbaCount = nba1 + nba2;
+    const mlbCount = mlb1 + mlb2;
+
+    try {
+      await env.PAPER_TRADING.put(ODDS_SNAPSHOT_HEARTBEAT_KEY, JSON.stringify({
+        ran_at: now.toISOString(),
+        nba_snapshots_written: nbaCount,
+        mlb_snapshots_written: mlbCount,
+      }), { expirationTtl: 60 * 60 });
+    } catch (err) { console.warn('[ODDS SNAP] heartbeat:', err.message); }
+
+    console.log(`[ODDS SNAP] NBA=${nbaCount} MLB=${mlbCount}`);
   } catch (err) { console.warn('[ODDS SNAP] error:', err.message); }
 }
 
