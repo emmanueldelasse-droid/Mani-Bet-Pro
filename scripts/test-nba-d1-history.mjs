@@ -25,6 +25,7 @@ const ROOT = resolve(__dirname, '..');
 const migrations = [
   '0001_nba_immutable_history.sql',
   '0002_nba_analysis_checkpoints.sql',
+  '0003_nba_verified_closing_line.sql',
 ].map(name => readFileSync(resolve(ROOT, 'migrations', name), 'utf8'));
 
 let assertions = 0;
@@ -190,6 +191,15 @@ logB.result_margin = 8;
 logB.result_total = 228;
 logB.motor_was_right = true;
 logB.settlement_source = 'cron_nightly';
+logB.clv_post_match = 3.4;
+logB.clv_status = 'AVAILABLE';
+logB.clv_method = 'TAKEN_PRICE_VS_CLOSING_PRICE';
+logB.closing_snapshot_at = '2026-10-20T23:15:00.000Z';
+logB.closing_snapshot_age_minutes = 15;
+logB.closing_source = 'espn_scoreboard';
+logB.closing_provider_name = 'DraftKings';
+logB.closing_home_ml = -120;
+logB.closing_away_ml = 105;
 await backend._botPersistSettlementD1(env, logB);
 
 let settlement = db.prepare(
@@ -197,6 +207,16 @@ let settlement = db.prepare(
 ).get('analysis-B');
 eq(settlement.result_home_score, 118, 'settlement inserted separately');
 eq(settlement.motor_was_right, 1, 'boolean settlement normalized to integer');
+eq(
+  db.prepare('SELECT clv_status, closing_snapshot_age_minutes, closing_source, closing_home_ml FROM nba_analysis_settlements WHERE analysis_id = ?').get('analysis-B'),
+  {
+    clv_status: 'AVAILABLE',
+    closing_snapshot_age_minutes: 15,
+    closing_source: 'espn_scoreboard',
+    closing_home_ml: -120,
+  },
+  'verified closing quote metadata persists with settlement'
+);
 
 logB.result_home_score = 119;
 logB.result_margin = 9;
