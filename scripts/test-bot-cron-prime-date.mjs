@@ -14,6 +14,7 @@
  *   3. Un match présent dans les DEUX slates n'est traité qu'UNE fois (dédup).
  *   4. Un match STATUS_FINAL (slate veille) est filtré (already_final).
  *   5. fetch sur 2 dates exactement : [Paris, Paris-1].
+ *   6. La date compacte du slate veille reste exploitable par le calcul de repos.
  *
  * Sandbox vm · pas de réseau · loaders stubbés · KV stub mémoire. Pas de secret.
  * Run · `node scripts/test-bot-cron-prime-date.mjs`  · Exit 0 OK · 1 sinon.
@@ -110,7 +111,12 @@ sb.handleNBAAIInjuriesBatch = async () => null;
 
 // _botAnalyzeMatch stubbé : enregistre les match_id atteints, ne sauvegarde rien
 const analyzed = [];
-sb._botAnalyzeMatch = async (match) => { analyzed.push(match.id); return null; };
+const analyzedMatches = [];
+sb._botAnalyzeMatch = async (match) => {
+  analyzed.push(match.id);
+  analyzedMatches.push(match);
+  return null;
+};
 
 const kv = makeKVStub();
 const env = { PAPER_TRADING: kv };
@@ -136,6 +142,18 @@ assert(!analyzed.includes('OLD_FINAL'), 'F4 · match STATUS_FINAL filtré (alrea
 
 // total : 3 matchs analysés (CURR_AFT, DUP_GAME, PRIME_NIGHT)
 eq(analyzed.length, 3, 'F · 3 matchs analysés au total');
+
+// 6. Le match prime-time conserve le slate US (veille Paris) pour les calculs
+// calendrier, tout en gardant son datetime réel. La date compacte YYYYMMDD doit
+// être parsable par _botComputeRestDays.
+const prime = analyzedMatches.find(m => m.id === 'PRIME_NIGHT');
+eq(prime?.date, '20260602', 'F6a · prime-time conserve la date du slate ESPN');
+eq(prime?.datetime, '2026-06-03T00:30:00Z', 'F6b · datetime réel prime-time conservé');
+eq(
+  sb._botComputeRestDays({ matches: [{ date: '2026-06-01' }] }, prime?.date),
+  0,
+  'F6c · YYYYMMDD parsé correctement · match du 02/06 après match du 01/06 = B2B (0 jour repos)',
+);
 
 // ── Bilan ───────────────────────────────────────────────────────────────────
 console.log(`\nbot cron prime-time date · Fix #5`);
