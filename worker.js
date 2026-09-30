@@ -4086,8 +4086,10 @@ async function _botPersistSettlementD1(env, log) {
         result_margin, result_total, motor_was_right,
         spread_was_right, ou_was_right, ou_model_was_right,
         clv_post_match, clv_status, clv_method, settlement_source,
+        closing_snapshot_at, closing_snapshot_age_minutes, closing_source,
+        closing_provider_name, closing_home_ml, closing_away_ml,
         payload_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(analysis_id) DO UPDATE SET
         status = excluded.status,
         settled_at = excluded.settled_at,
@@ -4104,6 +4106,12 @@ async function _botPersistSettlementD1(env, log) {
         clv_status = excluded.clv_status,
         clv_method = excluded.clv_method,
         settlement_source = excluded.settlement_source,
+        closing_snapshot_at = excluded.closing_snapshot_at,
+        closing_snapshot_age_minutes = excluded.closing_snapshot_age_minutes,
+        closing_source = excluded.closing_source,
+        closing_provider_name = excluded.closing_provider_name,
+        closing_home_ml = excluded.closing_home_ml,
+        closing_away_ml = excluded.closing_away_ml,
         payload_json = excluded.payload_json
     `;
 
@@ -4125,6 +4133,12 @@ async function _botPersistSettlementD1(env, log) {
       log.clv_status ?? null,
       log.clv_method ?? null,
       log.settlement_source ?? null,
+      log.closing_snapshot_at ?? null,
+      log.closing_snapshot_age_minutes ?? null,
+      log.closing_source ?? null,
+      log.closing_provider_name ?? null,
+      log.closing_home_ml ?? null,
+      log.closing_away_ml ?? null,
       _botD1Json(log),
     ).run();
 
