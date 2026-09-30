@@ -3682,8 +3682,8 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
     market_odds:         marketOdds,
     home_recent:         homeRecent,
     away_recent:         awayRecent,
-    home_back_to_back:   false,
-    away_back_to_back:   false,
+    home_back_to_back:   _botIsBackToBack(homeRecent, match.date ?? match.datetime),
+    away_back_to_back:   _botIsBackToBack(awayRecent, match.date ?? match.datetime),
     home_rest_days:      _botComputeRestDays(homeRecent, match.date ?? match.datetime),
     away_rest_days:      _botComputeRestDays(awayRecent, match.date ?? match.datetime),
     home_last5_avg_pts:  null,
@@ -5251,18 +5251,61 @@ const _BOT_NBA_TEAMS = {
 
 function _botGetTeamAbv(espnName) { return _BOT_NBA_TEAMS[espnName] ?? null; }
 
-// Calcule jours de repos entre le dernier match BDL et matchDate
-// Port de src/orchestration/data.orchestrator.js _computeRestDays
-function _botComputeRestDays(recentForm, matchDate) {
+// Parse une date de calendrier NBA en jour UTC, sans dépendre du parsing
+// implicite de Date. ESPN peut fournir YYYYMMDD alors que BDL renvoie YYYY-MM-DD.
+// On compare des JOURS de calendrier (pas des heures) pour éviter les effets DST/timezone.
+function _botParseScheduleDate(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+
+  let year, month, day;
+  const compact = /^(\d{4})(\d{2})(\d{2})$/.exec(s);
+  const dashed  = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+
+  if (compact) {
+    year = Number(compact[1]); month = Number(compact[2]); day = Number(compact[3]);
+  } else if (dashed) {
+    year = Number(dashed[1]); month = Number(dashed[2]); day = Number(dashed[3]);
+  } else {
+    const parsed = new Date(s);
+    if (isNaN(parsed.getTime())) return null;
+    year = parsed.getUTCFullYear();
+    month = parsed.getUTCMonth() + 1;
+    day = parsed.getUTCDate();
+  }
+
+  const ts = Date.UTC(year, month - 1, day);
+  const check = new Date(ts);
+  if (check.getUTCFullYear() !== year ||
+      check.getUTCMonth() + 1 !== month ||
+      check.getUTCDate() !== day) return null;
+  return ts;
+}
+
+function _botScheduleDayDiff(recentForm, matchDate) {
   if (!recentForm?.matches?.length || !matchDate) return null;
   const lastDate = recentForm.matches[0]?.date;
   if (!lastDate) return null;
-  const md = new Date(matchDate);
-  const ld = new Date(lastDate);
-  if (isNaN(md.getTime()) || isNaN(ld.getTime())) return null;
-  const diffDays = Math.floor((md.getTime() - ld.getTime()) / 86400000);
-  if (diffDays < 0) return null; // données incohérentes → quality MISSING
-  return Math.max(0, diffDays - 1);
+
+  const md = _botParseScheduleDate(matchDate);
+  const ld = _botParseScheduleDate(lastDate);
+  if (md === null || ld === null) return null;
+
+  const diffDays = Math.round((md - ld) / 86400000);
+  return diffDays < 0 ? null : diffDays;
+}
+
+// Calcule jours de repos entre le dernier match BDL et matchDate.
+// diff=1 => back-to-back => 0 jour de repos ; diff=2 => 1 jour de repos.
+function _botComputeRestDays(recentForm, matchDate) {
+  const diffDays = _botScheduleDayDiff(recentForm, matchDate);
+  return diffDays === null ? null : Math.max(0, diffDays - 1);
+}
+
+// Match courant joué le lendemain exact du dernier match connu.
+function _botIsBackToBack(recentForm, matchDate) {
+  const diffDays = _botScheduleDayDiff(recentForm, matchDate);
+  return diffDays === null ? null : diffDays === 1;
 }
 
 // BDL IDs — identiques à NBA_TEAMS dans sports.config.js
