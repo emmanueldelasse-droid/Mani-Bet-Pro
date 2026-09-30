@@ -1,0 +1,75 @@
+name: Regression tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: regression-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    name: Node regression suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run all offline regression suites
+        shell: bash
+        run: |
+          set -u -o pipefail
+
+          shopt -s nullglob
+          tests=(scripts/test-*.mjs)
+
+          if [ "${#tests[@]}" -eq 0 ]; then
+            echo "::error::No regression test found under scripts/test-*.mjs"
+            exit 1
+          fi
+
+          failures=0
+          passed=0
+
+          echo "## Regression test run" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Node: $(node --version)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Suites discovered: ${#tests[@]}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          for test_file in "${tests[@]}"; do
+            echo "::group::${test_file}"
+            if node "${test_file}"; then
+              echo "PASS  ${test_file}"
+              echo "- ✅ \`${test_file}\`" >> "$GITHUB_STEP_SUMMARY"
+              passed=$((passed + 1))
+            else
+              echo "::error file=${test_file}::Regression suite failed"
+              echo "- ❌ \`${test_file}\`" >> "$GITHUB_STEP_SUMMARY"
+              failures=$((failures + 1))
+            fi
+            echo "::endgroup::"
+          done
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Passed: ${passed}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Failed: ${failures}" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${failures}" -ne 0 ]; then
+            echo "::error::${failures} regression suite(s) failed"
+            exit 1
+          fi
