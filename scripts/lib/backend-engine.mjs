@@ -92,6 +92,8 @@ function loadBackendSandbox() {
     '_getAIPlayerPropsLines',
     '_botMatchPlayerPropsToLines',
     '_botBuildParlayRecs',
+    '_botSettleMarketRecommendations',
+    '_botSettlePlayerPointRecommendation',
     '_botComputeConfidence',
     '_botTennisConfidence',
     '_botEngineCompute',
