@@ -4006,6 +4006,14 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
     ou_model_was_right: null, // true/false — est_total_nba vs result_total (indép. de la reco)
     spread_was_right:  null,  // null si pas de reco spread, sinon true/false
     clv_post_match:    null,
+    clv_status:        'PENDING_CLOSING_ODDS',
+    clv_method:        null,
+    closing_snapshot_at: null,
+    closing_snapshot_age_minutes: null,
+    closing_source:    null,
+    closing_provider_name: null,
+    closing_home_ml:   null,
+    closing_away_ml:   null,
     settled_at:        null,
   };
 }
@@ -4541,6 +4549,26 @@ async function _botSettleDate(env, dateStr, options = {}) {
       const spreadWasRight = marketSettlement.spread_was_right;
       const ouWasRight     = marketSettlement.ou_was_right;
 
+      // Closing quote : dernier snapshot STRICTEMENT pré-tip.
+      // AVAILABLE uniquement si <= 20 min avant le tip, grâce au cron 15 min.
+      let closingInfo = {
+        status: 'UNAVAILABLE_NO_PRETIP_SNAPSHOT',
+        snapshot: null,
+        age_minutes: null,
+      };
+      try {
+        const rawClosing = await env.PAPER_TRADING.get(`${ODDS_SNAP_PREFIX}${result.id}`);
+        if (rawClosing) {
+          closingInfo = _botSelectClosingSnapshot(
+            JSON.parse(rawClosing),
+            log.datetime ?? result.datetime ?? null,
+            NBA_CLOSING_MAX_AGE_MINUTES,
+          );
+        }
+      } catch (err) {
+        console.warn(`[BOT] closing snapshot ${result.id}:`, err.message);
+      }
+
       let modelVsMarketAtAnalysisPts = null;
       if (log.motor_prob !== null && log.odds_at_analysis?.home_ml) {
         const ml = log.odds_at_analysis.home_ml;
@@ -4586,12 +4614,9 @@ async function _botSettleDate(env, dateStr, options = {}) {
       log.upset             = upset;
       log.ou_was_right      = ouWasRight;
       log.spread_was_right  = spreadWasRight;
-      // Pas de vraie closing quote capturée dans ce pipeline : ne jamais
-      // présenter un écart modèle↔marché d'analyse comme du CLV.
+      // L'écart modèle↔marché d'analyse reste séparé du CLV.
       log.model_vs_market_at_analysis_pts = modelVsMarketAtAnalysisPts;
-      log.clv_post_match    = null;
-      log.clv_method        = null;
-      log.clv_status        = 'UNAVAILABLE_NO_CLOSING_ODDS';
+      _botAttachClosingCLV(log, closingInfo);
       log.pp_recs_settled   = ppSettled;
       log.ml_recs_settled   = marketSettlement.moneyline_settled;
       log.spread_recs_settled = marketSettlement.spread_settled;
@@ -5562,6 +5587,8 @@ async function handleBotLogsExportCSV(url, env, origin) {
       'result_home_score', 'result_away_score', 'result_winner', 'result_margin', 'result_total',
       'motor_was_right', 'prob_delta_pts', 'upset', 'ou_was_right', 'ou_model_was_right', 'spread_was_right',
       'clv_post_match', 'clv_status', 'clv_method', 'model_vs_market_at_analysis_pts',
+      'closing_snapshot_at', 'closing_snapshot_age_minutes', 'closing_source',
+      'closing_provider_name', 'closing_home_ml', 'closing_away_ml',
       'est_total_nba', 'ou_line_nba', 'ou_diff_nba', 'ou_prediction_side', 'ou_prediction_edge',
     ];
     const colsNbaExtra = [
