@@ -70,9 +70,10 @@ Then apply to the remote database:
 npx wrangler d1 migrations apply manibetpro-history --remote
 ```
 
-Migration currently tracked:
+Migrations currently tracked:
 
-- `migrations/0001_nba_immutable_history.sql`
+- `migrations/0001_nba_immutable_history.sql` · tables append-only analysis + settlement
+- `migrations/0002_nba_analysis_checkpoints.sql` · métadonnées `checkpoint_id` / `checkpoint_minutes_to_tip`
 
 ## Rollout
 
