@@ -315,6 +315,8 @@ export class ProviderNBA {
         name:          m.name,
         status:        m.status,
         status_detail: m.status_detail,
+        season_type:   m.season_type ?? null,
+        event_type:    m.event_type ?? null,
         venue:         m.venue ?? null,
         source:        'espn',
         fetched_at:    m.fetched_at ?? new Date().toISOString(),
