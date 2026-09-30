@@ -6443,22 +6443,44 @@ function _botComputeMarketDivergence(score, matchData) {
   };
 }
 
+function _botSelectBestMoneylineExecutionBook(mktOdds, side) {
+  if (!mktOdds?.bookmakers?.length || !['HOME', 'AWAY'].includes(side)) return null;
+
+  const priority = ['pinnacle', 'winamax', 'betclic', 'unibet_eu', 'betsson', 'bet365'];
+  const priorityRank = key => {
+    const i = priority.indexOf(key);
+    return i === -1 ? 999 : i;
+  };
+  const _decAm = d => d >= 2 ? Math.round((d - 1) * 100) : Math.round(-100 / (d - 1));
+
+  let best = null;
+  for (const bk of mktOdds.bookmakers) {
+    const decimalOdds = Number(side === 'HOME' ? bk?.home_ml : bk?.away_ml);
+    if (!Number.isFinite(decimalOdds) || decimalOdds <= 1) continue;
+
+    const candidate = {
+      odds: _decAm(decimalOdds),
+      decimalOdds,
+      bookmaker: bk.title ?? bk.key ?? 'Unknown',
+      bookmaker_key: bk.key ?? null,
+      price_selection: 'BEST_AVAILABLE_MONEYLINE',
+    };
+
+    if (!best ||
+        decimalOdds > best.decimalOdds ||
+        (decimalOdds === best.decimalOdds &&
+         priorityRank(candidate.bookmaker_key) < priorityRank(best.bookmaker_key))) {
+      best = candidate;
+    }
+  }
+  return best;
+}
+
 function _botComputeBettingRecs(score, matchData, signals, marketDivergence) {
   const odds    = matchData?.odds ?? {};
   const mktOdds = matchData?.market_odds ?? null;
   const _decAm  = d => d >= 2 ? Math.round((d - 1) * 100) : Math.round(-100 / (d - 1));
   const _amProb = n => n != null ? (n > 0 ? 100 / (n + 100) : Math.abs(n) / (Math.abs(n) + 100)) : null;
-
-  const PRIORITY   = ['pinnacle', 'winamax', 'betclic', 'unibet_eu', 'bet365'];
-  const getBook    = (side) => {
-    if (!mktOdds?.bookmakers?.length) return null;
-    for (const key of PRIORITY) {
-      const bk    = mktOdds.bookmakers.find(b => b.key === key);
-      const odDec = bk ? (side === 'HOME' ? bk.home_ml : bk.away_ml) : null;
-      if (odDec && odDec > 1) return { odds: _decAm(odDec), decimalOdds: odDec, bookmaker: bk.title ?? bk.key };
-    }
-    return null;
-  };
 
   const homeML = odds.home_ml ?? (mktOdds?.home_ml_decimal ? _decAm(mktOdds.home_ml_decimal) : null);
   const awayML = odds.away_ml ?? (mktOdds?.away_ml_decimal ? _decAm(mktOdds.away_ml_decimal) : null);
@@ -6473,7 +6495,14 @@ function _botComputeBettingRecs(score, matchData, signals, marketDivergence) {
     const side        = edgeHome > 0 ? 'HOME' : 'AWAY';
     const absEdge     = Math.abs(edgeHome);
     if (absEdge >= 0.05) {
-      const bestBook  = getBook(side) ?? { odds: side === 'HOME' ? homeML : awayML, decimalOdds: null, bookmaker: 'ESPN' };
+      const bestBook  = _botSelectBestMoneylineExecutionBook(mktOdds, side)
+        ?? {
+          odds: side === 'HOME' ? homeML : awayML,
+          decimalOdds: null,
+          bookmaker: 'ESPN',
+          bookmaker_key: 'espn',
+          price_selection: 'REFERENCE_FALLBACK',
+        };
       const motorProb = side === 'HOME' ? score : 1 - score;
       const implied   = side === 'HOME' ? impliedHome : impliedAway;
       const kelly     = (() => {
@@ -6491,6 +6520,8 @@ function _botComputeBettingRecs(score, matchData, signals, marketDivergence) {
       recs.push({
         type: 'MONEYLINE', side,
         odds_line: bestBook.odds, odds_decimal: selectedDecimal ?? null, odds_source: bestBook.bookmaker,
+        odds_book_key: bestBook.bookmaker_key ?? null,
+        execution_price_selection: bestBook.price_selection ?? null,
         motor_prob: Math.round(motorProb * 100), implied_prob: Math.round(implied * 100),
         market_raw_prob: Math.round(implied * 10000) / 10000,
         market_fair_prob_no_vig: fairSide != null ? Math.round(fairSide * 10000) / 10000 : null,
