@@ -106,6 +106,12 @@ assert(
   '/health delegates to operational health handler'
 );
 
+// ── Health must stay read-only and network-free ──────────────────────────
+const healthStart = worker.indexOf('async function handleOperationalHealth');
+const routerStart = worker.indexOf('// ── ROUTER PRINCIPAL', healthStart);
+if (healthStart < 0 || routerStart < 0) throw new Error('handleOperationalHealth block not found');
+const healthBlock = worker.slice(healthStart, routerStart);
+
 const wrangler = readFileSync(resolve(ROOT, 'wrangler.jsonc'), 'utf8');
 assert(
   wrangler.includes('"binding": "CF_VERSION_METADATA"'),
@@ -123,12 +129,6 @@ assert(
   !healthBlock.includes("version: '6.85.0'"),
   'health no longer relies on stale hardcoded Worker version'
 );
-
-// ── Health must stay read-only and network-free ──────────────────────────
-const healthStart = worker.indexOf('async function handleOperationalHealth');
-const routerStart = worker.indexOf('// ── ROUTER PRINCIPAL', healthStart);
-if (healthStart < 0 || routerStart < 0) throw new Error('handleOperationalHealth block not found');
-const healthBlock = worker.slice(healthStart, routerStart);
 
 for (const forbidden of [
   'espnFetch(',
