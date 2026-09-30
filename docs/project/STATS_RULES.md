@@ -40,10 +40,14 @@ Tailles d'échantillon · ordre de grandeur IC ·
 
 ## CLV · Closing Line Value
 
-- Définition · `(motor_prob/100 − implied_closing) × 10000` (basis points)
-- Importance · prédicteur long-terme plus robuste que hit_rate sur petits samples
-- À logger en P2 · `closing_odds` au coup d'envoi (TODO `EXPERIMENTAL_FEATURES.md`)
-- Actuellement · `clv_post_match` calculé par log mais jamais agrégé en rapport
+- Le CLV compare **le prix obtenu au moment du pari** au **prix de clôture du même marché**. Il ne compare jamais `motor_prob` au marché.
+- Mesure de prix retenue · `CLV_price_% = (odds_taken_decimal / closing_odds_decimal − 1) × 100`.
+- Mesure complémentaire · `implied_prob_change_pts = implied_closing − implied_taken` en points de probabilité.
+- Positif = prix obtenu meilleur que le prix de clôture.
+- Un écart `motor_prob − implied_market` est un **model-vs-market gap**, pas du CLV.
+- Bot automatique · tant qu'aucune closing quote réelle n'est capturée avant tip-off, `clv_post_match=null` et `clv_status=UNAVAILABLE_NO_CLOSING_ODDS`.
+- Paper bet manuel · si `closing_odds` est fourni au settlement, le CLV de prix peut être calculé.
+- À implémenter ensuite · capture immuable d'une closing quote pré-tip avec bookmaker/référence et timestamp.
 
 ## Brier score · obligatoire par bucket motor_prob
 
