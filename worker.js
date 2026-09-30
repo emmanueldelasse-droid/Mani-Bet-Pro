@@ -3410,7 +3410,9 @@ async function _runBotCron(env, forceRun = false) {
     return true;
   });
   cronLog.games_after_filters = matches.length;
-  cronLog.phase_detected = typeof _botGetNBAPhase === 'function' ? _botGetNBAPhase() : null;
+  cronLog.phase_detected = typeof _botGetNBAPhase === 'function'
+    ? _botGetNBAPhase(matches[0] ?? null)
+    : null;
 
   if (!matches.length) {
     cronLog.skipped_reason.push('no_upcoming_matches');
@@ -3633,6 +3635,10 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
   // Construire matchData pour le moteur
   const matchData = {
     match_id:            match.id,
+    event_type:          match.event_type ?? null,
+    season_type:         match.season_type ?? null,
+    game_datetime:       match.datetime ?? null,
+    game_date:           match.date ?? null,
     home_season_stats:   Object.assign({}, match.home_season_stats ?? {}, {
       name: homeName,
       net_rating:        advanced[homeName]?.net_rating        ?? advanced[homeAbv]?.net_rating        ?? null,
@@ -3779,6 +3785,8 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
     away:        awayName,
     date:        dateStr,
     datetime:    match.datetime ?? null,
+    season_type: match.season_type ?? null,
+    event_type:  match.event_type ?? null,
     nba_phase:   analysis.nba_phase ?? null,
     _meta_playoff_gate_would_block: _metaPlayoffGateWouldBlock,
 
@@ -5183,10 +5191,43 @@ function _botComputeEMADiff(homeRecent, awayRecent, lambda = 0.85) {
   };
 }
 
-function _botGetNBAPhase() {
-  const now   = new Date();
-  const m     = now.getMonth() + 1;
-  const d     = now.getDate();
+function _botPhaseDate(matchData = null) {
+  const raw = matchData?.datetime ?? matchData?.game_datetime ?? matchData?.date ?? matchData?.game_date ?? null;
+  if (!raw) return new Date();
+
+  const s = String(raw).trim();
+  const parsed = /^\d{8}$/.test(s)
+    ? new Date(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}T00:00:00Z`)
+    : new Date(s);
+
+  return isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+function _botGetNBAPhase(matchData = null) {
+  const rawSeasonType = matchData?.season_type ?? matchData?.seasonType ?? null;
+  const parsedSeasonType = Number(rawSeasonType);
+  const seasonType = Number.isFinite(parsedSeasonType) ? parsedSeasonType : null;
+  const eventType = String(matchData?.event_type ?? '').trim().toUpperCase();
+
+  // Source primaire : type réel de l'événement ESPN.
+  if (seasonType === 1 || eventType === 'PRESEASON') return 'preseason';
+  if (seasonType === 2 || eventType === 'REGULAR') return 'regular';
+  if (seasonType === 4 || eventType === 'OFFSEASON') return 'offseason';
+
+  const now = _botPhaseDate(matchData);
+  const m   = now.getMonth() + 1;
+  const d   = now.getDate();
+
+  // ESPN regroupe Play-In + Playoffs sous POSTSEASON (type 3).
+  // La date DU MATCH sert seulement à distinguer ces deux sous-phases.
+  if (seasonType === 3 || eventType === 'POSTSEASON' || eventType === 'PLAYIN' || eventType === 'PLAYOFF') {
+    if (eventType === 'PLAYIN') return 'playin';
+    if (eventType === 'PLAYOFF') return 'playoff';
+    if (m === 4 && d < 22) return 'playin';
+    return 'playoff';
+  }
+
+  // Fallback historique uniquement si le provider n'a fourni aucun type.
   if (m >= 10 || m <= 3) return 'regular';
   if (m === 4 && d < 15)  return 'regular';
   if (m === 4 && d < 22)  return 'playin';
@@ -5195,8 +5236,8 @@ function _botGetNBAPhase() {
   return 'offseason';
 }
 
-function _botGetWeights() {
-  const phase      = _botGetNBAPhase();
+function _botGetWeights(matchData = null) {
+  const phase      = _botGetNBAPhase(matchData);
   const isPlayoff  = phase === 'playin' || phase === 'playoff';
   const weights    = isPlayoff ? {
     absences_impact: 0.20, recent_form_ema: 0.15, home_away_split: 0.14,
@@ -5415,7 +5456,7 @@ function _botComputeScore(variables, weights) {
 }
 
 function _botEngineCompute(matchData) {
-  const phaseConfig  = _botGetWeights();
+  const phaseConfig  = _botGetWeights(matchData);
   const { weights, phase, score_cap, ema_lambda: emaLambda } = phaseConfig;
 
   const variables    = _botExtractVariables(matchData, emaLambda);
@@ -6370,6 +6411,18 @@ function parseESPNMatches(data, dateStr) {
     const away        = competitors.find(c => c.homeAway === 'away');
     const odds        = competition.odds?.[0] ?? null;
 
+    // ESPN season type : 1=preseason · 2=regular · 3=postseason · 4=offseason.
+    // Conserver cette information évite de déduire la phase uniquement depuis
+    // l'horloge système.
+    const seasonTypeRaw = competition.seasonType ?? event.season?.type ?? null;
+    const seasonTypeNum = Number(seasonTypeRaw);
+    const seasonType = Number.isFinite(seasonTypeNum) ? seasonTypeNum : null;
+    const eventType = seasonType === 1 ? 'PRESEASON'
+      : seasonType === 2 ? 'REGULAR'
+      : seasonType === 3 ? 'POSTSEASON'
+      : seasonType === 4 ? 'OFFSEASON'
+      : 'UNKNOWN';
+
     const homeML = odds?.moneyline?.home?.close?.odds != null ? Number(odds.moneyline.home.close.odds) : null;
     const awayML = odds?.moneyline?.away?.close?.odds != null ? Number(odds.moneyline.away.close.odds) : null;
 
@@ -6402,6 +6455,8 @@ function parseESPNMatches(data, dateStr) {
       name:          event.name,
       status:        event.status?.type?.name   ?? null,
       status_detail: event.status?.type?.detail ?? null,
+      season_type:   seasonType,
+      event_type:    eventType,
       home_team:     parseESPNTeam(home),
       away_team:     parseESPNTeam(away),
       home_season_stats: parseESPNTeamStats(home),
