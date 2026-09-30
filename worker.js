@@ -3790,9 +3790,15 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
   const bestEdge  = bestRec?.edge ?? null;
 
   // Data quality
-  const totalVars    = Object.keys(analysis.variables_used ?? {}).length;
-  const missingCount = (analysis.missing_variables ?? []).length;
-  const dataQuality  = totalVars > 0 ? Math.round((1 - missingCount / totalVars) * 100) / 100 : null;
+  // `data_quality` reste STRICTEMENT le score historique utilisé par le gate.
+  // `data_quality_observed` ajoute une lecture pondérée non décisionnelle pour
+  // mesurer LOW_SAMPLE / ESTIMATED / PARTIAL / fraîcheur / fallback avant toute
+  // modification de seuil ou de calibration.
+  const dataQualityObserved = _botBuildDataQualitySnapshot(
+    analysis.variables_used ?? {},
+    analysis.missing_variables ?? [],
+  );
+  const dataQuality = dataQualityObserved.legacy_coverage_score;
 
   // Line movement snapshot (si historique dispo dans KV)
   let lineMovement = null;
@@ -3833,6 +3839,7 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
     score_method:          analysis.score_method,
     confidence_level:      _botComputeConfidence(analysis, dataQuality),
     data_quality:          dataQuality,
+    data_quality_observed: dataQualityObserved,
     missing_variables:     analysis.missing_variables ?? [],
     signals:               analysis.signals ?? [],
     variables_used:        analysis.variables_used ?? {},
@@ -6362,6 +6369,98 @@ function _botMatchPlayerPropsToLines(propsPrediction, linesMap, homeTeam, awayTe
       away_players: awayEnriched,
     },
     recommendations,
+  };
+}
+
+function _botNormalizeDataQualityLabel(rawQuality, value) {
+  if (value === null || value === undefined) return 'MISSING';
+
+  const q = String(rawQuality ?? '').trim().toUpperCase();
+  // Alias historique backend. "OK" signifiait seulement "valeur présente" ;
+  // pour l'observabilité pondérée on le traduit explicitement en VERIFIED.
+  if (q === 'OK') return 'VERIFIED';
+
+  const known = new Set([
+    'VERIFIED', 'WEIGHTED', 'PARTIAL', 'ESTIMATED', 'LOW_SAMPLE',
+    'UNCALIBRATED', 'INSUFFICIENT_SAMPLE', 'MISSING',
+  ]);
+  return known.has(q) ? q : 'UNKNOWN';
+}
+
+function _botBuildDataQualitySnapshot(variables, missingVariables = []) {
+  const QUALITY_SCORES = {
+    VERIFIED: 1.0,
+    WEIGHTED: 0.9,
+    PARTIAL: 0.6,
+    ESTIMATED: 0.5,
+    LOW_SAMPLE: 0.4,
+    UNCALIBRATED: 0.2,
+    INSUFFICIENT_SAMPLE: 0.1,
+    MISSING: 0.0,
+    UNKNOWN: 0.0,
+  };
+
+  const entries = Object.entries(variables ?? {});
+  const missingSet = new Set(Array.isArray(missingVariables) ? missingVariables : []);
+  const qualityCounts = {};
+  const breakdown = {};
+  const degradedVariables = [];
+  const fallbackVariables = [];
+  let weightedTotal = 0;
+  let timestamped = 0;
+
+  for (const [id, variable] of entries) {
+    const value = variable?.value ?? null;
+    const quality = _botNormalizeDataQualityLabel(variable?.quality, value);
+    const score = QUALITY_SCORES[quality] ?? 0;
+    const source = variable?.source ?? null;
+    const observedAt = variable?.fetched_at ?? variable?.as_of ?? variable?.updated_at ?? null;
+    const fallback = quality === 'PARTIAL' || quality === 'ESTIMATED' ||
+      String(source ?? '').toLowerCase().includes('proxy');
+
+    qualityCounts[quality] = (qualityCounts[quality] ?? 0) + 1;
+    weightedTotal += score;
+    if (observedAt) timestamped++;
+
+    if (score < 1) degradedVariables.push(id);
+    if (fallback) fallbackVariables.push(id);
+
+    breakdown[id] = {
+      quality,
+      raw_quality: variable?.quality ?? null,
+      score,
+      source,
+      fallback,
+      observed_at: observedAt,
+    };
+  }
+
+  const total = entries.length;
+  // IMPORTANT : ce score reproduit exactement la logique historique utilisée
+  // par le gate backend : seules les variables de missing_variables pénalisent.
+  const legacyCoverageScore = total > 0
+    ? Math.round((1 - missingSet.size / total) * 100) / 100
+    : null;
+  const weightedScore = total > 0
+    ? Math.round((weightedTotal / total) * 1000) / 1000
+    : null;
+
+  return {
+    schema_version: 'nba_dq_observation_v1',
+    legacy_coverage_score: legacyCoverageScore,
+    weighted_quality_score: weightedScore,
+    quality_counts: qualityCounts,
+    degraded_variables: degradedVariables,
+    fallback_variables: fallbackVariables,
+    freshness: {
+      timestamped_variables: timestamped,
+      variables_without_timestamp: Math.max(0, total - timestamped),
+      scoring_status: 'NOT_SCORED',
+    },
+    breakdown,
+    // Garde-fou explicite : le nouveau score est observationnel uniquement.
+    drives_decision: false,
+    decision_score_field: 'data_quality',
   };
 }
 

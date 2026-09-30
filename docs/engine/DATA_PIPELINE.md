@@ -149,6 +149,17 @@ console output formaté (formatReport)
 ```
 Doc · `docs/monitoring/BOT_MONITORING.md`.
 
+## NBA Data Quality · observation pondérée
+
+Le Worker conserve temporairement deux lectures distinctes afin de ne pas modifier le comportement prédictif sans preuve :
+
+- `data_quality` : **score historique de couverture**, utilisé actuellement par le gate de confiance. Une variable compte comme disponible tant qu'elle n'est pas dans `missing_variables`.
+- `data_quality_observed.weighted_quality_score` : **score pondéré d'observation**, aligné sur l'échelle frontend (`VERIFIED=1.0`, `WEIGHTED=0.9`, `PARTIAL=0.6`, `ESTIMATED=0.5`, `LOW_SAMPLE=0.4`, `UNCALIBRATED=0.2`, `INSUFFICIENT_SAMPLE=0.1`, `MISSING=0`).
+
+`data_quality_observed` expose aussi les variables dégradées, les fallbacks/proxies et la présence des timestamps. La fraîcheur est **mesurée mais non scorée** (`freshness.scoring_status=NOT_SCORED`).
+
+Garde-fou : `data_quality_observed.drives_decision=false`. Aucun poids, seuil, calibration ou règle de confiance n'est modifié par cette instrumentation. Le passage éventuel au score pondéré nécessite une analyse historique/time-split et une validation séparée.
+
 ## Effet MBP-P1 sur les logs (PR #197)
 
 Le gate `data_quality` faible (worker.js:5888 NBA · :9458 Tennis · :8424 MLB engine · :8336 MLB strikeouts) modifie le contenu des logs persistés ·
