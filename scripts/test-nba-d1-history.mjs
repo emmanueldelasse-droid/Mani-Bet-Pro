@@ -22,10 +22,10 @@ import { backend } from './lib/backend-engine.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
-const migration = readFileSync(
-  resolve(ROOT, 'migrations/0001_nba_immutable_history.sql'),
-  'utf8'
-);
+const migrations = [
+  '0001_nba_immutable_history.sql',
+  '0002_nba_analysis_checkpoints.sql',
+].map(name => readFileSync(resolve(ROOT, 'migrations', name), 'utf8'));
 
 let assertions = 0;
 let failures = 0;
@@ -65,7 +65,7 @@ function makeD1Adapter(db) {
 }
 
 const db = new DatabaseSync(':memory:');
-db.exec(migration);
+for (const migration of migrations) db.exec(migration);
 const d1 = makeD1Adapter(db);
 const kv = new MemoryKV();
 const env = { PAPER_TRADING: kv, MANI_HISTORY_DB: d1 };
@@ -83,6 +83,8 @@ function makeLog(id, bestEdge = 6.5) {
     home: 'Boston Celtics',
     away: 'New York Knicks',
     status: 'pending',
+    checkpoint_id: 'H2',
+    checkpoint_minutes_to_tip: 132,
     motor_prob: 58,
     model_raw_score: 0.57,
     decision_prob: 0.58,
@@ -122,6 +124,11 @@ eq(
   db.prepare('SELECT season_id FROM nba_analysis_history WHERE analysis_id = ?').get('analysis-A').season_id,
   '2026-27',
   'season_id retained in immutable history'
+);
+eq(
+  db.prepare('SELECT checkpoint_id, checkpoint_minutes_to_tip FROM nba_analysis_history WHERE analysis_id = ?').get('analysis-A'),
+  { checkpoint_id: 'H2', checkpoint_minutes_to_tip: 132 },
+  'checkpoint metadata retained in immutable history'
 );
 eq(
   JSON.parse(await kv.get('bot_log_ESPN_GAME_1')).analysis_id,
