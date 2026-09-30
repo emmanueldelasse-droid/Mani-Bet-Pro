@@ -5148,8 +5148,20 @@ function _botComputeRestDays(recentForm, matchDate) {
   if (!recentForm?.matches?.length || !matchDate) return null;
   const lastDate = recentForm.matches[0]?.date;
   if (!lastDate) return null;
-  const md = new Date(matchDate);
-  const ld = new Date(lastDate);
+
+  // parseESPNMatches propage la date du slate au format compact YYYYMMDD.
+  // new Date('20260602') est invalide en V8/Workers : parser explicitement ce
+  // format, tout en conservant le support ISO utilisé par BallDontLie.
+  const parseDate = (raw) => {
+    const s = String(raw ?? '').trim();
+    if (/^\d{8}$/.test(s)) {
+      return new Date(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}T00:00:00Z`);
+    }
+    return new Date(s);
+  };
+
+  const md = parseDate(matchDate);
+  const ld = parseDate(lastDate);
   if (isNaN(md.getTime()) || isNaN(ld.getTime())) return null;
   const diffDays = Math.floor((md.getTime() - ld.getTime()) / 86400000);
   if (diffDays < 0) return null; // données incohérentes → quality MISSING
