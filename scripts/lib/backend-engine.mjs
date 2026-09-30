@@ -98,6 +98,7 @@ function loadBackendSandbox() {
     '_botSettleMarketRecommendations',
     '_botSettlePlayerPointRecommendation',
     '_computePriceCLV',
+    '_botBuildDataQualitySnapshot',
     '_botComputeConfidence',
     '_botTennisConfidence',
     '_botEngineCompute',
