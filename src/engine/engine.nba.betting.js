@@ -78,7 +78,11 @@ export function computeBettingRecommendations(score, odds, matchData, variables,
 
       recs.push({
         type: 'MONEYLINE', label: 'Vainqueur du match', side,
-        odds_line: bestOdds, odds_source: bestBook?.bookmaker ?? 'DraftKings', odds_dk: dkOdds,
+        odds_line: bestOdds, odds_decimal: bestBook?.decimalOdds ?? null,
+        odds_source: bestBook?.bookmaker ?? 'DraftKings',
+        odds_book_key: bestBook?.bookmakerKey ?? null,
+        execution_price_selection: bestBook?.priceSelection ?? 'REFERENCE_FALLBACK',
+        odds_dk: dkOdds,
         motor_prob: Math.round(motorProb * 100), implied_prob: Math.round(bestImplied * 100),
         edge: Math.round(Math.abs(realEdge) * 100),
         confidence: edgeToConfidence(Math.abs(realEdge)),
@@ -306,6 +310,40 @@ export function getBestBookOdds(marketOdds, side, market) {
     return null;
   };
 
+  // MONEYLINE : toutes les offres portent sur le même événement binaire et sont
+  // directement comparables. Le prix d'exécution doit donc être le maximum
+  // décimal réellement disponible, pas le premier bookmaker d'une whitelist.
+  if (market === 'h2h') {
+    const rank = key => {
+      const i = PRIORITY.indexOf(key);
+      return i === -1 ? 999 : i;
+    };
+    let best = null;
+    for (const bk of marketOdds.bookmakers) {
+      const oddsDecimal = Number(_getOdds(bk));
+      if (!Number.isFinite(oddsDecimal) || oddsDecimal <= 1) continue;
+      const american = oddsDecimal >= 2
+        ? Math.round((oddsDecimal - 1) * 100)
+        : Math.round(-100 / (oddsDecimal - 1));
+      const candidate = {
+        odds: american,
+        decimalOdds: oddsDecimal,
+        bookmaker: bk.title ?? bk.key,
+        bookmakerKey: bk.key ?? null,
+        priceSelection: 'BEST_AVAILABLE_MONEYLINE',
+      };
+      if (!best ||
+          oddsDecimal > best.decimalOdds ||
+          (oddsDecimal === best.decimalOdds &&
+           rank(candidate.bookmakerKey) < rank(best.bookmakerKey))) {
+        best = candidate;
+      }
+    }
+    return best;
+  }
+
+  // Spread / total : conserver la logique historique tant qu'on ne compare pas
+  // explicitement des prix associés à la MÊME ligne.
   for (const key of PRIORITY) {
     const bk = marketOdds.bookmakers.find(b => b.key === key);
     if (!bk) continue;
