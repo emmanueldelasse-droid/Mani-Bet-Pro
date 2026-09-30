@@ -43,8 +43,18 @@ export class EngineNBA {
    * @returns {EngineResult}
    */
   static compute(matchData, customWeights = null) {
-    // ── Phase NBA → poids + config adaptés ──────────────────────────────────
-    const phaseConfig = getNBAWeights();
+    // ── Phase NBA → type réel du match d'abord, calendrier en fallback ──────
+    const rawPhaseDate = matchData?.datetime ?? matchData?.game_datetime ?? matchData?.date ?? matchData?.game_date ?? null;
+    let phaseDate = new Date();
+    if (rawPhaseDate) {
+      const s = String(rawPhaseDate).trim();
+      const parsed = /^\d{8}$/.test(s)
+        ? new Date(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}T00:00:00Z`)
+        : new Date(s);
+      if (!Number.isNaN(parsed.getTime())) phaseDate = parsed;
+    }
+
+    const phaseConfig = getNBAWeights(phaseDate, matchData);
     const weights     = customWeights ?? phaseConfig.weights;
     const phase       = phaseConfig.phase;
     const isPlayoff   = phase === 'playin' || phase === 'playoff';
