@@ -20,6 +20,6 @@
     "nodejs_compat"
   ],
   "triggers": {
-    "crons": ["0 * * * *"]
+    "crons": ["0 * * * *", "*/15 * * * *"]
   }
 }
