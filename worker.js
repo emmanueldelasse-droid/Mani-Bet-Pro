@@ -4965,13 +4965,13 @@ async function _runNightlySettle(env) {
   } catch (err) { console.warn('[NIGHTLY SETTLE] error:', err.message); }
 }
 
-// ── LINE MOVEMENT TRACKING ────────────────────────────────────────────────────
-// Snapshot horaire des cotes ESPN (NBA + MLB) pour détecter les mouvements.
-// Sharp money = ligne qui bouge vite & contre l'argent public. Signal prédictif.
-// Clé KV : odds_snap_{matchId} → array [{ t, home_ml, away_ml, spread, total }]
-// Tronqué à 48 points (2 jours × 24 h) + TTL 72h.
+// ── LINE MOVEMENT + CLOSING PRICE TRACKING ───────────────────────────────────
+// Snapshot ESPN toutes les 15 min via cron dédié.
+// Clé KV : odds_snap_{matchId} → array [{ t, home_ml, away_ml, spread, total, ... }]
+// 192 points = 48h × 4 snapshots/h. TTL 72h.
 const ODDS_SNAP_PREFIX  = 'odds_snap_';
-const ODDS_SNAP_MAX_PTS = 48;
+const ODDS_SNAP_MAX_PTS = 192;
+const NBA_CLOSING_MAX_AGE_MINUTES = 20;
 
 async function _runOddsSnapshot(env) {
   if (!env.PAPER_TRADING) return;
@@ -4998,11 +4998,14 @@ async function _runOddsSnapshot(env) {
           const raw  = await env.PAPER_TRADING.get(key);
           const arr  = raw ? JSON.parse(raw) : [];
           arr.push({
-            t:        now.toISOString(),
-            home_ml:  homeML,
-            away_ml:  awayML,
-            spread:   odds.spread ?? null,
-            total:    odds.overUnder ?? null,
+            t:             now.toISOString(),
+            home_ml:       homeML,
+            away_ml:       awayML,
+            spread:        odds.spread ?? null,
+            total:         odds.overUnder ?? null,
+            source:        'espn_scoreboard',
+            provider_name: odds.provider?.name ?? null,
+            event_status:  event.status?.type?.name ?? null,
           });
           if (arr.length > ODDS_SNAP_MAX_PTS) arr.splice(0, arr.length - ODDS_SNAP_MAX_PTS);
           await env.PAPER_TRADING.put(key, JSON.stringify(arr), { expirationTtl: 72 * 3600 });
@@ -5383,6 +5386,111 @@ async function handleOddsHistory(url, env, origin) {
       movement:   _computeLineMovement(arr),
     }, 200, origin);
   } catch (err) { return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin); }
+}
+
+function _botSelectClosingSnapshot(arr, gameDatetime, maxAgeMinutes = NBA_CLOSING_MAX_AGE_MINUTES) {
+  if (!Array.isArray(arr) || !gameDatetime) {
+    return { status: 'UNAVAILABLE_NO_PRETIP_SNAPSHOT', snapshot: null, age_minutes: null };
+  }
+
+  const tipMs = new Date(gameDatetime).getTime();
+  if (!Number.isFinite(tipMs)) {
+    return { status: 'UNAVAILABLE_INVALID_GAME_DATETIME', snapshot: null, age_minutes: null };
+  }
+
+  const candidates = arr
+    .map(s => ({ ...s, _ts: new Date(s?.t ?? '').getTime() }))
+    .filter(s =>
+      Number.isFinite(s._ts) &&
+      s._ts <= tipMs &&
+      (s.home_ml != null || s.away_ml != null || s.spread != null || s.total != null)
+    )
+    .sort((a, b) => b._ts - a._ts);
+
+  if (!candidates.length) {
+    return { status: 'UNAVAILABLE_NO_PRETIP_SNAPSHOT', snapshot: null, age_minutes: null };
+  }
+
+  const chosen = candidates[0];
+  const ageMinutes = Math.round(((tipMs - chosen._ts) / 60000) * 10) / 10;
+  const snapshot = { ...chosen };
+  delete snapshot._ts;
+
+  if (ageMinutes > maxAgeMinutes) {
+    return {
+      status: 'UNAVAILABLE_CLOSING_SNAPSHOT_STALE',
+      snapshot,
+      age_minutes: ageMinutes,
+      max_age_minutes: maxAgeMinutes,
+    };
+  }
+
+  return {
+    status: 'AVAILABLE',
+    snapshot,
+    age_minutes: ageMinutes,
+    max_age_minutes: maxAgeMinutes,
+  };
+}
+
+function _botAttachClosingCLV(log, closingInfo) {
+  const info = closingInfo ?? { status: 'UNAVAILABLE_NO_PRETIP_SNAPSHOT', snapshot: null, age_minutes: null };
+
+  log.closing_snapshot_at = info.snapshot?.t ?? null;
+  log.closing_snapshot_age_minutes = info.age_minutes ?? null;
+  log.closing_source = info.snapshot?.source ?? null;
+  log.closing_provider_name = info.snapshot?.provider_name ?? null;
+  log.closing_home_ml = info.snapshot?.home_ml ?? null;
+  log.closing_away_ml = info.snapshot?.away_ml ?? null;
+
+  if (info.status !== 'AVAILABLE') {
+    log.clv_post_match = null;
+    log.clv_method = null;
+    log.clv_status = info.status;
+    return null;
+  }
+
+  if (log.best_market !== 'MONEYLINE') {
+    log.clv_post_match = null;
+    log.clv_method = null;
+    log.clv_status = 'UNAVAILABLE_MARKET_NOT_CAPTURED';
+    return null;
+  }
+
+  const recs = log.betting_recommendations?.recommendations ?? [];
+  const rec = recs.find(r =>
+    r?.type === 'MONEYLINE' &&
+    r?.has_value === true &&
+    r?.side === log.best_side
+  ) ?? null;
+
+  const taken = rec?.odds_line ?? null;
+  const closing = rec?.side === 'HOME'
+    ? info.snapshot?.home_ml
+    : rec?.side === 'AWAY'
+      ? info.snapshot?.away_ml
+      : null;
+
+  const clv = _computePriceCLV(taken, closing);
+  if (!clv) {
+    log.clv_post_match = null;
+    log.clv_method = null;
+    log.clv_status = 'UNAVAILABLE_ODDS_PAIR';
+    return null;
+  }
+
+  rec.closing_odds_american = closing;
+  rec.closing_snapshot_at = info.snapshot?.t ?? null;
+  rec.closing_snapshot_age_minutes = info.age_minutes ?? null;
+  rec.clv_price_pct = clv.price_ratio_pct;
+  rec.clv_implied_prob_pts = clv.implied_prob_change_pts;
+  rec.clv_status = 'AVAILABLE';
+  rec.clv_method = 'TAKEN_PRICE_VS_CLOSING_PRICE';
+
+  log.clv_post_match = clv.price_ratio_pct;
+  log.clv_method = 'TAKEN_PRICE_VS_CLOSING_PRICE';
+  log.clv_status = 'AVAILABLE';
+  return clv;
 }
 
 /**
