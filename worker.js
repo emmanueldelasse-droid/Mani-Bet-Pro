@@ -3823,8 +3823,13 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
     _meta_playoff_gate_would_block: _metaPlayoffGateWouldBlock,
 
     // Analyse moteur complète
+    // Back-compat motor_prob = décision actuelle après éventuel shrinkage marché.
     motor_prob:            analysis.score !== null ? Math.round(analysis.score * 100) : null,
     score_raw:             analysis.score,
+    model_raw_score:       analysis.model_raw_score ?? null,
+    model_calibrated_prob: analysis.model_calibrated_prob ?? null,
+    decision_prob:         analysis.decision_prob ?? analysis.score ?? null,
+    probability_status:    analysis.probability_status ?? 'UNAVAILABLE',
     score_method:          analysis.score_method,
     confidence_level:      _botComputeConfidence(analysis, dataQuality),
     data_quality:          dataQuality,
@@ -5172,7 +5177,8 @@ async function handleBotLogsExportCSV(url, env, origin) {
 
     const colsCommon = [
       'logged_at', 'settled_at', 'match_id', 'date', 'home', 'away',
-      'motor_prob', 'confidence_level', 'data_quality', 'best_edge', 'best_market', 'best_side',
+      'motor_prob', 'model_raw_score', 'model_calibrated_prob', 'decision_prob', 'probability_status',
+      'confidence_level', 'data_quality', 'best_edge', 'best_market', 'best_side',
       'result_home_score', 'result_away_score', 'result_winner', 'result_margin', 'result_total',
       'motor_was_right', 'prob_delta_pts', 'upset', 'ou_was_right', 'ou_model_was_right', 'spread_was_right',
       'clv_post_match', 'clv_status', 'clv_method', 'model_vs_market_at_analysis_pts',
@@ -5624,6 +5630,10 @@ function _botEngineCompute(matchData) {
 
   if (score !== null && score > score_cap) score = score_cap;
 
+  // Score modèle AVANT toute incorporation du marché. Ce n'est PAS encore une
+  // probabilité calibrée : garder le nom explicite pour validation future.
+  const modelRawScore = score;
+
   // Market divergence
   const marketDivergence = _botComputeMarketDivergence(score, matchData);
 
@@ -5664,6 +5674,10 @@ function _botEngineCompute(matchData) {
 
   return {
     score, score_method: score !== null ? 'WEIGHTED_SUM' : 'MISSING',
+    model_raw_score:       modelRawScore,
+    model_calibrated_prob: null,
+    decision_prob:         score,
+    probability_status:    score !== null ? 'UNCALIBRATED_SCORE' : 'UNAVAILABLE',
     signals:               computed.signals,
     variables_used:        variables,
     missing_variables:     missing,
@@ -5678,6 +5692,19 @@ function _botEngineCompute(matchData) {
   };
 }
 
+function _botNoVigPair(probA, probB) {
+  const a = Number(probA);
+  const b = Number(probB);
+  if (!(a > 0) || !(b > 0)) return null;
+  const sum = a + b;
+  if (!(sum > 0)) return null;
+  return {
+    fair_a: a / sum,
+    fair_b: b / sum,
+    overround: sum - 1,
+  };
+}
+
 function _botComputeMarketDivergence(score, matchData) {
   if (score == null) return null;
   const odds    = matchData?.odds ?? null;
@@ -5687,9 +5714,21 @@ function _botComputeMarketDivergence(score, matchData) {
   const homeProb = mktOdds?.home_ml_decimal ? _decProb(mktOdds.home_ml_decimal) : _amProb(odds?.home_ml);
   const awayProb = mktOdds?.away_ml_decimal ? _decProb(mktOdds.away_ml_decimal) : _amProb(odds?.away_ml);
   if (homeProb == null || awayProb == null) return null;
+  const fair = _botNoVigPair(homeProb, awayProb);
   const div  = Math.round(Math.max(Math.abs(score - homeProb), Math.abs((1 - score) - awayProb)) * 100);
   const flag = div >= 28 ? 'critical' : div >= 20 ? 'high' : div >= 12 ? 'medium' : 'low';
-  return { market_implied_home: Math.round(homeProb * 1000) / 1000, market_implied_away: Math.round(awayProb * 1000) / 1000, divergence_pts: div, flag };
+  return {
+    // Champs legacy conservés : le comportement de shrinkage reste strictement inchangé.
+    market_implied_home: Math.round(homeProb * 1000) / 1000,
+    market_implied_away: Math.round(awayProb * 1000) / 1000,
+    market_raw_prob_home: Math.round(homeProb * 10000) / 10000,
+    market_raw_prob_away: Math.round(awayProb * 10000) / 10000,
+    market_fair_prob_no_vig_home: fair ? Math.round(fair.fair_a * 10000) / 10000 : null,
+    market_fair_prob_no_vig_away: fair ? Math.round(fair.fair_b * 10000) / 10000 : null,
+    market_overround: fair ? Math.round(fair.overround * 10000) / 10000 : null,
+    divergence_pts: div,
+    flag,
+  };
 }
 
 function _botComputeBettingRecs(score, matchData, signals, marketDivergence) {
@@ -5717,6 +5756,7 @@ function _botComputeBettingRecs(score, matchData, signals, marketDivergence) {
   if (homeML != null && awayML != null) {
     const impliedHome = _amProb(homeML);
     const impliedAway = _amProb(awayML);
+    const fairPair    = _botNoVigPair(impliedHome, impliedAway);
     const edgeHome    = score - impliedHome;
     const side        = edgeHome > 0 ? 'HOME' : 'AWAY';
     const absEdge     = Math.abs(edgeHome);
@@ -5730,10 +5770,20 @@ function _botComputeBettingRecs(score, matchData, signals, marketDivergence) {
         return k <= 0 ? 0 : Math.min(k * 0.25, 0.05);
       })();
       const isContrarian = (side === 'HOME' && score <= 0.5) || (side === 'AWAY' && score > 0.5);
+      const selectedDecimal = bestBook.decimalOdds ?? _amToDecimal(bestBook.odds);
+      const fairSide = fairPair
+        ? (side === 'HOME' ? fairPair.fair_a : fairPair.fair_b)
+        : null;
+      const ev = selectedDecimal > 1 ? motorProb * selectedDecimal - 1 : null;
+
       recs.push({
         type: 'MONEYLINE', side,
-        odds_line: bestBook.odds, odds_source: bestBook.bookmaker,
+        odds_line: bestBook.odds, odds_decimal: selectedDecimal ?? null, odds_source: bestBook.bookmaker,
         motor_prob: Math.round(motorProb * 100), implied_prob: Math.round(implied * 100),
+        market_raw_prob: Math.round(implied * 10000) / 10000,
+        market_fair_prob_no_vig: fairSide != null ? Math.round(fairSide * 10000) / 10000 : null,
+        edge_no_vig: fairSide != null ? Math.round((motorProb - fairSide) * 10000) / 100 : null,
+        expected_value: ev != null ? Math.round(ev * 10000) / 10000 : null,
         edge: Math.round(absEdge * 100),
         has_value: true, kelly_stake: kelly,
         is_contrarian: isContrarian,
@@ -5874,12 +5924,13 @@ function _botPredictNBATotal(matchData) {
   const overImplied  = book.over_total  > 1 ? 1 / book.over_total  : null;
   const underImplied = book.under_total > 1 ? 1 / book.under_total : null;
   if (!overImplied || !underImplied) return { est_total: estTotal, line, recommendation: null, adjustments };
+  const fairPair = _botNoVigPair(overImplied, underImplied);
 
   const overEdge  = Math.round((overProb  - overImplied)  * 100);
   const underEdge = Math.round((underProb - underImplied) * 100);
   const best = overEdge >= underEdge
-    ? { side: 'OVER',  edge: overEdge,  prob: overProb,  implied: overImplied,  odds: book.over_total }
-    : { side: 'UNDER', edge: underEdge, prob: underProb, implied: underImplied, odds: book.under_total };
+    ? { side: 'OVER',  edge: overEdge,  prob: overProb,  implied: overImplied,  odds: book.over_total, fair: fairPair?.fair_a ?? null }
+    : { side: 'UNDER', edge: underEdge, prob: underProb, implied: underImplied, odds: book.under_total, fair: fairPair?.fair_b ?? null };
 
   const recommendation = best.edge >= 5 ? {
     type:         'OVER_UNDER',
@@ -5888,9 +5939,13 @@ function _botPredictNBATotal(matchData) {
     est_total:    estTotal,
     motor_prob:   Math.round(best.prob * 100),
     implied_prob: Math.round(best.implied * 100),
+    market_raw_prob: Math.round(best.implied * 10000) / 10000,
+    market_fair_prob_no_vig: best.fair != null ? Math.round(best.fair * 10000) / 10000 : null,
+    edge_no_vig: best.fair != null ? Math.round((best.prob - best.fair) * 10000) / 100 : null,
     odds_decimal: best.odds,
     odds_line:    _decToAm(best.odds),
     odds_source:  book.title ?? book.key,
+    expected_value: Math.round((best.prob * best.odds - 1) * 10000) / 10000,
     edge:         best.edge,
     has_value:    true,
   } : null;
@@ -6143,6 +6198,9 @@ function _botMatchPlayerPropsToLines(propsPrediction, linesMap, homeTeam, awayTe
 
       const overImplied  = line.over?.decimal  ? 1 / line.over.decimal  : null;
       const underImplied = line.under?.decimal ? 1 / line.under.decimal : null;
+      const fairPair = overImplied != null && underImplied != null
+        ? _botNoVigPair(overImplied, underImplied)
+        : null;
       const overEdge  = overImplied  != null ? Math.round((overProb  - overImplied)  * 100) : null;
       const underEdge = underImplied != null ? Math.round((underProb - underImplied) * 100) : null;
 
@@ -6158,6 +6216,11 @@ function _botMatchPlayerPropsToLines(propsPrediction, linesMap, homeTeam, awayTe
           diff:          Math.round(diff * 10) / 10,
           over_prob:     Math.round(overProb  * 1000) / 1000,
           under_prob:    Math.round(underProb * 1000) / 1000,
+          over_market_raw_prob:  overImplied != null ? Math.round(overImplied * 10000) / 10000 : null,
+          under_market_raw_prob: underImplied != null ? Math.round(underImplied * 10000) / 10000 : null,
+          over_market_fair_prob_no_vig:  fairPair ? Math.round(fairPair.fair_a * 10000) / 10000 : null,
+          under_market_fair_prob_no_vig: fairPair ? Math.round(fairPair.fair_b * 10000) / 10000 : null,
+          market_overround: fairPair ? Math.round(fairPair.overround * 10000) / 10000 : null,
           over_edge:     overEdge,
           under_edge:    underEdge,
         },
@@ -6197,8 +6260,14 @@ function _botMatchPlayerPropsToLines(propsPrediction, linesMap, homeTeam, awayTe
     if (!p.market) continue;
     const { over_edge: oe, under_edge: ue, line } = p.market;
     const best = (oe ?? -99) >= (ue ?? -99)
-      ? { side: 'OVER',  edge: oe, prob: p.market.over_prob,  decimal: p.market.over_decimal,  book: p.market.over_book }
-      : { side: 'UNDER', edge: ue, prob: p.market.under_prob, decimal: p.market.under_decimal, book: p.market.under_book };
+      ? {
+          side: 'OVER', edge: oe, prob: p.market.over_prob, decimal: p.market.over_decimal, book: p.market.over_book,
+          raw: p.market.over_market_raw_prob, fair: p.market.over_market_fair_prob_no_vig,
+        }
+      : {
+          side: 'UNDER', edge: ue, prob: p.market.under_prob, decimal: p.market.under_decimal, book: p.market.under_book,
+          raw: p.market.under_market_raw_prob, fair: p.market.under_market_fair_prob_no_vig,
+        };
     if (best.edge == null || !best.decimal) continue;
 
     // Confiance projection utilisée comme FILTRE (cf<0.50 → drop), pas comme
@@ -6224,9 +6293,13 @@ function _botMatchPlayerPropsToLines(propsPrediction, linesMap, homeTeam, awayTe
       projected_pts:     p.projected_pts,
       motor_prob:        Math.round(best.prob * 100),
       implied_prob:      Math.round((1 / best.decimal) * 100),
+      market_raw_prob:   best.raw ?? Math.round((1 / best.decimal) * 10000) / 10000,
+      market_fair_prob_no_vig: best.fair ?? null,
+      edge_no_vig:       best.fair != null ? Math.round((best.prob - best.fair) * 10000) / 100 : null,
       odds_decimal:      best.decimal,
       odds_line:         _decToAm(best.decimal),
       odds_source:       best.book,
+      expected_value:    Math.round((best.prob * best.decimal - 1) * 10000) / 10000,
       edge_raw:          best.edge,
       edge:              best.edge,
       kelly_stake:       kelly,
