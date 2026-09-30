@@ -234,7 +234,7 @@ function _renderMetricsCard(metrics, totalBets, pendingCount) {
 
     // Mise totale = clôturés seulement (les PENDING sont dans "engagés" de la bankroll)
     _metricCell('Mis\u00e9 (cl\u00f4tur\u00e9s)', totalStakedDisplay.toFixed(2) + ' \u20ac', 'var(--color-text)'),
-    _metricCell('Valeur prise vs cote finale', metrics.avg_clv !== null ? (metrics.avg_clv > 0 ? '+' : '') + metrics.avg_clv + '%' : '\u2014', metrics.avg_clv > 0 ? 'var(--color-success)' : 'var(--color-muted)', 'positif = pris bonne cote avant fermeture'),
+    _metricCell('CLV moyen', metrics.avg_clv !== null ? (metrics.avg_clv > 0 ? '+' : '') + metrics.avg_clv + '%' : '\u2014', metrics.avg_clv > 0 ? 'var(--color-success)' : 'var(--color-muted)', 'prix pris vs cote de clôture · positif = meilleure cote prise avant fermeture'),
     _metricCell('Pr\u00e9cision pr\u00e9dictions', metrics.brier_score !== null ? metrics.brier_score.toFixed(4) : '\u2014', 'var(--color-muted)', brierLabel),
 
     '</div>',
@@ -370,7 +370,9 @@ function _renderBetRow(bet, isFirstInGroup, groupSize) {
     '<span style="color:var(--color-text-secondary)">Mise : ' + bet.stake.toFixed(2) + ' \u20ac</span>',
     '<span style="color:var(--color-text-secondary)">Avantage : ' + bet.edge + '%</span>',
     bet.pnl !== null ? '<span style="color:' + (bet.pnl >= 0 ? 'var(--color-success)' : 'var(--color-danger)') + '">P&L : ' + (bet.pnl >= 0 ? '+' : '') + bet.pnl.toFixed(2) + ' \u20ac</span>' : '',
-    bet.clv !== null ? '<span style="color:var(--color-text-secondary)" title="Valeur prise vs cote finale · positif = pris bonne cote avant fermeture">Valeur cote : ' + (bet.clv > 0 ? '+' : '') + bet.clv + '%</span>' : '',
+    (bet.clv_status === 'AVAILABLE' && bet.clv_method === 'TAKEN_PRICE_VS_CLOSING_PRICE' && Number.isFinite(bet.clv_price_pct ?? bet.clv))
+      ? '<span style="color:var(--color-text-secondary)" title="CLV réel : prix pris vs cote de clôture · positif = meilleure cote prise avant fermeture">CLV : ' + ((bet.clv_price_pct ?? bet.clv) > 0 ? '+' : '') + (bet.clv_price_pct ?? bet.clv) + '%</span>'
+      : '',
     '</div>',
 
     // Settler automatique actif — pas de boutons manuels sauf via modal
