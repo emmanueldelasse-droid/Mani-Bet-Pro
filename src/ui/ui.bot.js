@@ -934,7 +934,10 @@ function _renderResultLine(log) {
   const homeName = log.p1 ?? log.home ?? '?';
   const awayName = log.p2 ?? log.away ?? '?';
   const winner   = log.result_winner === 'HOME' ? homeName : awayName;
-  const clv      = log.clv_post_match != null ? `CLV: ${log.clv_post_match > 0 ? '+' : ''}${log.clv_post_match}%` : '';
+  const hasVerifiedClv = log.clv_status === 'AVAILABLE' && !!log.clv_method;
+  const clv      = hasVerifiedClv && log.clv_post_match != null
+    ? `CLV: ${log.clv_post_match > 0 ? '+' : ''}${log.clv_post_match}%`
+    : '';
   const scorePart = isTennis
     ? ''
     : `Résultat : <span class="bot-result__score">${log.result_away_score ?? '?'} – ${log.result_home_score ?? '?'}</span> · `;
