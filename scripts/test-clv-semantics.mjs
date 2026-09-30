@@ -50,8 +50,11 @@ eq('invalid closing odds', backend._computePriceCLV(-110, 0), null);
 
 // Anti-régression statique : l'ancien faux CLV modèle-vs-closing ne doit pas revenir.
 const worker = readFileSync(new URL('../worker.js', import.meta.url), 'utf8');
-check('bot CLV auto explicitly unavailable',
-  worker.includes("log.clv_status        = 'UNAVAILABLE_NO_CLOSING_ODDS'"));
+check('bot CLV auto requires verified pre-tip closing snapshot',
+  worker.includes('_botSelectClosingSnapshot(') &&
+  worker.includes('_botAttachClosingCLV(log, closingInfo)'));
+check('bot no longer hardcodes CLV unavailable',
+  !worker.includes("log.clv_status        = 'UNAVAILABLE_NO_CLOSING_ODDS'"));
 check('bot preserves model-vs-market under honest name',
   worker.includes('log.model_vs_market_at_analysis_pts = modelVsMarketAtAnalysisPts'));
 check('NBA fake CLV formula removed',
