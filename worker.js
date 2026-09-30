@@ -3073,8 +3073,10 @@ async function _fetchPlayerPointsForEvent(eventId, env, ctx = null) {
         const norm = _normalizeName(playerName);
         if (!linesByPlayer[norm]) {
           linesByPlayer[norm] = {
-            player_name: playerName,
+            player_name:     playerName,
             line,
+            market_verified: true,
+            market_source:   'the_odds_api',
             over: { decimal: null, book: null },
             under: { decimal: null, book: null },
           };
@@ -3717,10 +3719,20 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
         });
       }
 
-      // Source 3 (fallback) : cache AI peuplé par _runAIPlayerPropsCron à 22h UTC
+      // Source IA : projection externe uniquement. Elle peut enrichir
+      // l'affichage/audit mais ne devient JAMAIS un marché et ne passe jamais
+      // dans _botMatchPlayerPropsToLines.
       if (!ppResult?.available) {
-        const aiLines = await _getAIPlayerPropsLines(dateStr, gameKey, env);
-        if (aiLines?.available) ppResult = aiLines;
+        const aiProjection = await _getAIPlayerPropsLines(dateStr, gameKey, env);
+        if (aiProjection?.available) {
+          analysis.player_props_prediction.external_projection = {
+            source:           aiProjection.source,
+            fetched_at:       aiProjection.fetched_at,
+            projection_only:  true,
+            market_available: false,
+            players:          aiProjection.lines,
+          };
+        }
       }
 
       if (ppResult?.available && ppResult.lines) {
@@ -4924,11 +4936,13 @@ async function _fetchAndParsePinnacleNBA() {
     if (!norm) continue;
 
     game.lines[norm] = {
-      player_name: playerName,
-      line:        overP.points,
-      over:        { decimal: overDec,  book: 'pinnacle' },
-      under:       { decimal: underDec, book: 'pinnacle' },
-      confidence:  'VERIFIED',
+      player_name:     playerName,
+      line:            overP.points,
+      market_verified: true,
+      market_source:   'pinnacle',
+      over:            { decimal: overDec,  book: 'pinnacle' },
+      under:           { decimal: underDec, book: 'pinnacle' },
+      confidence:      'VERIFIED',
     };
   }
 
@@ -4973,7 +4987,9 @@ async function _fetchPlayerPointsPinnacle(homeName, awayName, dateStr, env) {
   };
 }
 
-// Lit le cache AI player props et convertit au format attendu par _botMatchPlayerPropsToLines
+// Lit le cache AI player props comme PROJECTION EXTERNE uniquement.
+// Règle absolue : une ligne trouvée/projetée par IA n'est jamais une cote
+// bookmaker. Aucun prix synthétique, aucun edge, aucun Kelly ne peut en dériver.
 async function _getAIPlayerPropsLines(dateStr, gameKey, env) {
   if (!env?.PAPER_TRADING) return null;
   try {
@@ -4984,21 +5000,23 @@ async function _getAIPlayerPropsLines(dateStr, gameKey, env) {
     const linesByPlayer = {};
     for (const p of players) {
       const norm = _normalizeName(p.name);
+      if (!norm) continue;
       linesByPlayer[norm] = {
-        player_name: p.name,
-        line:        p.line,
-        // Pas de vraies cotes → défaut 1.91 (standard -110/-110)
-        over:        { decimal: 1.91, book: `ai:${p.source}` },
-        under:       { decimal: 1.91, book: `ai:${p.source}` },
-        confidence:  p.confidence,
+        player_name:       p.name,
+        projection_line:   Number.isFinite(Number(p.line)) ? Number(p.line) : null,
+        projection_source: p.source ?? 'ai_web_search',
+        confidence:        p.confidence ?? null,
+        market_verified:   false,
       };
     }
     return {
-      available:     true,
-      source:        'ai_cache',
-      fetched_at:    new Date(cached.fetched_at).toISOString(),
-      players_count: Object.keys(linesByPlayer).length,
-      lines:         linesByPlayer,
+      available:        Object.keys(linesByPlayer).length > 0,
+      source:           'ai_cache',
+      projection_only:  true,
+      market_available: false,
+      fetched_at:       cached.fetched_at ? new Date(cached.fetched_at).toISOString() : null,
+      players_count:    Object.keys(linesByPlayer).length,
+      lines:            linesByPlayer,
     };
   } catch (_) { return null; }
 }
@@ -6044,7 +6062,10 @@ function _botMatchPlayerPropsToLines(propsPrediction, linesMap, homeTeam, awayTe
     return players.map(p => {
       const norm = _normalizeName(p.name);
       const line = linesMap[norm];
-      if (!line || !Number.isFinite(line.line)) return p;
+      // Fail closed : seules des quotes bookmaker explicitement vérifiées
+      // peuvent devenir un marché exploitable.
+      if (!line || line.market_verified !== true || !Number.isFinite(line.line)) return p;
+      if (!(line.over?.decimal > 1) || !(line.under?.decimal > 1)) return p;
 
       const diff    = p.projected_pts - line.line;
       // Stdev variable selon le joueur (cf. _botPredictPlayerPoints : 0.22*ppg, 4-8).
@@ -6097,7 +6118,7 @@ function _botMatchPlayerPropsToLines(propsPrediction, linesMap, homeTeam, awayTe
   const homeEnriched = enrichSide(_filterCorrectSide(propsPrediction.home_players, homeTeam, 'home') ?? [], homeTeam);
   const awayEnriched = enrichSide(_filterCorrectSide(propsPrediction.away_players, awayTeam, 'away') ?? [], awayTeam);
 
-  // Facteur confiance combiné : projection interne × ligne AI (si présente)
+  // Facteur confiance combiné : projection interne × qualité de la quote marché
   const confFactor = (projConf, lineConf) => {
     const projScore = projConf?.score ?? 0.80;
     const lineScore = lineConf === 'high' ? 1.0 : lineConf === 'medium' ? 0.85 : lineConf === 'low' ? 0.6 : 0.95;

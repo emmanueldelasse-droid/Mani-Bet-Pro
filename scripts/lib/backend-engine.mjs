@@ -89,6 +89,8 @@ function loadBackendSandbox() {
     '_botCountAwayGamesInLast5',
     '_botComputeScore',
     '_botComputeMarketDivergence',
+    '_getAIPlayerPropsLines',
+    '_botMatchPlayerPropsToLines',
     '_botComputeConfidence',
     '_botTennisConfidence',
     '_botEngineCompute',
