@@ -3677,7 +3677,7 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
     }),
     home_injuries:       mergedHome.length > 0 ? mergedHome : null,
     away_injuries:       mergedAway.length > 0 ? mergedAway : null,
-    absences_confirmed:  homeInjuries !== null || awayInjuries !== null,
+    absences_confirmed:  _botHasRelevantAbsences(mergedHome, mergedAway),
     odds:                match.odds ?? null,
     market_odds:         marketOdds,
     home_recent:         homeRecent,
@@ -6414,6 +6414,13 @@ function _botMergeInjuries(baseList, aiGame, teamName, isHome) {
     if (!exists) merged.push({ name: aiP.name, status: aiP.status ?? 'Out', ppg: aiP.ppg ?? null, impact_weight: null, source: 'claude_ai' });
   }
   return merged;
+}
+
+function _botHasRelevantAbsences(homeInjuries, awayInjuries) {
+  return Boolean(
+    (Array.isArray(homeInjuries) && homeInjuries.length > 0) ||
+    (Array.isArray(awayInjuries) && awayInjuries.length > 0)
+  );
 }
 
 function _botGetMarketOdds(oddsData, homeName, awayName) {
