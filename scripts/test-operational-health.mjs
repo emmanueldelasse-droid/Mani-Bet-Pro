@@ -106,6 +106,24 @@ assert(
   '/health delegates to operational health handler'
 );
 
+const wrangler = readFileSync(resolve(ROOT, 'wrangler.jsonc'), 'utf8');
+assert(
+  wrangler.includes('"binding": "CF_VERSION_METADATA"'),
+  'Cloudflare version metadata binding configured'
+);
+assert(
+  healthBlock.includes('env?.CF_VERSION_METADATA?.id'),
+  'health exposes deployed Worker version id'
+);
+assert(
+  healthBlock.includes('env?.CF_VERSION_METADATA?.timestamp'),
+  'health exposes deployed Worker version timestamp'
+);
+assert(
+  !healthBlock.includes("version: '6.85.0'"),
+  'health no longer relies on stale hardcoded Worker version'
+);
+
 // ── Health must stay read-only and network-free ──────────────────────────
 const healthStart = worker.indexOf('async function handleOperationalHealth');
 const routerStart = worker.indexOf('// ── ROUTER PRINCIPAL', healthStart);
