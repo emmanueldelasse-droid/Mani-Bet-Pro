@@ -10,9 +10,14 @@
 ```
 Cron horaire
   ↓
-_runBotCron (worker.js:3204)
+_runBotCron
   ↓
-ESPN /scoreboard → matches jour (handleNBAMatches worker.js:853)
+ESPN /scoreboard → matchs du slate
+  ↓
+Sélection par match du checkpoint dû :
+H6 (5–7h) · H4 (3–5h) · H2 (1h30–3h) · H1 (0–1h30)
+  ↓
+Idempotence KV `nba_checkpoint_{matchId}_{checkpoint}`
   ↓
 Tank01 → rosters + stats équipe (cache `tank01_teams_stats` 6h)
 ESPN /injuries → blessures officielles
@@ -25,9 +30,10 @@ _botExtractVariables · _botEngineCompute (worker.js:5211)
   ↓
 Reco → `_botComputeBettingRecs` (worker.js:5334)
   ↓
-KV `bot_log_{matchId}` 90j (worker.js:3606)
+KV `bot_log_{matchId}` 90j = dernier snapshot du match
+D1 `nba_analysis_history` = tous les snapshots par `analysis_id` si binding disponible
   ↓
-Telegram notification (worker.js:3684)
+Telegram uniquement au checkpoint H1 (run manuel inchangé)
 ```
 
 ## Flux MLB
@@ -212,9 +218,10 @@ Conséquence calibration · les logs INCONCLUSIVE (NBA/Tennis) et LOW (MLB) ne g
 ### Idempotence cron
 | Clé | TTL | Rôle |
 |---|---|---|
-| `bot_last_run` | 30h (108_000s) | Cron NBA |
-| `mlb_bot_last_run` | 30h | Cron MLB |
-| `tennis_bot_last_run` | 30h | Cron tennis |
+| `nba_checkpoint_{matchId}_{H6|H4|H2|H1}` | 72h | Idempotence NBA par match + checkpoint |
+| `bot_last_run` | 30h (108_000s) | Télémétrie dernier run NBA uniquement · **ne bloque plus la journée** |
+| `mlb_bot_last_run` | 30h | Anti-doublon MLB quotidien |
+| `tennis_bot_last_run` | 30h | Anti-doublon tennis quotidien |
 | `bot_nightly_settle_last_run` | 48h (172_800s) | Settle 10-11h UTC |
 | `calibration_run_YYYY-Www` | 8j (691_200s) | Calib hebdo lundi 7h UTC |
 
@@ -273,10 +280,12 @@ Sécu MBP-S.4 ·
 | `ai_player_props_{date}` | lu (worker.js:1401, 4362, 4656) · **write non trouvée** | à vérifier dans `src/` ou cron AI |
 
 ## Idempotence cron
-- Chaque bot trackée par `{sport}_bot_last_run` KV
-- Skip si déjà tourné même jour
-- `nightly-settle` 48h TTL → 1 fois par jour 10-11h UTC max
-- Calibration lundi 7h UTC · 8j TTL → 1 fois par semaine
+- NBA : idempotence **par match + checkpoint** via `nba_checkpoint_{matchId}_{checkpoint}`. Les fenêtres H6/H4/H2/H1 peuvent donc produire plusieurs analyses pré-match du même match.
+- NBA : `bot_last_run` est conservé comme télémétrie du dernier run ; il n'est plus lu comme gate quotidien.
+- MLB / Tennis : anti-doublon quotidien historique conservé.
+- `nightly-settle` 48h TTL → 1 fois par jour 10-11h UTC max.
+- Calibration lundi 7h UTC · 8j TTL → 1 fois par semaine.
+- Les snapshots H6/H4/H2 n'envoient pas Telegram ; H1 reste le passage opérationnel notifié.
 
 ## Données fiables
 - ESPN scoreboard · matches officiels · scores temps réel (~1-2h délai post-match)
