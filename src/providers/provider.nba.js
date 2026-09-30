@@ -14,6 +14,7 @@
 import { API_CONFIG }    from '../config/api.config.js';
 import { ProviderCache } from './provider.cache.js';
 import { Logger }        from '../utils/utils.logger.js';
+import { getNBASeasonId } from '../config/sports.config.js';
 
 const WORKER  = API_CONFIG.WORKER_BASE_URL;
 const TIMEOUT = API_CONFIG.TIMEOUTS.DEFAULT;
@@ -60,6 +61,7 @@ export class ProviderNBA {
     const result = {
       team_id:    bdlTeamId,
       season,
+      season_id:  `${season}-${String(Number(season) + 1).slice(-2)}`,
       source:     'balldontlie_v1',
       fetched_at: data.fetched_at ?? new Date().toISOString(),
       matches:    (data.matches ?? []).map(m => ({
@@ -317,6 +319,7 @@ export class ProviderNBA {
         status_detail: m.status_detail,
         season_type:   m.season_type ?? null,
         event_type:    m.event_type ?? null,
+        season_id:     m.season_id ?? getNBASeasonId(m.datetime ?? m.date ?? date),
         venue:         m.venue ?? null,
         source:        'espn',
         fetched_at:    m.fetched_at ?? new Date().toISOString(),

@@ -152,6 +152,7 @@ export class EngineCore {
       computed_at:          new Date().toISOString(),
       computation_ms:       Date.now() - startTime,
       nba_phase:            nbaPhase,  // 'regular' | 'playin' | 'playoff' | null (autres sports)
+      season_id:            engineResult.season_id ?? rawData?.season_id ?? null,
 
       // Score plafonné — affiché dans l'UI
       predictive_score:     cappedScore,
@@ -391,6 +392,7 @@ export class EngineCore {
       model_version:        '0.3.0',
       computed_at:          new Date().toISOString(),
       computation_ms:       null,
+      season_id:            engineResult?.season_id ?? null,
 
       predictive_score:     null,
       raw_predictive_score: null,

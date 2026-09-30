@@ -3195,11 +3195,14 @@ async function handleNBATeamStats(espnTeamId, origin) {
 
 async function handleNBARecentForm(env, url, teamId, origin) {
   const season = url.searchParams.get('season') ?? currentSeason();
+  const seasonId = Number.isFinite(Number(season))
+    ? `${Number(season)}-${String(Number(season) + 1).slice(-2)}`
+    : null;
   const n      = Math.min(parseInt(url.searchParams.get('n') ?? '10'), 20);
 
   if (!env.BALLDONTLIE_API_KEY) {
     return jsonResponse({
-      team_id: teamId, season, source: 'balldontlie_v1',
+      team_id: teamId, season, season_id: seasonId, source: 'balldontlie_v1',
       available: false, note: 'BALLDONTLIE_API_KEY not configured', matches: [],
     }, 200, origin);
   }
@@ -3213,7 +3216,7 @@ async function handleNBARecentForm(env, url, teamId, origin) {
       const cached = await env.PAPER_TRADING.get(cacheKey, { type: 'json' });
       if (cached?.fetched_at && (Date.now() - cached.fetched_at) < CACHE_TTL * 1000) {
         return jsonResponse({
-          team_id:    teamId, season, source: 'balldontlie_v1',
+          team_id:    teamId, season, season_id: cached.season_id ?? seasonId, source: 'balldontlie_v1',
           available:  true, fetched_at: new Date(cached.fetched_at).toISOString(),
           matches:    cached.matches.slice(0, n),
           from_cache: true,
@@ -3228,7 +3231,7 @@ async function handleNBARecentForm(env, url, teamId, origin) {
   if (!data) {
     console.warn(`[BDL] team ${teamId} season ${season} fetch failed (after retries)`);
     return jsonResponse({
-      team_id: teamId, season, source: 'balldontlie_v1',
+      team_id: teamId, season, season_id: seasonId, source: 'balldontlie_v1',
       available: false, note: 'BallDontLie temporarily unavailable', matches: [],
     }, 200, origin);
   }
@@ -3256,13 +3259,13 @@ async function handleNBARecentForm(env, url, teamId, origin) {
   if (env.PAPER_TRADING && matches.length > 0) {
     try {
       await env.PAPER_TRADING.put(cacheKey, JSON.stringify({
-        fetched_at: Date.now(), matches,
+        fetched_at: Date.now(), season_id: seasonId, matches,
       }), { expirationTtl: CACHE_TTL });
     } catch (_) {}
   }
 
   return jsonResponse({
-    team_id:    teamId, season, source: 'balldontlie_v1',
+    team_id:    teamId, season, season_id: seasonId, source: 'balldontlie_v1',
     available:  true, fetched_at: new Date().toISOString(), matches,
   }, 200, origin, { 'Cache-Control': 'no-store' });
 }
@@ -3657,6 +3660,7 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
     match_id:            match.id,
     event_type:          match.event_type ?? null,
     season_type:         match.season_type ?? null,
+    season_id:           match.season_id ?? _botGetNBASeasonId(match.datetime ?? match.date),
     game_datetime:       match.datetime ?? null,
     game_date:           match.date ?? null,
     home_season_stats:   Object.assign({}, match.home_season_stats ?? {}, {
@@ -3825,6 +3829,7 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
     datetime:    match.datetime ?? null,
     season_type: match.season_type ?? null,
     event_type:  match.event_type ?? null,
+    season_id:   analysis.season_id ?? match.season_id ?? _botGetNBASeasonId(match.datetime ?? match.date),
     nba_phase:   analysis.nba_phase ?? null,
     _meta_playoff_gate_would_block: _metaPlayoffGateWouldBlock,
 
@@ -5192,7 +5197,7 @@ async function handleBotLogsExportCSV(url, env, origin) {
       'est_total_nba', 'ou_line_nba', 'ou_diff_nba', 'ou_prediction_side', 'ou_prediction_edge',
     ];
     const colsNbaExtra = [
-      'season_type', 'event_type', 'nba_phase',
+      'season_id', 'season_type', 'event_type', 'nba_phase',
       'var_net_rating_diff', 'var_efg_diff', 'var_ts_pct', 'var_win_pct_diff',
       'var_home_away_split', 'var_recent_form_ema', 'var_absences_impact',
       'var_pace_diff', 'var_rest_days_diff', 'home_out', 'away_out',
@@ -5359,6 +5364,35 @@ function _botComputeEMADiff(homeRecent, awayRecent, lambda = 0.85) {
     source:  'balldontlie_v1',
     quality: (homeRecent.matches.length >= 5 && awayRecent.matches.length >= 5) ? 'VERIFIED' : 'LOW_SAMPLE',
   };
+}
+
+function _botGetNBASeasonIdentity(dateLike = new Date()) {
+  let refDate = null;
+  if (dateLike instanceof Date) {
+    refDate = isNaN(dateLike.getTime()) ? null : dateLike;
+  } else {
+    const s = String(dateLike ?? '').trim();
+    if (/^\d{8}$/.test(s)) {
+      refDate = new Date(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}T00:00:00Z`);
+    } else if (s) {
+      refDate = new Date(s);
+    }
+  }
+  if (!refDate || isNaN(refDate.getTime())) return null;
+
+  const year = refDate.getUTCFullYear();
+  const month = refDate.getUTCMonth() + 1;
+  const startYear = month >= 10 ? year : year - 1;
+  const endYear = startYear + 1;
+  return {
+    season_id: `${startYear}-${String(endYear).slice(-2)}`,
+    start_year: startYear,
+    end_year: endYear,
+  };
+}
+
+function _botGetNBASeasonId(dateLike = new Date()) {
+  return _botGetNBASeasonIdentity(dateLike)?.season_id ?? null;
 }
 
 function _botPhaseDate(matchData = null) {
@@ -5627,6 +5661,9 @@ function _botComputeScore(variables, weights) {
 
 function _botEngineCompute(matchData) {
   const phaseConfig  = _botGetWeights(matchData);
+  const seasonId = matchData?.season_id ?? _botGetNBASeasonId(
+    matchData?.game_datetime ?? matchData?.datetime ?? matchData?.game_date ?? matchData?.date
+  );
   const { weights, phase, score_cap, ema_lambda: emaLambda } = phaseConfig;
 
   const variables    = _botExtractVariables(matchData, emaLambda);
@@ -5736,6 +5773,7 @@ function _botEngineCompute(matchData) {
     market_divergence:     marketDivergence,
     confidence_penalty:    null,
     nba_phase:             phase,
+    season_id:             seasonId,
     betting_recommendations: bettingRecs,
     total_prediction:      totalPrediction,
     player_props_prediction: playerPropsPrediction,
@@ -6836,6 +6874,7 @@ function parseESPNMatches(data, dateStr) {
       status_detail: event.status?.type?.detail ?? null,
       season_type:   seasonType,
       event_type:    eventType,
+      season_id:     _botGetNBASeasonId(event.date ?? dateStr),
       home_team:     parseESPNTeam(home),
       away_team:     parseESPNTeam(away),
       home_season_stats: parseESPNTeamStats(home),

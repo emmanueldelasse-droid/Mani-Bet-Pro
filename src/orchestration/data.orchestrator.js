@@ -99,6 +99,8 @@ import {
   getNBAAbvFromEspn,
   getNBAEspnFromAbv,
   getNBABdlIdFromEspn,
+  getNBASeasonId,
+  getNBASeasonStartYear,
 } from '../config/sports.config.js';
 
 // Mappings équipes supprimés (v3.12) — centralisés dans sports.config.js (NBA_TEAMS).
@@ -159,7 +161,14 @@ export class DataOrchestrator {
       // ÉTAPE 2 : Injuries + BDL + Odds + Stats avancées en parallèle
       LoadingUI.update('Blessures + forme récente + cotes + Net Rating...', 20);
 
-      const season  = _getCurrentNBASeason();
+      // La saison BDL doit dépendre de la DATE ANALYSÉE, pas de l'horloge système.
+      // Ex : le 30/09/2026, analyser le 03/10/2026 doit charger season=2026
+      // (NBA 2026-27), pas season=2025.
+      const season = getNBASeasonStartYear(date);
+      if (season === null) {
+        Logger.error('NBA_SEASON_ID_INVALID_DATE', { date });
+        return null;
+      }
       const teamIds = _extractTeamIds(matches);
 
       // Extraire les abréviations Tank01 pour team-detail (1 appel par match)
@@ -260,6 +269,7 @@ export class DataOrchestrator {
       match_id:             match.id,
       event_type:           match.event_type ?? null,
       season_type:          match.season_type ?? null,
+      season_id:            match.season_id ?? getNBASeasonId(match.datetime ?? match.date),
       game_datetime:        match.datetime ?? null,
       game_date:            match.date ?? null,
       home_season_stats:    Object.assign({}, match.home_season_stats || {}, { name: homeTeamName }),
@@ -1258,11 +1268,6 @@ function _normalizeDate(s) {
   if (!s) return '';
   if (s.length === 8 && !s.includes('-')) return s.slice(0,4) + '-' + s.slice(4,6) + '-' + s.slice(6,8);
   return s.slice(0, 10);
-}
-
-function _getCurrentNBASeason() {
-  const now = new Date();
-  return String(now.getMonth() + 1 >= 10 ? now.getFullYear() : now.getFullYear() - 1);
 }
 
 // ── TEAM DETAIL — v3.10 ───────────────────────────────────────────────────────

@@ -79,6 +79,7 @@ function loadBackendSandbox() {
     'parseESPNMatches',
     '_isNBAPreseasonLog',
     '_isNBAStatsEligibleLog',
+    '_botGetNBASeasonId',
     '_botGetNBAPhase',
     '_botGetWeights',
     '_botExtractVariables',
