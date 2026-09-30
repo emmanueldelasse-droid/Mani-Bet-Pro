@@ -131,8 +131,69 @@ const TENNIS_ODDS_SNAP_PREFIX = 'tennis_odds_snap_';  // KV : historique cotes p
 
 const PAPER_BETS_INDEX_KEY = 'paper_bets_index';
 const BOT_LOG_PREFIX       = 'bot_log_';
-const BOT_RUN_KEY          = 'bot_last_run';
+const BOT_RUN_KEY          = 'bot_last_run'; // telemetry only · no longer blocks a full day
+const NBA_CHECKPOINT_PREFIX = 'nba_checkpoint_';
+const NBA_CHECKPOINT_TTL_SECONDS = 72 * 3600;
+const NBA_CHECKPOINT_WINDOWS = Object.freeze([
+  { id: 'H6', min_exclusive: 300, max_inclusive: 420 },
+  { id: 'H4', min_exclusive: 180, max_inclusive: 300 },
+  { id: 'H2', min_exclusive:  90, max_inclusive: 180 },
+  { id: 'H1', min_exclusive:   0, max_inclusive:  90 },
+]);
 const TELEGRAM_API         = 'https://api.telegram.org';
+
+function _botCheckpointForMatch(match, nowMs = Date.now()) {
+  const tipMs = match?.datetime ? new Date(match.datetime).getTime() : NaN;
+  if (!Number.isFinite(tipMs)) return null;
+
+  const minutesToTip = (tipMs - nowMs) / 60000;
+  if (!(minutesToTip > 0)) return null;
+
+  const window = NBA_CHECKPOINT_WINDOWS.find(cp =>
+    minutesToTip > cp.min_exclusive && minutesToTip <= cp.max_inclusive
+  );
+  if (!window) return null;
+
+  return {
+    id: window.id,
+    minutes_to_tip: Math.round(minutesToTip),
+    window_min_exclusive: window.min_exclusive,
+    window_max_inclusive: window.max_inclusive,
+  };
+}
+
+function _botCheckpointKey(matchId, checkpointId) {
+  if (!matchId || !checkpointId) return null;
+  return `${NBA_CHECKPOINT_PREFIX}${matchId}_${checkpointId}`;
+}
+
+async function _botCheckpointAlreadyDone(env, matchId, checkpointId) {
+  const key = _botCheckpointKey(matchId, checkpointId);
+  if (!key || !env?.PAPER_TRADING) return false;
+  try { return Boolean(await env.PAPER_TRADING.get(key)); }
+  catch (err) {
+    console.warn('[BOT] checkpoint read error:', err.message);
+    return false;
+  }
+}
+
+async function _botMarkCheckpointDone(env, matchId, checkpoint, meta = {}) {
+  const key = _botCheckpointKey(matchId, checkpoint?.id);
+  if (!key || !env?.PAPER_TRADING) return false;
+  try {
+    await env.PAPER_TRADING.put(key, JSON.stringify({
+      match_id: matchId,
+      checkpoint_id: checkpoint.id,
+      minutes_to_tip: checkpoint.minutes_to_tip ?? null,
+      completed_at: new Date().toISOString(),
+      ...meta,
+    }), { expirationTtl: NBA_CHECKPOINT_TTL_SECONDS });
+    return true;
+  } catch (err) {
+    console.warn('[BOT] checkpoint write error:', err.message);
+    return false;
+  }
+}
 
 // ── MBP-CATCHUP-SETTLE · statuts logs unifiés (PR catch-up settlement) ─────────
 // Statuts persistés dans log.status · règle absolue · les statuts non-settled
@@ -3444,32 +3505,58 @@ async function _runBotCron(env, forceRun = false) {
     return;
   }
 
-  // Vérifier qu'on est ~1h avant le premier match
-  const firstMatchTime = matches
-    .map(m => m.datetime ? new Date(m.datetime).getTime() : Infinity)
-    .sort((a, b) => a - b)[0];
+  // Checkpoints par match · H6 / H4 / H2 / H1.
+  // L'ancien BOT_RUN_KEY quotidien empêchait toute seconde analyse le même jour.
+  // Désormais chaque match possède sa propre idempotence par checkpoint.
+  const checkpointByMatch = new Map();
+  const dueMatches = [];
 
-  const msUntilFirst = firstMatchTime - Date.now();
-  const isInWindow   = msUntilFirst > 0 && msUntilFirst < 2 * 3600 * 1000;
+  for (const match of matches) {
+    if (forceRun) {
+      const manualCheckpoint = {
+        id: 'MANUAL',
+        minutes_to_tip: match.datetime
+          ? Math.round((new Date(match.datetime).getTime() - Date.now()) / 60000)
+          : null,
+        window_min_exclusive: null,
+        window_max_inclusive: null,
+      };
+      checkpointByMatch.set(match.id, manualCheckpoint);
+      dueMatches.push(match);
+      continue;
+    }
 
-  if (!forceRun && !isInWindow) {
-    console.log(`[BOT] Hors fenêtre — premier match dans ${Math.round(msUntilFirst / 60000)}min`);
+    const checkpoint = _botCheckpointForMatch(match, Date.now());
+    if (!checkpoint) {
+      cronLog.skipped_game_ids.push({ id: match.id, reason: 'outside_checkpoint_window' });
+      continue;
+    }
+
+    if (await _botCheckpointAlreadyDone(env, match.id, checkpoint.id)) {
+      cronLog.skipped_game_ids.push({
+        id: match.id,
+        reason: 'checkpoint_already_done',
+        checkpoint_id: checkpoint.id,
+      });
+      continue;
+    }
+
+    checkpointByMatch.set(match.id, checkpoint);
+    dueMatches.push(match);
+  }
+
+  if (!dueMatches.length) {
+    cronLog.skipped_reason.push('no_due_checkpoints');
+    cronLog.cron_finished = new Date().toISOString();
+    cronLog.duration_ms = Date.now() - new Date(cronLog.cron_started).getTime();
+    console.log('[BOT] Aucun checkpoint NBA dû sur cette exécution');
+    console.log('[BOT-CRON-LOG]', JSON.stringify(cronLog));
     return;
   }
 
-  // Vérifier qu'on n'a pas déjà tourné dans cette fenêtre (sauf run manuel)
-  if (!forceRun && env.PAPER_TRADING) {
-    try {
-      const lastRun = await env.PAPER_TRADING.get(BOT_RUN_KEY);
-      if (lastRun) {
-        const lastRunDate = JSON.parse(lastRun);
-        if (lastRunDate.date === dateStr) {
-          console.log('[BOT] Déjà tourné aujourd\'hui — skip');
-          return;
-        }
-      }
-    } catch (err) { console.warn('[BOT] lastRun read error:', err.message); }
-  }
+  // À partir d'ici, les appels providers et analyses ne concernent que les
+  // matchs réellement dus. Réduit les coûts et évite de recharger tout le slate.
+  matches.splice(0, matches.length, ...dueMatches);
 
   // Charger toutes les données partagées en parallèle
   // Charger toutes les données en parallèle — appels directs aux fonctions (pas HTTP interne)
@@ -3586,13 +3673,26 @@ async function _runBotCron(env, forceRun = false) {
       log.status       = log.status ?? BOT_LOG_STATUS.PENDING;
       log.cron_run_id  = cronRunId;
       log.logged_at    = log.logged_at ?? new Date().toISOString();
+
+      const checkpoint = checkpointByMatch.get(match.id) ?? { id: forceRun ? 'MANUAL' : null };
+      log.checkpoint_id = checkpoint.id ?? null;
+      log.checkpoint_minutes_to_tip = checkpoint.minutes_to_tip ?? null;
+
       // MBP-NBA-PLAYOFF-GATE-LOG · lire le flag éphémère puis le supprimer
       // pour ne jamais le persister dans le KV. Observation pure · le
       // backend n'applique pas le gate · le compteur ne change rien au
       // comportement.
       if (log._meta_playoff_gate_would_block) cronLog.playoff_gate_blocked++;
       delete log._meta_playoff_gate_would_block;
-      await _botSaveLog(env, log);
+
+      const saveResult = await _botSaveLog(env, log);
+      if (!forceRun && (saveResult?.kv_written || saveResult?.d1_written)) {
+        await _botMarkCheckpointDone(env, match.id, checkpoint, {
+          analysis_id: log.analysis_id ?? null,
+          cron_run_id: cronRunId,
+          game_datetime: match.datetime ?? null,
+        });
+      }
       logs.push(log);
       cronLog.games_analyzed++;
       if (log.best_edge && log.best_edge >= 5) edgesFound.push(log);
@@ -3607,14 +3707,30 @@ async function _runBotCron(env, forceRun = false) {
   if (env.PAPER_TRADING) {
     try {
       await env.PAPER_TRADING.put(BOT_RUN_KEY,
-        JSON.stringify({ date: dateStr, ran_at: new Date().toISOString(), matches_analyzed: logs.length }),
+        JSON.stringify({
+          date: dateStr,
+          ran_at: new Date().toISOString(),
+          matches_analyzed: logs.length,
+          checkpoint_mode: true,
+          checkpoints: logs.map(l => ({
+            match_id: l.match_id,
+            checkpoint_id: l.checkpoint_id ?? null,
+            analysis_id: l.analysis_id ?? null,
+          })),
+        }),
         { expirationTtl: 30 * 3600 }
       );
     } catch (err) { console.warn('[BOT] lastRun write error:', err.message); }
   }
 
-  // Telegram
-  await _botSendTelegram(env, logs, edgesFound, dateStr);
+  // Telegram : un seul passage opérationnel par match.
+  // H6/H4/H2 sont des snapshots d'observation et ne doivent pas spammer.
+  const telegramLogs = forceRun ? logs : logs.filter(l => l.checkpoint_id === 'H1');
+  if (telegramLogs.length > 0) {
+    const telegramIds = new Set(telegramLogs.map(l => l.analysis_id));
+    const telegramEdges = edgesFound.filter(l => telegramIds.has(l.analysis_id));
+    await _botSendTelegram(env, telegramLogs, telegramEdges, dateStr);
+  }
 
   cronLog.settled_count = 0;  // settle se fait dans le nightly cron, pas ici
   cronLog.pending_count = logs.length;
@@ -4002,8 +4118,10 @@ async function _botPersistSettlementD1(env, log) {
 }
 
 async function _botSaveLog(env, log) {
-  if (!log) return;
+  if (!log) return { kv_written: false, d1_written: false };
   if (!log.analysis_id) log.analysis_id = crypto.randomUUID();
+
+  let kvWritten = false;
 
   // KV reste le chemin canonique actuel : ne jamais rendre l'analyse dépendante
   // de D1 tant que la migration et le binding production ne sont pas validés.
@@ -4011,12 +4129,17 @@ async function _botSaveLog(env, log) {
     try {
       const key = `${BOT_LOG_PREFIX}${log.match_id}`;
       await env.PAPER_TRADING.put(key, JSON.stringify(log), { expirationTtl: 90 * 24 * 3600 }); // 90 jours
+      kvWritten = true;
     } catch (err) { console.warn('[BOT] saveLog error:', err.message); }
   }
 
   // Dual-write best-effort. D1 conserve chaque analysis_id ; KV conserve
   // uniquement le dernier snapshot par match_id pendant 90 jours.
-  await _botPersistAnalysisD1(env, log);
+  const d1Result = await _botPersistAnalysisD1(env, log);
+  return {
+    kv_written: kvWritten,
+    d1_written: d1Result?.written === true,
+  };
 }
 
 // ── PARIS COMBINÉS (parlay) — détection value sur paires de recos ─────────────
@@ -5315,6 +5438,7 @@ async function handleBotLogsExportCSV(url, env, origin) {
 
     const colsCommon = [
       'analysis_id', 'logged_at', 'settled_at', 'match_id', 'date', 'home', 'away',
+      'checkpoint_id', 'checkpoint_minutes_to_tip',
       'motor_prob', 'model_raw_score', 'model_calibrated_prob', 'decision_prob', 'probability_status',
       'confidence_level', 'data_quality', 'best_edge', 'best_market', 'best_side',
       'result_home_score', 'result_away_score', 'result_winner', 'result_margin', 'result_total',
