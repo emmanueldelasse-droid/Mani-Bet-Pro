@@ -4,11 +4,12 @@
 `main` · auto-deploy CF/GH Pages (build f9cd992)
 
 ## En cours
-[P2] Fix #5 (optionnel) · cause amont du raté pré-match NBA · NON démarré
-- symptôme · `bot_last_run` absente du KV (cron NBA pré-match `_runBotCron` n'écrit plus depuis >30h) alors que le nightly est vivant
-- pistes · date Paris vs slate US (`_botFormatDate` Paris vs `?dates=` ESPN US) · fenêtre 2h + run unique/jour (`BOT_RUN_KEY`) · filtre `already_final`
-- à arbitrer APRÈS observation d'1-2 nightly post-Fix#4 (les finales doivent réapparaître en `missed_by_cron`)
-- décision Fix #5 seulement si on veut l'analyse pré-match réelle des finales (pas juste le rattrapage)
+[P0] Scheduler NBA pré-match · branche `feat/nba-per-game-checkpoints-20260930`
+- le gate quotidien `BOT_RUN_KEY` est supprimé du chemin NBA ; la clé devient télémétrie uniquement
+- idempotence par match + checkpoint : H6 (5-7h), H4 (3-5h), H2 (1h30-3h), H1 (0-1h30)
+- KV garde le dernier snapshot ; D1 optionnel conserve chaque `analysis_id`
+- Telegram uniquement à H1 ; H6/H4/H2 = observation silencieuse
+- la partie **date Paris vs slate US** reste séparée dans la PR draft #217 et nécessite toujours une preuve runtime réelle avant merge
 
 ## Validation post-Fix#4 (à faire · prochain nightly ~10-11h UTC)
 - vérifier que les matchs playoffs manquants réapparaissent en `missed_by_cron` dans `/bot/logs`
