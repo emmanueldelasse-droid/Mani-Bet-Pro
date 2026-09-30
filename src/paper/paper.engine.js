@@ -169,9 +169,19 @@ export class PaperEngine {
     const roi         = totalStaked > 0 ? Math.round(totalPnl / totalStaked * 10000) / 100 : null;
     const hitRate     = Math.round(won.length / total * 1000) / 10;
     const hitByEdge   = _computeHitRateByEdge(settled);
-    const clvBets     = settled.filter(b => b.clv !== null);
-    const avgClv      = clvBets.length > 0
-      ? Math.round(clvBets.reduce((s, b) => s + b.clv, 0) / clvBets.length * 100) / 100
+    // CLV uniquement si une vraie closing quote a été fournie et si la
+    // sémantique est explicitement price-vs-closing. Les anciens bet.clv
+    // calculés depuis motor_prob sont ignorés.
+    const clvBets = settled.filter(b =>
+      b.clv_status === 'AVAILABLE' &&
+      b.clv_method === 'TAKEN_PRICE_VS_CLOSING_PRICE' &&
+      Number.isFinite(b.clv_price_pct ?? b.clv)
+    );
+    const avgClv = clvBets.length > 0
+      ? Math.round(
+          clvBets.reduce((s, b) => s + (b.clv_price_pct ?? b.clv), 0)
+          / clvBets.length * 100
+        ) / 100
       : null;
     const brierScore  = _computeBrierScore(settled);
     const biasDetection = _detectBias(settled);
@@ -230,6 +240,23 @@ function _placeBetLocal(betData) {
   return state;
 }
 
+function _computeLocalPriceCLV(oddsTakenAmerican, closingOddsAmerican) {
+  const toDecimal = (american) => {
+    const n = Number(american);
+    if (!Number.isFinite(n) || n === 0) return null;
+    return n > 0 ? (n / 100 + 1) : (100 / Math.abs(n) + 1);
+  };
+
+  const taken = toDecimal(oddsTakenAmerican);
+  const closing = toDecimal(closingOddsAmerican);
+  if (!(taken > 1) || !(closing > 1)) return null;
+
+  return {
+    price_ratio_pct: Math.round(((taken / closing) - 1) * 10000) / 100,
+    implied_prob_change_pts: Math.round(((1 / closing) - (1 / taken)) * 10000) / 100,
+  };
+}
+
 function _settleBetLocal(betId, result, closingOdds, extraFields = {}) {
   const state = _loadLocal();
   const bet   = state.bets.find(b => b.bet_id === betId);
@@ -242,12 +269,27 @@ function _settleBetLocal(betId, result, closingOdds, extraFields = {}) {
   // Stocker les champs supplémentaires (home_score, away_score, etc.)
   Object.assign(bet, extraFields);
 
-  if (closingOdds !== null && bet.motor_prob !== null) {
-    const decClosing = closingOdds > 0
-      ? closingOdds / 100 + 1
-      : 100 / Math.abs(closingOdds) + 1;
-    const impliedClosing = 1 / decClosing;
-    bet.clv = Math.round((bet.motor_prob / 100 - impliedClosing) * 10000) / 100;
+  if (closingOdds !== null) {
+    const clv = _computeLocalPriceCLV(bet.odds_taken, closingOdds);
+    if (clv) {
+      bet.clv = clv.price_ratio_pct;
+      bet.clv_price_pct = clv.price_ratio_pct;
+      bet.clv_implied_prob_pts = clv.implied_prob_change_pts;
+      bet.clv_method = 'TAKEN_PRICE_VS_CLOSING_PRICE';
+      bet.clv_status = 'AVAILABLE';
+    } else {
+      bet.clv = null;
+      bet.clv_price_pct = null;
+      bet.clv_implied_prob_pts = null;
+      bet.clv_method = null;
+      bet.clv_status = 'UNAVAILABLE_INVALID_CLOSING_ODDS';
+    }
+  } else {
+    bet.clv = null;
+    bet.clv_price_pct = null;
+    bet.clv_implied_prob_pts = null;
+    bet.clv_method = null;
+    bet.clv_status = 'UNAVAILABLE_NO_CLOSING_ODDS';
   }
 
   if (result === 'WIN') {
