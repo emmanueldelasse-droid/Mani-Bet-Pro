@@ -65,6 +65,22 @@ const ui = readFileSync(new URL('../src/ui/ui.bot.js', import.meta.url), 'utf8')
 check('UI requires verified CLV status', ui.includes("log.clv_status === 'AVAILABLE'"));
 check('UI requires CLV method', ui.includes('!!log.clv_method'));
 
+const paperEngine = readFileSync(new URL('../src/paper/paper.engine.js', import.meta.url), 'utf8');
+check('local paper CLV uses price helper',
+  paperEngine.includes('_computeLocalPriceCLV(bet.odds_taken, closingOdds)'));
+check('local paper CLV no longer depends on motor_prob',
+  !paperEngine.includes('closingOdds !== null && bet.motor_prob !== null'));
+check('paper metrics ignore legacy unverified CLV',
+  paperEngine.includes("b.clv_status === 'AVAILABLE'") &&
+  paperEngine.includes("b.clv_method === 'TAKEN_PRICE_VS_CLOSING_PRICE'"));
+
+const historyUi = readFileSync(new URL('../src/ui/ui.history.js', import.meta.url), 'utf8');
+check('history UI only shows verified CLV',
+  historyUi.includes("bet.clv_status === 'AVAILABLE'") &&
+  historyUi.includes("bet.clv_method === 'TAKEN_PRICE_VS_CLOSING_PRICE'"));
+check('history UI labels metric as CLV',
+  historyUi.includes("_metricCell('CLV moyen'"));
+
 console.log('\nCLV semantics');
 console.log(`  pass: ${pass}`);
 console.log(`  fail: ${fail}`);
