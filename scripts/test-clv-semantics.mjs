@@ -80,6 +80,8 @@ check('history UI only shows verified CLV',
   historyUi.includes("bet.clv_method === 'TAKEN_PRICE_VS_CLOSING_PRICE'"));
 check('history UI labels metric as CLV',
   historyUi.includes("_metricCell('CLV moyen'"));
+check('history UI no longer exposes legacy Valeur cote label',
+  !historyUi.includes('Valeur cote : '));
 
 console.log('\nCLV semantics');
 console.log(`  pass: ${pass}`);
