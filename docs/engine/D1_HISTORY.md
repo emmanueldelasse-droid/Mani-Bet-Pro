@@ -74,6 +74,7 @@ Migrations currently tracked:
 
 - `migrations/0001_nba_immutable_history.sql` · tables append-only analysis + settlement
 - `migrations/0002_nba_analysis_checkpoints.sql` · métadonnées `checkpoint_id` / `checkpoint_minutes_to_tip`
+- `migrations/0003_nba_verified_closing_line.sql` · closing quote, âge/source/provider et prix ML au settlement
 
 ## Rollout
 

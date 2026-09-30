@@ -77,15 +77,21 @@ Telegram
 
 ## Flux odds (snapshot)
 ```
-_runOddsSnapshot (worker.js:4298) · chaque heure
+Cron dédié `*/15 * * * *`
   ↓
-TheOddsAPI NBA + MLB
+_runOddsSnapshot · snapshots ESPN NBA + MLB uniquement
   ↓
-KV `odds_snap_{matchId}` 72h · array snapshots [48 pts max]
-KV `tennis_odds_snap_{matchId}` 72h
+KV `odds_snap_{matchId}` 72h · array [192 pts max = 48h × 4/h]
   ↓
-/bot/odds-history (worker.js:4686) · expose mouvement cotes UI
+Settlement NBA
+  ↓
+dernier snapshot strictement pré-tip
+  ↓
+âge <=20 min + MONEYLINE → CLV price-vs-price AVAILABLE
+âge >20 min / post-tip / autre marché → CLV indisponible avec statut explicite
 ```
+
+Le trigger 15 minutes est isolé dans `scheduled()` : il ne lance jamais les moteurs NBA/MLB/Tennis ni les providers lourds associés. Le cron horaire principal reste inchangé pour les analyses.
 
 ## Flux injuries
 - NBA officiel · ESPN `/injuries`
@@ -228,7 +234,7 @@ Conséquence calibration · les logs INCONCLUSIVE (NBA/Tennis) et LOW (MLB) ne g
 ### Snapshots cotes
 | Préfixe | TTL | Rôle |
 |---|---|---|
-| `odds_snap_{matchId}` | 72h (259_200s) | Snapshots NBA/MLB |
+| `odds_snap_{matchId}` | 72h (259_200s) | Snapshots ESPN NBA/MLB toutes les 15 min · 192 pts max · source closing MONEYLINE |
 | `tennis_odds_snap_{matchId}` | 7j / 3h | Snapshots tennis (2 TTL distincts worker.js:6558, 6565) |
 
 ### Caches providers

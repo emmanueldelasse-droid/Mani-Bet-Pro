@@ -4,11 +4,12 @@
 `main` · auto-deploy CF/GH Pages (build f9cd992)
 
 ## En cours
-[P0] Scheduler NBA pré-match · branche `feat/nba-per-game-checkpoints-20260930`
-- le gate quotidien `BOT_RUN_KEY` est supprimé du chemin NBA ; la clé devient télémétrie uniquement
-- idempotence par match + checkpoint : H6 (5-7h), H4 (3-5h), H2 (1h30-3h), H1 (0-1h30)
-- KV garde le dernier snapshot ; D1 optionnel conserve chaque `analysis_id`
-- Telegram uniquement à H1 ; H6/H4/H2 = observation silencieuse
+[P0] Closing line NBA vérifiée · branche `feat/nba-verified-closing-line-20260930`
+- scheduler par match H6/H4/H2/H1 mergé via PR #234 ; `BOT_RUN_KEY` = télémétrie uniquement
+- nouveau cron dédié 15 min : snapshots ESPN uniquement, sans relancer les moteurs
+- closing quote = dernier snapshot strictement pré-tip ; `AVAILABLE` seulement si âge <=20 min
+- CLV automatique actuel limité au MONEYLINE ; spread/total restent indisponibles tant que leurs prix de clôture bidirectionnels ne sont pas capturés
+- D1 settlement reçoit timestamp/âge/source/provider/prix closing si binding disponible
 - la partie **date Paris vs slate US** reste séparée dans la PR draft #217 et nécessite toujours une preuve runtime réelle avant merge
 
 ## Validation post-Fix#4 (à faire · prochain nightly ~10-11h UTC)

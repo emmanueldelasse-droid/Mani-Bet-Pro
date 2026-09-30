@@ -79,6 +79,8 @@ function loadBackendSandbox() {
     'parseESPNMatches',
     '_isNBAPreseasonLog',
     '_isNBAStatsEligibleLog',
+    '_botSelectClosingSnapshot',
+    '_botAttachClosingCLV',
     '_botCheckpointForMatch',
     '_botCheckpointKey',
     '_botCheckpointAlreadyDone',
