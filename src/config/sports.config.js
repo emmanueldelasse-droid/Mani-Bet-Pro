@@ -386,6 +386,58 @@ export function getNBABdlIdFromEspn(espnName) {
 }
 
 /**
+ * Identité canonique d'une saison NBA à partir de la date RÉELLE du match.
+ *
+ * Convention :
+ *   2026-10-03 (pré-saison) → start_year=2026 · season_id="2026-27"
+ *   2027-05-15 (playoffs)   → start_year=2026 · season_id="2026-27"
+ *   2026-09-30 (offseason)  → start_year=2025 · season_id="2025-26"
+ *
+ * La bascule se fait au 1er octobre, cohérente avec la convention BallDontLie
+ * où `season=2026` désigne la saison NBA 2026-27.
+ *
+ * @param {Date|string|number} dateLike
+ * @returns {{season_id:string,start_year:number,end_year:number}|null}
+ */
+export function getNBASeasonIdentity(dateLike = new Date()) {
+  let refDate = null;
+
+  if (dateLike instanceof Date) {
+    refDate = Number.isNaN(dateLike.getTime()) ? null : dateLike;
+  } else if (typeof dateLike === 'string') {
+    const s = dateLike.trim();
+    if (/^\d{8}$/.test(s)) {
+      refDate = new Date(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}T00:00:00Z`);
+    } else if (s) {
+      refDate = new Date(s);
+    }
+  } else if (typeof dateLike === 'number') {
+    refDate = new Date(dateLike);
+  }
+
+  if (!refDate || Number.isNaN(refDate.getTime())) return null;
+
+  const year = refDate.getUTCFullYear();
+  const month = refDate.getUTCMonth() + 1;
+  const startYear = month >= 10 ? year : year - 1;
+  const endYear = startYear + 1;
+
+  return {
+    season_id: `${startYear}-${String(endYear).slice(-2)}`,
+    start_year: startYear,
+    end_year: endYear,
+  };
+}
+
+export function getNBASeasonId(dateLike = new Date()) {
+  return getNBASeasonIdentity(dateLike)?.season_id ?? null;
+}
+
+export function getNBASeasonStartYear(dateLike = new Date()) {
+  return getNBASeasonIdentity(dateLike)?.start_year ?? null;
+}
+
+/**
  * Détecte automatiquement la phase NBA selon le mois et le jour.
  *
  * Calendrier NBA approximatif (stable d'une saison à l'autre) :
