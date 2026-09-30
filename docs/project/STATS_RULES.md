@@ -53,6 +53,20 @@ Toujours distinguer les champs suivants :
 
 Règle : exposer une mesure no-vig/EV n'autorise pas à modifier automatiquement les seuils ou recommandations.
 
+### Prix d'exécution Moneyline
+
+Pour la MONEYLINE, distinguer strictement :
+
+- **marché de référence** : paire HOME/AWAY utilisée par la logique historique de gate/edge et par les mesures no-vig ;
+- **prix d'exécution** : meilleure cote décimale valide disponible pour le côté retenu parmi les bookmakers observés.
+
+Le prix d'exécution MONEYLINE est le maximum décimal disponible. Une liste de priorité bookmaker ne peut servir qu'à départager deux prix strictement égaux.
+
+Garde-fou de la correction initiale : le meilleur prix peut améliorer l'EV/Kelly/la cote affichée d'une recommandation déjà détectée, mais **ne crée pas à lui seul une recommandation** si le gate historique du marché de référence n'a pas été franchi.
+
+Spread/total ne suivent pas encore cette règle de maximum global : leurs prix ne sont comparables que pour une **même ligne**. Jusqu'à une implémentation line-aware dédiée, leur sélection historique est conservée.
+
+
 ## CLV · Closing Line Value
 
 - Le CLV compare **le prix obtenu au moment du pari** au **prix de clôture du même marché**. Il ne compare jamais `motor_prob` au marché.
