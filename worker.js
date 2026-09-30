@@ -4266,11 +4266,11 @@ async function _botSettleDate(env, dateStr, options = {}) {
       const spreadWasRight = marketSettlement.spread_was_right;
       const ouWasRight     = marketSettlement.ou_was_right;
 
-      let clvPostMatch = null;
+      let modelVsMarketAtAnalysisPts = null;
       if (log.motor_prob !== null && log.odds_at_analysis?.home_ml) {
         const ml = log.odds_at_analysis.home_ml;
         const impliedHome = ml < 0 ? Math.abs(ml) / (Math.abs(ml) + 100) : 100 / (ml + 100);
-        clvPostMatch = Math.round((log.motor_prob / 100 - impliedHome) * 10000) / 100;
+        modelVsMarketAtAnalysisPts = Math.round((log.motor_prob / 100 - impliedHome) * 10000) / 100;
       }
 
       // ── Settlement PLAYER_POINTS — fetch box score ESPN si recs props ─────
@@ -4311,7 +4311,12 @@ async function _botSettleDate(env, dateStr, options = {}) {
       log.upset             = upset;
       log.ou_was_right      = ouWasRight;
       log.spread_was_right  = spreadWasRight;
-      log.clv_post_match    = clvPostMatch;
+      // Pas de vraie closing quote capturée dans ce pipeline : ne jamais
+      // présenter un écart modèle↔marché d'analyse comme du CLV.
+      log.model_vs_market_at_analysis_pts = modelVsMarketAtAnalysisPts;
+      log.clv_post_match    = null;
+      log.clv_method        = null;
+      log.clv_status        = 'UNAVAILABLE_NO_CLOSING_ODDS';
       log.pp_recs_settled   = ppSettled;
       log.ml_recs_settled   = marketSettlement.moneyline_settled;
       log.spread_recs_settled = marketSettlement.spread_settled;
@@ -5169,7 +5174,8 @@ async function handleBotLogsExportCSV(url, env, origin) {
       'logged_at', 'settled_at', 'match_id', 'date', 'home', 'away',
       'motor_prob', 'confidence_level', 'data_quality', 'best_edge', 'best_market', 'best_side',
       'result_home_score', 'result_away_score', 'result_winner', 'result_margin', 'result_total',
-      'motor_was_right', 'prob_delta_pts', 'upset', 'ou_was_right', 'ou_model_was_right', 'spread_was_right', 'clv_post_match',
+      'motor_was_right', 'prob_delta_pts', 'upset', 'ou_was_right', 'ou_model_was_right', 'spread_was_right',
+      'clv_post_match', 'clv_status', 'clv_method', 'model_vs_market_at_analysis_pts',
       'est_total_nba', 'ou_line_nba', 'ou_diff_nba', 'ou_prediction_side', 'ou_prediction_edge',
     ];
     const colsNbaExtra = [
@@ -6317,6 +6323,24 @@ function _botFormatDate(date = new Date()) {
 // Remplacé par appels directs à Date + _botFormatDate pour éviter ambiguïté.
 function _botNowParis() { return new Date(); }
 
+function _computePriceCLV(oddsTakenAmerican, closingOddsAmerican) {
+  const taken = _amToDecimal(Number(oddsTakenAmerican));
+  const closing = _amToDecimal(Number(closingOddsAmerican));
+  if (!(taken > 1) || !(closing > 1)) return null;
+
+  const takenImplied = 1 / taken;
+  const closingImplied = 1 / closing;
+
+  // Deux lectures complémentaires, toutes deux basées sur PRIX vs PRIX.
+  // Positif = la cote prise était meilleure que la cote de clôture.
+  return {
+    odds_taken_decimal: Math.round(taken * 1000) / 1000,
+    closing_odds_decimal: Math.round(closing * 1000) / 1000,
+    price_ratio_pct: Math.round(((taken / closing) - 1) * 10000) / 100,
+    implied_prob_change_pts: Math.round((closingImplied - takenImplied) * 10000) / 100,
+  };
+}
+
 // ── PAPER TRADING ─────────────────────────────────────────────────────────────
 
 async function handlePaperGet(request, env, origin) {
@@ -6363,6 +6387,10 @@ async function handlePaperPlaceBet(request, env, origin) {
     bet.result    = 'PENDING';
     bet.pnl       = null;
     bet.clv       = null;
+    bet.clv_price_pct = null;
+    bet.clv_implied_prob_pts = null;
+    bet.clv_method = null;
+    bet.clv_status = 'PENDING_CLOSING_ODDS';
 
     state.bets.push(bet);
     state.current_bankroll = Math.round((state.current_bankroll - bet.stake) * 100) / 100;
@@ -6422,10 +6450,28 @@ async function handlePaperSettleBet(request, betId, env, origin) {
       bet.pnl = 0;
     }
 
-    if (closingOdds !== null && bet.motor_prob !== null) {
-      const decClosing     = closingOdds > 0 ? closingOdds / 100 + 1 : 100 / Math.abs(closingOdds) + 1;
-      const impliedClosing = 1 / decClosing;
-      bet.clv = Math.round((bet.motor_prob / 100 - impliedClosing) * 10000) / 100;
+    if (closingOdds !== null) {
+      const clv = _computePriceCLV(bet.odds_taken, closingOdds);
+      if (clv) {
+        // Back-compat : `bet.clv` devient un vrai CLV de prix (%).
+        bet.clv = clv.price_ratio_pct;
+        bet.clv_price_pct = clv.price_ratio_pct;
+        bet.clv_implied_prob_pts = clv.implied_prob_change_pts;
+        bet.clv_method = 'TAKEN_PRICE_VS_CLOSING_PRICE';
+        bet.clv_status = 'AVAILABLE';
+      } else {
+        bet.clv = null;
+        bet.clv_price_pct = null;
+        bet.clv_implied_prob_pts = null;
+        bet.clv_method = null;
+        bet.clv_status = 'UNAVAILABLE_INVALID_CLOSING_ODDS';
+      }
+    } else {
+      bet.clv = null;
+      bet.clv_price_pct = null;
+      bet.clv_implied_prob_pts = null;
+      bet.clv_method = null;
+      bet.clv_status = 'UNAVAILABLE_NO_CLOSING_ODDS';
     }
 
     state.current_bankroll = Math.round((state.current_bankroll + bet.stake + bet.pnl) * 100) / 100;
