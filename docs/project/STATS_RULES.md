@@ -60,9 +60,11 @@ Règle : exposer une mesure no-vig/EV n'autorise pas à modifier automatiquement
 - Mesure complémentaire · `implied_prob_change_pts = implied_closing − implied_taken` en points de probabilité.
 - Positif = prix obtenu meilleur que le prix de clôture.
 - Un écart `motor_prob − implied_market` est un **model-vs-market gap**, pas du CLV.
-- Bot automatique · tant qu'aucune closing quote réelle n'est capturée avant tip-off, `clv_post_match=null` et `clv_status=UNAVAILABLE_NO_CLOSING_ODDS`.
+- Bot automatique NBA · snapshots ESPN toutes les 15 minutes. Le closing price est le **dernier snapshot strictement avant tip-off**.
+- Validation temporelle · `clv_status=AVAILABLE` uniquement si ce snapshot est âgé de **20 minutes maximum** au tip. Plus ancien ⇒ `UNAVAILABLE_CLOSING_SNAPSHOT_STALE`. Snapshot post-tip ⇒ ignoré.
+- Marché couvert pour CLV automatique dans cette étape · **MONEYLINE uniquement**, car le snapshot capture un prix HOME/AWAY exploitable. Spread/total restent `UNAVAILABLE_MARKET_NOT_CAPTURED` jusqu'à capture de prix bidirectionnels équivalents.
+- Source/référence obligatoires · `closing_snapshot_at`, `closing_snapshot_age_minutes`, `closing_source`, `closing_provider_name`.
 - Paper bet manuel · si `closing_odds` est fourni au settlement, le CLV de prix peut être calculé.
-- À implémenter ensuite · capture immuable d'une closing quote pré-tip avec bookmaker/référence et timestamp.
 
 ## Brier score · obligatoire par bucket motor_prob
 
