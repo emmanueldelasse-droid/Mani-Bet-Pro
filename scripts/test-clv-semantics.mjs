@@ -54,7 +54,8 @@ check('bot CLV auto explicitly unavailable',
   worker.includes("log.clv_status        = 'UNAVAILABLE_NO_CLOSING_ODDS'"));
 check('bot preserves model-vs-market under honest name',
   worker.includes('log.model_vs_market_at_analysis_pts = modelVsMarketAtAnalysisPts'));
-check('legacy clvPostMatch variable removed', !worker.includes('let clvPostMatch'));
+check('NBA fake CLV formula removed',
+  !worker.includes('clvPostMatch = Math.round((log.motor_prob / 100 - impliedHome)'));
 check('paper CLV method explicit',
   worker.includes("bet.clv_method = 'TAKEN_PRICE_VS_CLOSING_PRICE'"));
 check('paper CLV no longer requires motor_prob',
