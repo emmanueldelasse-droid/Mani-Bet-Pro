@@ -446,6 +446,11 @@ async function handleOperationalHealth(env, origin) {
       status: 'degraded',
       health_schema_version: '2.0.0',
       worker: 'mani-bet-pro',
+      deployed_version: {
+        id: env?.CF_VERSION_METADATA?.id ?? null,
+        tag: env?.CF_VERSION_METADATA?.tag ?? null,
+        created_at: env?.CF_VERSION_METADATA?.timestamp ?? null,
+      },
       timestamp: now.toISOString(),
       storage: { kv_configured: false, d1_history_configured: Boolean(env?.MANI_HISTORY_DB) },
       issues: ['PAPER_TRADING_KV_MISSING'],
@@ -544,7 +549,11 @@ async function handleOperationalHealth(env, origin) {
     status: issues.length === 0 ? 'ok' : 'degraded',
     health_schema_version: '2.0.0',
     worker: 'mani-bet-pro',
-    version: '6.85.0',
+    deployed_version: {
+      id: env?.CF_VERSION_METADATA?.id ?? null,
+      tag: env?.CF_VERSION_METADATA?.tag ?? null,
+      created_at: env?.CF_VERSION_METADATA?.timestamp ?? null,
+    },
     timestamp: now.toISOString(),
     storage: {
       kv_configured: true,
