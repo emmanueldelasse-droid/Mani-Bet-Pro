@@ -378,15 +378,22 @@ const SAFE_ERROR_MSG_UNAVAILABLE = 'Service temporairement indisponible';
 // ── ROUTER PRINCIPAL ──────────────────────────────────────────────────────────
 
 export default {
-  // Cron Trigger — Cloudflare appelle scheduled() selon wrangler.toml
-  // Cron défini : "0 * * * *" (toutes les heures) — le handler filtre lui-même
-  // pour ne tourner que ~1h avant le premier match du soir.
+  // Cron Trigger — deux cadences :
+  // - "0 * * * *" : pipeline principal horaire (NBA/MLB/Tennis/settlement/calibration)
+  // - "*/15 * * * *" : snapshots de cotes uniquement pour approcher le closing price
+  // Le trigger 15 min ne lance JAMAIS les moteurs afin d'éviter ×4 appels providers.
   async scheduled(event, env, ctx) {
+    const cronSpec = event?.cron ?? '';
+
+    if (cronSpec === '*/15 * * * *') {
+      ctx.waitUntil(_runOddsSnapshot(env));
+      return;
+    }
+
     ctx.waitUntil(_runBotCron(env));
     ctx.waitUntil(_runMLBBotCron(env));
     ctx.waitUntil(_runTennisBotCron(env));
     ctx.waitUntil(_runNightlySettle(env));
-    ctx.waitUntil(_runOddsSnapshot(env));
     ctx.waitUntil(_runAIPlayerPropsCron(env));
     ctx.waitUntil(_runCalibrationCron(env));
   },
