@@ -3887,12 +3887,136 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
   };
 }
 
-async function _botSaveLog(env, log) {
-  if (!env.PAPER_TRADING) return;
+function _botD1Json(value) {
+  try { return JSON.stringify(value ?? null); }
+  catch (_) { return 'null'; }
+}
+
+async function _botPersistAnalysisD1(env, log) {
+  const db = env?.MANI_HISTORY_DB;
+  if (!db || !log?.analysis_id) return { written: false, reason: 'D1_BINDING_UNAVAILABLE' };
+
   try {
-    const key = `${BOT_LOG_PREFIX}${log.match_id}`;
-    await env.PAPER_TRADING.put(key, JSON.stringify(log), { expirationTtl: 90 * 24 * 3600 }); // 90 jours
-  } catch (err) { console.warn('[BOT] saveLog error:', err.message); }
+    const sql = `
+      INSERT OR IGNORE INTO nba_analysis_history (
+        analysis_id, match_id, season_id, event_type, season_type, nba_phase,
+        game_datetime, analyzed_at, home_team, away_team, status,
+        motor_prob, model_raw_score, decision_prob, probability_status,
+        confidence_level, data_quality, data_quality_observed,
+        best_edge, best_market, best_side, payload_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+
+    const weightedDq = log.data_quality_observed?.weighted_quality_score ?? null;
+    await db.prepare(sql).bind(
+      log.analysis_id,
+      log.match_id ?? null,
+      log.season_id ?? null,
+      log.event_type ?? null,
+      log.season_type ?? null,
+      log.nba_phase ?? null,
+      log.datetime ?? null,
+      log.logged_at ?? new Date().toISOString(),
+      log.home ?? null,
+      log.away ?? null,
+      log.status ?? BOT_LOG_STATUS.PENDING,
+      log.motor_prob ?? null,
+      log.model_raw_score ?? null,
+      log.decision_prob ?? null,
+      log.probability_status ?? null,
+      log.confidence_level ?? null,
+      log.data_quality ?? null,
+      weightedDq,
+      log.best_edge ?? null,
+      log.best_market ?? null,
+      log.best_side ?? null,
+      _botD1Json(log),
+    ).run();
+
+    return { written: true };
+  } catch (err) {
+    console.warn('[BOT] D1 analysis dual-write error:', err.message);
+    return { written: false, reason: 'D1_WRITE_FAILED' };
+  }
+}
+
+async function _botPersistSettlementD1(env, log) {
+  const db = env?.MANI_HISTORY_DB;
+  if (!db || !log?.analysis_id) return { written: false, reason: 'D1_BINDING_UNAVAILABLE' };
+
+  try {
+    const sql = `
+      INSERT INTO nba_analysis_settlements (
+        analysis_id, match_id, status, settled_at,
+        result_home_score, result_away_score, result_winner,
+        result_margin, result_total, motor_was_right,
+        spread_was_right, ou_was_right, ou_model_was_right,
+        clv_post_match, clv_status, clv_method, settlement_source,
+        payload_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(analysis_id) DO UPDATE SET
+        status = excluded.status,
+        settled_at = excluded.settled_at,
+        result_home_score = excluded.result_home_score,
+        result_away_score = excluded.result_away_score,
+        result_winner = excluded.result_winner,
+        result_margin = excluded.result_margin,
+        result_total = excluded.result_total,
+        motor_was_right = excluded.motor_was_right,
+        spread_was_right = excluded.spread_was_right,
+        ou_was_right = excluded.ou_was_right,
+        ou_model_was_right = excluded.ou_model_was_right,
+        clv_post_match = excluded.clv_post_match,
+        clv_status = excluded.clv_status,
+        clv_method = excluded.clv_method,
+        settlement_source = excluded.settlement_source,
+        payload_json = excluded.payload_json
+    `;
+
+    await db.prepare(sql).bind(
+      log.analysis_id,
+      log.match_id ?? null,
+      log.status ?? null,
+      log.settled_at ?? new Date().toISOString(),
+      log.result_home_score ?? null,
+      log.result_away_score ?? null,
+      log.result_winner ?? null,
+      log.result_margin ?? null,
+      log.result_total ?? null,
+      log.motor_was_right == null ? null : (log.motor_was_right ? 1 : 0),
+      log.spread_was_right == null ? null : (log.spread_was_right ? 1 : 0),
+      log.ou_was_right == null ? null : (log.ou_was_right ? 1 : 0),
+      log.ou_model_was_right == null ? null : (log.ou_model_was_right ? 1 : 0),
+      log.clv_post_match ?? null,
+      log.clv_status ?? null,
+      log.clv_method ?? null,
+      log.settlement_source ?? null,
+      _botD1Json(log),
+    ).run();
+
+    return { written: true };
+  } catch (err) {
+    console.warn('[BOT] D1 settlement dual-write error:', err.message);
+    return { written: false, reason: 'D1_WRITE_FAILED' };
+  }
+}
+
+async function _botSaveLog(env, log) {
+  if (!log) return;
+  if (!log.analysis_id) log.analysis_id = crypto.randomUUID();
+
+  // KV reste le chemin canonique actuel : ne jamais rendre l'analyse dépendante
+  // de D1 tant que la migration et le binding production ne sont pas validés.
+  if (env?.PAPER_TRADING) {
+    try {
+      const key = `${BOT_LOG_PREFIX}${log.match_id}`;
+      await env.PAPER_TRADING.put(key, JSON.stringify(log), { expirationTtl: 90 * 24 * 3600 }); // 90 jours
+    } catch (err) { console.warn('[BOT] saveLog error:', err.message); }
+  }
+
+  // Dual-write best-effort. D1 conserve chaque analysis_id ; KV conserve
+  // uniquement le dernier snapshot par match_id pendant 90 jours.
+  await _botPersistAnalysisD1(env, log);
 }
 
 // ── PARIS COMBINÉS (parlay) — détection value sur paires de recos ─────────────
@@ -4253,6 +4377,7 @@ async function _botSettleDate(env, dateStr, options = {}) {
         log.result_fetch_latency  = resultFetchLatency;
         if (cronRunId) log.cron_run_id = cronRunId;
         await env.PAPER_TRADING.put(key, JSON.stringify(log), { expirationTtl: 90 * 24 * 3600 });
+        await _botPersistSettlementD1(env, log);
         if (espnMapped === BOT_LOG_STATUS.POSTPONED) postponed++; else cancelled++;
         continue;
       }
@@ -4364,6 +4489,7 @@ async function _botSettleDate(env, dateStr, options = {}) {
       }
 
       await env.PAPER_TRADING.put(key, JSON.stringify(log), { expirationTtl: 90 * 24 * 3600 });
+      await _botPersistSettlementD1(env, log);
       settled++;
     } catch (err) { console.warn(`[BOT] settle log ${result.id}:`, err.message); }
   }
@@ -5188,7 +5314,7 @@ async function handleBotLogsExportCSV(url, env, origin) {
     logs.sort((a, b) => new Date(a.logged_at) - new Date(b.logged_at));
 
     const colsCommon = [
-      'logged_at', 'settled_at', 'match_id', 'date', 'home', 'away',
+      'analysis_id', 'logged_at', 'settled_at', 'match_id', 'date', 'home', 'away',
       'motor_prob', 'model_raw_score', 'model_calibrated_prob', 'decision_prob', 'probability_status',
       'confidence_level', 'data_quality', 'best_edge', 'best_market', 'best_side',
       'result_home_score', 'result_away_score', 'result_winner', 'result_margin', 'result_total',
