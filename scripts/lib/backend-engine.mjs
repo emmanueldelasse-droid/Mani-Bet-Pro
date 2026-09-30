@@ -77,6 +77,8 @@ function loadBackendSandbox() {
 
   const required = [
     'parseESPNMatches',
+    '_isNBAPreseasonLog',
+    '_isNBAStatsEligibleLog',
     '_botGetNBAPhase',
     '_botGetWeights',
     '_botExtractVariables',
