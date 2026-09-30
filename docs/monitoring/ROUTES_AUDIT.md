@@ -104,24 +104,26 @@ Regex pattern · `^\/paper\/bet\/[^/]+$` (worker.js:407)
 
 ## Health / OPTIONS
 
-| Route | Méthode | Handler | Ligne | Notes |
-|---|---|---|---|---|
-| `OPTIONS *` | OPTIONS | inline 204 + CORS | 253-254 | hors try block (à vérifier impact corsHeaders) |
-| `/health` | GET | inline JSON | 415 | **version hardcodée `6.85.0`** non sync changelog |
+| Route | Méthode | Handler | Notes |
+|---|---|---|---|
+| `OPTIONS *` | OPTIONS | inline 204 + CORS | preflight CORS |
+| `/health` | GET | `handleOperationalHealth` | read-only KV/runtime metadata · aucun appel provider externe · scheduler/checkpoints/settlement/provider-cache/D1/version Cloudflare |
 
 ## Cron handlers (scheduled)
 
-Trigger Cloudflare · `"0 * * * *"` (chaque heure) · lancement `ctx.waitUntil()` parallèle.
+Triggers Cloudflare :
+- `0 * * * *` · pipeline principal horaire ;
+- `*/15 * * * *` · snapshots de cotes uniquement, distingué via `controller.cron`.
 
-| Handler | Ligne implémentation | Condition horaire | Idempotence KV | Rôle |
-|---|---|---|---|---|
-| `_runBotCron` | 3204 | fenêtre dynamique (~1h avant 1er match) | `bot_last_run` 30h | Analyse NBA + recos + Telegram |
-| `_runMLBBotCron` | 8066 | idem MLB | `mlb_bot_last_run` 30h | Analyse MLB |
-| `_runTennisBotCron` | 9372 | idem tennis (tournois actifs) | `tennis_bot_last_run` 30h | Analyse tennis |
-| `_runNightlySettle` | 4237 | **10-11h UTC** | `bot_nightly_settle_last_run` 48h | Settle J-1 J-2 (tennis J-10) |
-| `_runOddsSnapshot` | 4298 | chaque heure | `odds_snap_*` 72h | Snapshot cotes NBA + MLB |
-| `_runAIPlayerPropsCron` | 4350 | **22h UTC** | rate KV 25h | Claude batch props NBA |
-| `_runCalibrationCron` | 4415 | **lundi 7h UTC** | `calibration_run_YYYY-Www` 8j | Résumé hebdo Telegram |
+| Handler | Cadence / condition | Idempotence KV | Rôle |
+|---|---|---|---|
+| `_runBotCron` | horaire · checkpoints NBA H6/H4/H2/H1 par match | `nba_checkpoint_{matchId}_{checkpoint}` 72h | Analyse NBA · Telegram H1 seulement · heartbeat `nba_cron_heartbeat_v1` |
+| `_runMLBBotCron` | horaire · fenêtre MLB historique | `mlb_bot_last_run` 30h | Analyse MLB |
+| `_runTennisBotCron` | horaire · fenêtre tournois actifs | `tennis_bot_last_run` 30h | Analyse tennis |
+| `_runNightlySettle` | horaire · actif 10-11h UTC | `bot_nightly_settle_last_run` 48h | settlement + recovery |
+| `_runOddsSnapshot` | **toutes les 15 min** | `odds_snap_*` 72h | snapshots ESPN NBA/MLB + heartbeat `odds_snapshot_heartbeat_v1` |
+| `_runAIPlayerPropsCron` | horaire · actif 22h UTC | rate KV 25h | Claude batch props NBA |
+| `_runCalibrationCron` | horaire · lundi 7h UTC | `calibration_run_YYYY-Www` 8j | résumé hebdo Telegram |
 
 ## Routes orphelines / dead code
 

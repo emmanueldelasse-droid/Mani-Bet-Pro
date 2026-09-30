@@ -134,6 +134,8 @@ const BOT_LOG_PREFIX       = 'bot_log_';
 const BOT_RUN_KEY          = 'bot_last_run'; // telemetry only · no longer blocks a full day
 const NBA_CHECKPOINT_PREFIX = 'nba_checkpoint_';
 const NBA_CHECKPOINT_TTL_SECONDS = 72 * 3600;
+const NBA_CRON_HEARTBEAT_KEY = 'nba_cron_heartbeat_v1';
+const ODDS_SNAPSHOT_HEARTBEAT_KEY = 'odds_snapshot_heartbeat_v1';
 const NBA_CHECKPOINT_WINDOWS = Object.freeze([
   { id: 'H6', min_exclusive: 300, max_inclusive: 420 },
   { id: 'H4', min_exclusive: 180, max_inclusive: 300 },
@@ -375,6 +377,207 @@ function errorResponse(message, status = 500, origin = '') {
 const SAFE_ERROR_MSG_500 = 'Erreur interne';
 const SAFE_ERROR_MSG_UNAVAILABLE = 'Service temporairement indisponible';
 
+function _healthAgeMinutes(timestamp, nowMs = Date.now()) {
+  if (!timestamp) return null;
+  const ts = typeof timestamp === 'number'
+    ? timestamp
+    : new Date(timestamp).getTime();
+  if (!Number.isFinite(ts)) return null;
+  return Math.round(((nowMs - ts) / 60000) * 10) / 10;
+}
+
+function _healthFreshness(timestamp, maxAgeMinutes, nowMs = Date.now()) {
+  const age = _healthAgeMinutes(timestamp, nowMs);
+  if (age === null) return { status: 'UNKNOWN', age_minutes: null, observed_at: timestamp ?? null };
+  if (age < 0) return { status: 'CLOCK_SKEW', age_minutes: age, observed_at: timestamp };
+  return {
+    status: age <= maxAgeMinutes ? 'FRESH' : 'STALE',
+    age_minutes: age,
+    observed_at: timestamp,
+    max_age_minutes: maxAgeMinutes,
+  };
+}
+
+function _healthExtractTimestamp(value) {
+  if (!value || typeof value !== 'object') return null;
+  return value.ran_at
+    ?? value.fetched_at
+    ?? value.updated_at
+    ?? value.timestamp
+    ?? value._ts
+    ?? null;
+}
+
+async function _healthReadJson(kv, key) {
+  if (!kv) return null;
+  try {
+    const raw = await kv.get(key);
+    if (!raw) return null;
+    if (typeof raw === 'object') return raw;
+    return JSON.parse(raw);
+  } catch (_) { return null; }
+}
+
+async function _healthReadLogs(kv, prefix, limit = 1000) {
+  if (!kv) return { logs: [], truncated: false };
+  try {
+    const list = await kv.list({ prefix, limit });
+    const keys = list?.keys ?? [];
+    const logs = [];
+    await Promise.all(keys.map(async entry => {
+      try {
+        const raw = await kv.get(entry.name);
+        if (raw) logs.push(typeof raw === 'string' ? JSON.parse(raw) : raw);
+      } catch (_) {}
+    }));
+    return { logs, truncated: Boolean(list?.list_complete === false) };
+  } catch (_) {
+    return { logs: [], truncated: false };
+  }
+}
+
+async function handleOperationalHealth(env, origin) {
+  const now = new Date();
+  const nowMs = now.getTime();
+  const kv = env?.PAPER_TRADING ?? null;
+
+  if (!kv) {
+    return jsonResponse({
+      status: 'degraded',
+      health_schema_version: '2.0.0',
+      worker: 'mani-bet-pro',
+      deployed_version: {
+        id: env?.CF_VERSION_METADATA?.id ?? null,
+        tag: env?.CF_VERSION_METADATA?.tag ?? null,
+        created_at: env?.CF_VERSION_METADATA?.timestamp ?? null,
+      },
+      timestamp: now.toISOString(),
+      storage: { kv_configured: false, d1_history_configured: Boolean(env?.MANI_HISTORY_DB) },
+      issues: ['PAPER_TRADING_KV_MISSING'],
+    }, 200, origin);
+  }
+
+  const [nbaHeartbeat, oddsHeartbeat, lastRun, nightlyRaw, logsResult, checkpointList] = await Promise.all([
+    _healthReadJson(kv, NBA_CRON_HEARTBEAT_KEY),
+    _healthReadJson(kv, ODDS_SNAPSHOT_HEARTBEAT_KEY),
+    _healthReadJson(kv, BOT_RUN_KEY),
+    kv.get(NIGHTLY_SETTLE_RUN_KEY).catch(() => null),
+    _healthReadLogs(kv, BOT_LOG_PREFIX),
+    kv.list({ prefix: NBA_CHECKPOINT_PREFIX, limit: 1000 }).catch(() => ({ keys: [], list_complete: true })),
+  ]);
+
+  const logs = logsResult.logs;
+  const last24hCutoff = nowMs - 24 * 3600 * 1000;
+  const recentLogs = logs.filter(log => {
+    const ts = new Date(log?.logged_at ?? '').getTime();
+    return Number.isFinite(ts) && ts >= last24hCutoff;
+  });
+
+  const statusCounts = {};
+  const checkpointCounts = {};
+  let latestAnalysisAt = null;
+  let overdueSettlements = 0;
+
+  for (const log of logs) {
+    const status = _botLogStatus(log) ?? 'unknown';
+    statusCounts[status] = (statusCounts[status] ?? 0) + 1;
+
+    const checkpoint = log?.checkpoint_id ?? 'LEGACY';
+    checkpointCounts[checkpoint] = (checkpointCounts[checkpoint] ?? 0) + 1;
+
+    const loggedTs = new Date(log?.logged_at ?? '').getTime();
+    if (Number.isFinite(loggedTs) && (!latestAnalysisAt || loggedTs > new Date(latestAnalysisAt).getTime())) {
+      latestAnalysisAt = log.logged_at;
+    }
+
+    if (status === BOT_LOG_STATUS.PENDING && log?.datetime) {
+      const tipMs = new Date(log.datetime).getTime();
+      if (Number.isFinite(tipMs) && nowMs > tipMs + 6 * 3600 * 1000) overdueSettlements++;
+    }
+  }
+
+  const providerKeys = {
+    tank01_team_stats: TANK01_KV_KEY,
+    injuries_impact: TANK01_INJURIES_KEY,
+    roster_injuries: TANK01_ROSTER_KEY,
+    enriched_rosters: 'nba_rosters_teams_v3',
+  };
+  const providerCache = {};
+  for (const [name, key] of Object.entries(providerKeys)) {
+    const value = await _healthReadJson(kv, key);
+    const ts = _healthExtractTimestamp(value);
+    providerCache[name] = {
+      present: value !== null,
+      observed_at: ts,
+      age_minutes: _healthAgeMinutes(ts, nowMs),
+    };
+  }
+
+  const scheduler = {
+    nba_hourly: {
+      ..._healthFreshness(nbaHeartbeat?.ran_at ?? null, 90, nowMs),
+      cron_run_id: nbaHeartbeat?.cron_run_id ?? null,
+      date: nbaHeartbeat?.date ?? null,
+    },
+    odds_snapshot_15m: {
+      ..._healthFreshness(oddsHeartbeat?.ran_at ?? null, 35, nowMs),
+      nba_snapshots_written: oddsHeartbeat?.nba_snapshots_written ?? null,
+      mlb_snapshots_written: oddsHeartbeat?.mlb_snapshots_written ?? null,
+    },
+    last_analysis_run: lastRun ? {
+      ran_at: lastRun.ran_at ?? null,
+      matches_analyzed: lastRun.matches_analyzed ?? null,
+      checkpoint_mode: lastRun.checkpoint_mode ?? false,
+      checkpoints: Array.isArray(lastRun.checkpoints) ? lastRun.checkpoints.length : 0,
+    } : null,
+    nightly_settle_last_run: typeof nightlyRaw === 'string' ? nightlyRaw : null,
+  };
+
+  const issues = [];
+  if (scheduler.nba_hourly.status !== 'FRESH') issues.push('NBA_CRON_HEARTBEAT_NOT_FRESH');
+  if (scheduler.odds_snapshot_15m.status !== 'FRESH') issues.push('ODDS_SNAPSHOT_HEARTBEAT_NOT_FRESH');
+  if (overdueSettlements > 0) issues.push('NBA_SETTLEMENT_OVERDUE');
+  if (logsResult.truncated) issues.push('NBA_LOG_SCAN_TRUNCATED');
+
+  const warnings = [];
+  if (!env?.MANI_HISTORY_DB) warnings.push('D1_HISTORY_BINDING_NOT_CONFIGURED');
+  for (const [name, p] of Object.entries(providerCache)) {
+    if (!p.present) warnings.push(`CACHE_MISSING_${name.toUpperCase()}`);
+  }
+
+  return jsonResponse({
+    status: issues.length === 0 ? 'ok' : 'degraded',
+    health_schema_version: '2.0.0',
+    worker: 'mani-bet-pro',
+    deployed_version: {
+      id: env?.CF_VERSION_METADATA?.id ?? null,
+      tag: env?.CF_VERSION_METADATA?.tag ?? null,
+      created_at: env?.CF_VERSION_METADATA?.timestamp ?? null,
+    },
+    timestamp: now.toISOString(),
+    storage: {
+      kv_configured: true,
+      d1_history_configured: Boolean(env?.MANI_HISTORY_DB),
+    },
+    scheduler,
+    nba: {
+      logs_scanned: logs.length,
+      logs_scan_truncated: logsResult.truncated,
+      latest_analysis_at: latestAnalysisAt,
+      latest_analysis_freshness: _healthFreshness(latestAnalysisAt, 8 * 60, nowMs),
+      latest_snapshot_logs_24h: recentLogs.length,
+      status_breakdown: statusCounts,
+      checkpoint_breakdown_latest_snapshots: checkpointCounts,
+      checkpoint_keys_72h: checkpointList?.keys?.length ?? 0,
+      checkpoint_scan_truncated: checkpointList?.list_complete === false,
+      overdue_settlements_6h_after_tip: overdueSettlements,
+    },
+    provider_cache: providerCache,
+    issues,
+    warnings,
+  }, 200, origin);
+}
+
 // ── ROUTER PRINCIPAL ──────────────────────────────────────────────────────────
 
 export default {
@@ -579,22 +782,10 @@ export default {
 
       // ── IA ────────────────────────────────────────────────────────────────
       // ── SANTÉ ─────────────────────────────────────────────────────────────
-      if (path === '/health') {
-        return jsonResponse({
-          status:    'ok',
-          worker:    'mani-bet-pro',
-          version:   '6.85.0',
-          timestamp: new Date().toISOString(),
-          routes: [
-            'GET /nba/matches', 'GET /nba/team/:id/stats', 'GET /nba/team/:id/recent',
-            'GET /nba/injuries/espn', 'GET /nba/injuries/impact', 'GET /nba/injuries',
-            'GET /nba/standings', 'GET /nba/results', 'GET /nba/teams/stats',
-            'GET /nba/player/test', 'GET /nba/roster-injuries',
-            'GET /nba/ai-injuries', 'POST /nba/ai-injuries-batch', 'GET /nba/odds/comparison', 'GET /nba/team-detail',
-            'GET /nba/player-points', 'POST /nba/ai-player-props-batch', 'GET /nba/ai-player-props',
-            'GET /paper/state', 'POST /paper/bet', 'PUT /paper/bet/:id', 'POST /paper/reset',
-          ],
-        }, 200, origin);
+      // Read-only : aucun appel provider externe. Le health reflète uniquement
+      // les heartbeats/caches/logs déjà persistés dans KV.
+      if (path === '/health' && request.method === 'GET') {
+        return await handleOperationalHealth(env, origin);
       }
 
       if (env.ASSETS) return env.ASSETS.fetch(request);
@@ -3472,6 +3663,19 @@ async function _runBotCron(env, forceRun = false) {
   };
   console.log(`[BOT] Cron démarré — ${now.toISOString()}, date NBA (Paris): ${dateStr} · run=${cronRunId}`);
 
+  // Heartbeat indépendant de la présence de matchs/checkpoints.
+  // Permet à /health de distinguer "cron vivant mais rien à analyser" de
+  // "scheduler Cloudflare qui ne tourne plus".
+  if (env?.PAPER_TRADING) {
+    try {
+      await env.PAPER_TRADING.put(NBA_CRON_HEARTBEAT_KEY, JSON.stringify({
+        ran_at: now.toISOString(),
+        date: dateStr,
+        cron_run_id: cronRunId,
+      }), { expirationTtl: 3 * 3600 });
+    } catch (err) { console.warn('[BOT] heartbeat write error:', err.message); }
+  }
+
   // Charger les matchs du jour
   const espnData = await espnFetch(`${ESPN_SCOREBOARD}?dates=${dateStr}&limit=25`);
   if (!espnData) {
@@ -5061,7 +5265,18 @@ async function _runOddsSnapshot(env) {
     const nba2 = await snapshot(`${ESPN_SCOREBOARD}?dates=${tomorrow}&limit=25`, ODDS_SNAP_PREFIX);
     const mlb1 = await snapshot(`${ESPN_MLB_SCOREBOARD}?dates=${today}&limit=25`, ODDS_SNAP_PREFIX);
     const mlb2 = await snapshot(`${ESPN_MLB_SCOREBOARD}?dates=${tomorrow}&limit=25`, ODDS_SNAP_PREFIX);
-    console.log(`[ODDS SNAP] NBA=${nba1 + nba2} MLB=${mlb1 + mlb2}`);
+    const nbaCount = nba1 + nba2;
+    const mlbCount = mlb1 + mlb2;
+
+    try {
+      await env.PAPER_TRADING.put(ODDS_SNAPSHOT_HEARTBEAT_KEY, JSON.stringify({
+        ran_at: now.toISOString(),
+        nba_snapshots_written: nbaCount,
+        mlb_snapshots_written: mlbCount,
+      }), { expirationTtl: 60 * 60 });
+    } catch (err) { console.warn('[ODDS SNAP] heartbeat:', err.message); }
+
+    console.log(`[ODDS SNAP] NBA=${nbaCount} MLB=${mlbCount}`);
   } catch (err) { console.warn('[ODDS SNAP] error:', err.message); }
 }
 

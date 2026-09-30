@@ -4,12 +4,13 @@
 `main` · auto-deploy CF/GH Pages (build f9cd992)
 
 ## En cours
-[P0] Closing line NBA vérifiée · branche `feat/nba-verified-closing-line-20260930`
-- scheduler par match H6/H4/H2/H1 mergé via PR #234 ; `BOT_RUN_KEY` = télémétrie uniquement
-- nouveau cron dédié 15 min : snapshots ESPN uniquement, sans relancer les moteurs
-- closing quote = dernier snapshot strictement pré-tip ; `AVAILABLE` seulement si âge <=20 min
-- CLV automatique actuel limité au MONEYLINE ; spread/total restent indisponibles tant que leurs prix de clôture bidirectionnels ne sont pas capturés
-- D1 settlement reçoit timestamp/âge/source/provider/prix closing si binding disponible
+[P0] Health opérationnel NBA · branche `feat/health-operational-dashboard-20260930`
+- scheduler par match H6/H4/H2/H1 mergé via PR #234
+- closing line pré-tip + CLV MONEYLINE mergés via PR #235
+- `GET /health` devient un snapshot read-only KV/runtime : heartbeats NBA horaire + odds 15 min, checkpoints, logs/status, settlements en retard, présence/fraîcheur caches provider, état binding D1
+- aucun provider externe n'est appelé par `/health`
+- version réellement déployée exposée via binding Cloudflare `CF_VERSION_METADATA`
+- health `degraded` uniquement sur issues opérationnelles ; D1 non provisionné reste warning
 - la partie **date Paris vs slate US** reste séparée dans la PR draft #217 et nécessite toujours une preuve runtime réelle avant merge
 
 ## Validation post-Fix#4 (à faire · prochain nightly ~10-11h UTC)
