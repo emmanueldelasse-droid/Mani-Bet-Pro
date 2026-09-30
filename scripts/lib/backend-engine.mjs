@@ -91,6 +91,7 @@ function loadBackendSandbox() {
     '_botComputeMarketDivergence',
     '_getAIPlayerPropsLines',
     '_botMatchPlayerPropsToLines',
+    '_botBuildParlayRecs',
     '_botComputeConfidence',
     '_botTennisConfidence',
     '_botEngineCompute',
