@@ -4087,6 +4087,109 @@ async function handleBotLogs(url, env, origin) {
   } catch (err) { return jsonResponse({ error: SAFE_ERROR_MSG_500 }, 500, origin); }
 }
 
+function _botSettleMarketRecommendations(recommendations, outcome) {
+  const recs = Array.isArray(recommendations) ? recommendations : [];
+  const winner = outcome?.winner ?? null;
+  const margin = Number(outcome?.margin);
+  const totalPts = Number(outcome?.total_points);
+
+  let moneylineWasRight = null;
+  let spreadWasRight = null;
+  let ouWasRight = null;
+  let moneylineSettled = 0;
+  let spreadSettled = 0;
+  let totalSettled = 0;
+
+  for (const rec of recs) {
+    // Seules les recommandations réellement exploitables entrent dans les stats.
+    if (!rec || rec.has_value !== true) continue;
+
+    if (rec.type === 'MONEYLINE' && (rec.side === 'HOME' || rec.side === 'AWAY') && winner) {
+      const win = rec.side === winner;
+      rec.result = win ? 'WIN' : 'LOSS';
+      rec.was_right = win;
+      rec.settled_value = winner;
+      moneylineSettled++;
+      if (moneylineWasRight === null) moneylineWasRight = win;
+      continue;
+    }
+
+    if (rec.type === 'SPREAD' && (rec.side === 'HOME' || rec.side === 'AWAY') && Number.isFinite(margin)) {
+      const line = Number(rec.spread_line ?? rec.line);
+      if (!Number.isFinite(line)) continue;
+
+      // spread_line est exprimée du point de vue du side de la recommandation
+      // (HOME -5.5 ou AWAY +5.5). On centre donc la marge sur ce side.
+      const sideMargin = rec.side === 'HOME' ? margin : -margin;
+      const coveredBy = sideMargin + line;
+
+      rec.settled_value = Math.round(sideMargin * 10) / 10;
+      rec.settled_line = line;
+      if (Math.abs(coveredBy) < 1e-9) {
+        rec.result = 'PUSH';
+        rec.was_right = null;
+      } else {
+        const win = coveredBy > 0;
+        rec.result = win ? 'WIN' : 'LOSS';
+        rec.was_right = win;
+      }
+      spreadSettled++;
+      if (spreadWasRight === null && rec.result !== 'PUSH') spreadWasRight = rec.was_right;
+      continue;
+    }
+
+    if (rec.type === 'OVER_UNDER' && (rec.side === 'OVER' || rec.side === 'UNDER') && Number.isFinite(totalPts)) {
+      const line = Number(rec.ou_line ?? rec.line ?? rec.market_total);
+      if (!Number.isFinite(line)) continue;
+
+      rec.settled_value = totalPts;
+      rec.settled_line = line;
+      if (Math.abs(totalPts - line) < 1e-9) {
+        rec.result = 'PUSH';
+        rec.was_right = null;
+      } else {
+        const actualSide = totalPts > line ? 'OVER' : 'UNDER';
+        const win = rec.side === actualSide;
+        rec.result = win ? 'WIN' : 'LOSS';
+        rec.was_right = win;
+      }
+      totalSettled++;
+      if (ouWasRight === null && rec.result !== 'PUSH') ouWasRight = rec.was_right;
+    }
+  }
+
+  return {
+    moneyline_was_right: moneylineWasRight,
+    spread_was_right: spreadWasRight,
+    ou_was_right: ouWasRight,
+    moneyline_settled: moneylineSettled,
+    spread_settled: spreadSettled,
+    total_settled: totalSettled,
+  };
+}
+
+function _botSettlePlayerPointRecommendation(rec, actualPts, actualMins = null) {
+  if (!rec || rec.type !== 'PLAYER_POINTS') return false;
+  const line = Number(rec.line);
+  const pts = Number(actualPts);
+  if (!Number.isFinite(line) || !Number.isFinite(pts)) return false;
+
+  rec.actual_pts = pts;
+  if (actualMins != null && Number.isFinite(Number(actualMins))) rec.actual_mins = Number(actualMins);
+
+  if (Math.abs(pts - line) < 1e-9) {
+    rec.result = 'PUSH';
+    rec.was_right = null;
+    return true;
+  }
+
+  const actualSide = pts > line ? 'OVER' : 'UNDER';
+  const win = rec.side === actualSide;
+  rec.result = win ? 'WIN' : 'LOSS';
+  rec.was_right = win;
+  return true;
+}
+
 async function _botSettleDate(env, dateStr, options = {}) {
   const { force = false, cronRunId = null, source = 'cron_nightly' } = options;
   const fetchStartedAt = Date.now();
@@ -4154,18 +4257,14 @@ async function _botSettleDate(env, dateStr, options = {}) {
 
       const upset = log.motor_prob !== null && Math.abs(log.motor_prob - 50) > 5 && !motorWasRight;
 
-      let spreadWasRight = null;
-      let ouWasRight     = null;
-      const recs = log.betting_recommendations;
-      if (recs?.spread?.side && recs?.spread?.line !== undefined) {
-        const line = recs.spread.line;
-        const coverHome = (margin + line) > 0;
-        spreadWasRight = recs.spread.side === 'HOME' ? coverHome : !coverHome;
-      }
-      if (recs?.total?.side && recs?.total?.line !== undefined) {
-        const over = totalPts > recs.total.line;
-        ouWasRight = recs.total.side === 'OVER' ? over : !over;
-      }
+      // Settlement sur le schéma réellement produit par les moteurs :
+      // betting_recommendations.recommendations[].
+      const marketSettlement = _botSettleMarketRecommendations(
+        log.betting_recommendations?.recommendations ?? [],
+        { winner, margin, total_points: totalPts }
+      );
+      const spreadWasRight = marketSettlement.spread_was_right;
+      const ouWasRight     = marketSettlement.ou_was_right;
 
       let clvPostMatch = null;
       if (log.motor_prob !== null && log.odds_at_analysis?.home_ml) {
@@ -4186,10 +4285,8 @@ async function _botSettleDate(env, dateStr, options = {}) {
             for (const rec of ppRecs) {
               const match = box.find(b => _normalizeName(b.name) === _normalizeName(rec.player));
               if (!match) continue;
-              rec.actual_pts = match.pts;
-              rec.actual_mins = match.mins;
-              rec.was_right = rec.side === 'OVER' ? match.pts > rec.line : match.pts < rec.line;
-              if (rec.was_right !== null) ppSettled++;
+              const didSettle = _botSettlePlayerPointRecommendation(rec, match.pts, match.mins);
+              if (didSettle && (rec.was_right === true || rec.was_right === false)) ppSettled++;
             }
             // Enrichir projections (tous les joueurs, pas que ceux avec reco)
             if (hasPPPred) {
@@ -4216,11 +4313,18 @@ async function _botSettleDate(env, dateStr, options = {}) {
       log.spread_was_right  = spreadWasRight;
       log.clv_post_match    = clvPostMatch;
       log.pp_recs_settled   = ppSettled;
+      log.ml_recs_settled   = marketSettlement.moneyline_settled;
+      log.spread_recs_settled = marketSettlement.spread_settled;
+      log.ou_recs_settled   = marketSettlement.total_settled;
       // Calibration modèle O/U : est_total_nba vs résultat réel (indépendant de la reco)
       if (log.est_total_nba != null && log.ou_line_nba != null && totalPts != null) {
-        const modelOver = log.est_total_nba > log.ou_line_nba;
-        const actualOver = totalPts > log.ou_line_nba;
-        log.ou_model_was_right = modelOver === actualOver;
+        if (Math.abs(totalPts - log.ou_line_nba) < 1e-9) {
+          log.ou_model_was_right = null; // PUSH marché · jamais WIN/LOSS
+        } else {
+          const modelOver = log.est_total_nba > log.ou_line_nba;
+          const actualOver = totalPts > log.ou_line_nba;
+          log.ou_model_was_right = modelOver === actualOver;
+        }
       }
       // MBP-CATCHUP-SETTLE · enrichissement audit
       log.status                = BOT_LOG_STATUS.SETTLED;
