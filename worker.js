@@ -4017,10 +4017,11 @@ async function _botPersistAnalysisD1(env, log) {
       INSERT OR IGNORE INTO nba_analysis_history (
         analysis_id, match_id, season_id, event_type, season_type, nba_phase,
         game_datetime, analyzed_at, home_team, away_team, status,
+        checkpoint_id, checkpoint_minutes_to_tip,
         motor_prob, model_raw_score, decision_prob, probability_status,
         confidence_level, data_quality, data_quality_observed,
         best_edge, best_market, best_side, payload_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const weightedDq = log.data_quality_observed?.weighted_quality_score ?? null;
@@ -4036,6 +4037,8 @@ async function _botPersistAnalysisD1(env, log) {
       log.home ?? null,
       log.away ?? null,
       log.status ?? BOT_LOG_STATUS.PENDING,
+      log.checkpoint_id ?? null,
+      log.checkpoint_minutes_to_tip ?? null,
       log.motor_prob ?? null,
       log.model_raw_score ?? null,
       log.decision_prob ?? null,
