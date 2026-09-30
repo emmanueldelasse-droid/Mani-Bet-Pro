@@ -4,8 +4,9 @@
  * `absences_confirmed` côté frontend dans DataOrchestrator.buildRawData.
  *
  * Avant le fix : `absences_confirmed = injuryReport !== null` (booléen GLOBAL).
- * Après le fix : défini PAR ÉQUIPE, aligné sur le backend
- *   (worker.js _botAnalyzeMatch:3654 · `homeInjuries !== null || awayInjuries !== null`).
+ * Après le fix : défini PAR ÉQUIPE à partir des absences réellement pertinentes
+ *   pour le match. Le backend Worker applique désormais la même sémantique
+ *   après fusion des sources ESPN/Tank01 + IA.
  *
  * Les 5 cas obligatoires de la mission :
  *   Cas 1 · rapport avec absences home ou away        → true
@@ -99,9 +100,9 @@ const PLAYER = (name) => ({ name, status: 'Out', ppg: 20, impact_weight: 0.18 })
   check('Cas5b · injuryReport null → false', absConfirmed(null) === false);
 }
 
-// ── Vérif alignement backend · définition par équipe identique ─────────────
-// Backend : homeInjuries !== null || awayInjuries !== null (non-vide par équipe).
-// On vérifie que le front produit le MÊME verdict que la règle backend.
+// ── Vérif sémantique canonique · absences pertinentes par équipe ───────────
+// Canonique : true seulement si la liste pertinente home ou away contient au
+// moins une absence après normalisation/fusion des sources.
 {
   const backendVerdict = (report) => {
     const h = report?.by_team?.[HOME] ?? [];
@@ -119,7 +120,7 @@ const PLAYER = (name) => ({ name, status: 'Out', ppg: 20, impact_weight: 0.18 })
   for (const s of samples) {
     if (absConfirmed(s) !== backendVerdict(s)) aligned = false;
   }
-  check('Alignement · front == backend (par équipe) sur 5 échantillons', aligned);
+  check('Alignement · front == sémantique canonique sur 5 échantillons', aligned);
 }
 
 // ── Bilan ───────────────────────────────────────────────────────────────────
