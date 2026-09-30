@@ -5847,7 +5847,7 @@ function _botPredictNBATotal(matchData) {
   }
 
   // Playoffs / play-in : défense +, rythme -, arbitrage différent → -4.5 pts
-  const phase = _botGetNBAPhase();
+  const phase = _botGetNBAPhase(matchData);
   const isPlayoff = phase === 'playin' || phase === 'playoff';
   if (isPlayoff) {
     estTotal -= 4.5;
