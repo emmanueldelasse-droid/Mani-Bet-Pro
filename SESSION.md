@@ -4,16 +4,17 @@
 `main` · auto-deploy CF/GH Pages · identité runtime via `CF_VERSION_METADATA` / build `index.html`
 
 ## En cours
-[P1] Pré-saison NBA 2026-27 · validation runtime PR #241 · DRAFT
+[P1] Pré-saison NBA 2026-27 · PR #241 · preuve pré-merge VALIDÉE
 - branche · `fix/nba-prime-time-slate-date-clean-20261001`
 - objectif · découvrir les matchs ESPN classés date US veille alors que Paris est déjà au lendemain
 - correction isolée · fetch date Paris + date calendrier précédente · fusion · dédup ESPN `match_id`
 - aucun changement scoring · gate · calibration · confidence · odds · injuries
-- CI 01/10 · 36 suites régression · 0 fail · test prime-time 12 assertions · health 46 assertions
-- merge BLOQUÉ jusqu'à preuve runtime réelle
-- cible prioritaire · Miami Heat vs Toronto Raptors · 03/10/2026 23:00 UTC = 04/10 01:00 Paris
-- preuve forte · run horaire 22:00 UTC doit exécuter H1 alors que date Paris=20261004 et slate ESPN=20261003
-- vérifier · `fetch_dates` 20261004+20261003 · PRESEASON · season_type=1 · datetime exact · un seul H1 · heartbeat frais · aucune contamination stats regular
+- CI 01/10 · 36 suites offline · 0 fail · prime-time offline 12 assertions · health 46 assertions
+- preuve live ESPN 01/10 · horloge simulée 03/10 22:00 UTC · payload ESPN réel · 15 assertions · 0 fail
+- Miami Heat @ Toronto Raptors réellement découvert sur slate `20261003` alors que date Paris=`20261004`
+- classification validée · PRESEASON · season_type=1 · H1=60 min · marqueur H1 persisté · analyse unique après dédup
+- limite honnête · les Cron Triggers Cloudflare ne ciblent pas les previews · validation scheduler réel seulement après déploiement production
+- post-merge · vérifier heartbeat/fetch_dates/H1 sur exécution Cloudflare réelle du 03/10 22:00 UTC
 
 [P1] Faux positifs audit MBP-A.1 · RÉCONCILIÉS 01/10
 - `ai_player_props_{date}` · écriture cache confirmée dans `handleNBAAIPlayerPropsBatch` · read 20h / TTL 24h
@@ -88,6 +89,7 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
 - prochaine étape · ChatGPT review formelle PR · validation créateur · monitoring prod 24h sur cas OKC vs SAS 18/05/2026
 
 ## Derniers PR mergés
+- #248 · agent persistant observer-first · architecture docs-only
 - #247 · docs calibration/providers/Alon réconciliés avec code vivant
 - #246 · docs pré-saison/architecture/routes synchronisées
 - #245 · weighted Data Quality decision shadow · non décisionnel
@@ -115,8 +117,8 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
 - #196 · NBA engine parity test (492 assertions)
 
 ## TODO prioritaire
-- [ ] P1 · 03/10 pré-saison · preuve runtime PR #241 sur H1 Miami–Toronto · aucun merge avant preuve
-- [ ] P1 · après preuve #241 · review finale ChatGPT · merge squash uniquement si runtime conforme + MEMORY FILES UPDATED
+- [x] P1 · preuve pré-merge #241 · ESPN réel + horloge simulée H1 Miami–Toronto · 15 assertions · 0 fail
+- [ ] P1 · post-merge 03/10 22:00 UTC · confirmer Cron Cloudflare production · heartbeat + fetch_dates + H1 réel
 - [ ] P1 · provisionner D1 `MANI_HISTORY_DB` séparément seulement avec UUID Cloudflare réel · appliquer migrations 0001→0008 · valider KV↔D1 sur pré-saison
 - [ ] P1 · DECISION-003 MLB v6.94 · audit empirique 421 logs · validation créateur (proposed)
 - [ ] P1 · validation prod endpoints catchup PR #205 · 4 curl tests documentés `docs/monitoring/CATCHUP_SETTLE.md`
