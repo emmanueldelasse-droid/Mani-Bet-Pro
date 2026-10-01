@@ -90,6 +90,7 @@ Migrations currently tracked:
 - `migrations/0004_nba_match_outcomes.sql` · résultat officiel + closing quote canonique par `match_id`
 - `migrations/0005_nba_engine_version.sql` · `engine_version` + `analysis_schema_version` indexés pour isoler les générations de moteur
 - `migrations/0006_nba_recent_form_ema_shadow.sql` · valeur EMA legacy + decay-lambda shadow + delta + λ
+- `migrations/0007_nba_b2b_scale_shadow.sql` · échelle B2B backend vs frontend et delta de score pondéré
 
 ## Rollout
 
