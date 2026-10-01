@@ -193,6 +193,18 @@ Le Worker conserve temporairement deux lectures distinctes afin de ne pas modifi
 
 Garde-fou : `data_quality_observed.drives_decision=false`. Aucun poids, seuil, calibration ou règle de confiance n'est modifié par cette instrumentation. Le passage éventuel au score pondéré nécessite une analyse historique/time-split et une validation séparée.
 
+### Data Quality · shadow de décision
+`data_quality_decision_shadow` applique le **même seuil 0,55 et le même algorithme de confidence** au `weighted_quality_score`, uniquement en contre-factuel.
+
+Il expose :
+- confidence actuelle basée sur `data_quality` legacy ;
+- confidence shadow pondérée ;
+- `weighted_below_gate_shadow` ;
+- `gate_would_change` ;
+- `confidence_would_change`.
+
+`drives_decision=false` reste obligatoire. Le score legacy continue seul à piloter la production. Un éventuel passage au weighted DQ exige des données forward par `engine_version`, impact sur volume/reco/performance et validation créateur.
+
 ## Effet MBP-P1 sur les logs (PR #197)
 
 Le gate `data_quality` faible (worker.js:5888 NBA · :9458 Tennis · :8424 MLB engine · :8336 MLB strikeouts) modifie le contenu des logs persistés ·

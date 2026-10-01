@@ -112,6 +112,7 @@ function loadBackendSandbox() {
     '_botSettlePlayerPointRecommendation',
     '_computePriceCLV',
     '_botBuildDataQualitySnapshot',
+    '_botBuildDataQualityDecisionShadow',
     '_botPersistAnalysisD1',
     '_botPersistSettlementD1',
     '_botPersistMatchOutcomeD1',

@@ -4145,6 +4145,11 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
     analysis.missing_variables ?? [],
   );
   const dataQuality = dataQualityObserved.legacy_coverage_score;
+  const confidenceLevel = _botComputeConfidence(analysis, dataQuality);
+  const dataQualityDecisionShadow = _botBuildDataQualityDecisionShadow(
+    analysis,
+    dataQualityObserved,
+  );
 
   // Line movement snapshot (si historique dispo dans KV)
   let lineMovement = null;
@@ -4186,9 +4191,10 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
     decision_prob:         analysis.decision_prob ?? analysis.score ?? null,
     probability_status:    analysis.probability_status ?? 'UNAVAILABLE',
     score_method:          analysis.score_method,
-    confidence_level:      _botComputeConfidence(analysis, dataQuality),
+    confidence_level:      confidenceLevel,
     data_quality:          dataQuality,
     data_quality_observed: dataQualityObserved,
+    data_quality_decision_shadow: dataQualityDecisionShadow,
     recent_form_ema_shadow: analysis.recent_form_ema_shadow ?? null,
     back_to_back_scale_shadow: analysis.back_to_back_scale_shadow ?? null,
     missing_variables:     analysis.missing_variables ?? [],
@@ -4266,8 +4272,10 @@ async function _botPersistAnalysisD1(env, log) {
         b2b_weighted_score_current, b2b_weighted_score_shadow, b2b_score_delta,
         motor_prob, model_raw_score, decision_prob, probability_status,
         confidence_level, data_quality, data_quality_observed,
+        dq_weighted_confidence_shadow, dq_weighted_below_gate,
+        dq_gate_would_change, dq_confidence_would_change,
         best_edge, best_market, best_side, payload_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const weightedDq = log.data_quality_observed?.weighted_quality_score ?? null;
@@ -4303,6 +4311,13 @@ async function _botPersistAnalysisD1(env, log) {
       log.confidence_level ?? null,
       log.data_quality ?? null,
       weightedDq,
+      log.data_quality_decision_shadow?.weighted_confidence_shadow ?? null,
+      log.data_quality_decision_shadow?.weighted_below_gate_shadow == null
+        ? null : (log.data_quality_decision_shadow.weighted_below_gate_shadow ? 1 : 0),
+      log.data_quality_decision_shadow?.gate_would_change == null
+        ? null : (log.data_quality_decision_shadow.gate_would_change ? 1 : 0),
+      log.data_quality_decision_shadow?.confidence_would_change == null
+        ? null : (log.data_quality_decision_shadow.confidence_would_change ? 1 : 0),
       log.best_edge ?? null,
       log.best_market ?? null,
       log.best_side ?? null,
@@ -5950,7 +5965,10 @@ async function handleBotLogsExportCSV(url, env, origin) {
       'b2b_backend_value', 'b2b_frontend_scale_shadow',
       'b2b_weighted_score_current', 'b2b_weighted_score_shadow', 'b2b_score_delta',
       'motor_prob', 'model_raw_score', 'model_calibrated_prob', 'decision_prob', 'probability_status',
-      'confidence_level', 'data_quality', 'best_edge', 'best_market', 'best_side',
+      'confidence_level', 'data_quality',
+      'dq_weighted_quality_shadow', 'dq_weighted_confidence_shadow',
+      'dq_weighted_below_gate', 'dq_gate_would_change', 'dq_confidence_would_change',
+      'best_edge', 'best_market', 'best_side',
       'result_home_score', 'result_away_score', 'result_winner', 'result_margin', 'result_total',
       'motor_was_right', 'prob_delta_pts', 'upset', 'ou_was_right', 'ou_model_was_right', 'spread_was_right',
       'clv_post_match', 'clv_status', 'clv_method', 'model_vs_market_at_analysis_pts',
@@ -5997,6 +6015,11 @@ async function handleBotLogsExportCSV(url, env, origin) {
       if (col === 'b2b_weighted_score_current') return esc(log.back_to_back_scale_shadow?.weighted_sum_score_current ?? '');
       if (col === 'b2b_weighted_score_shadow') return esc(log.back_to_back_scale_shadow?.weighted_sum_score_shadow ?? '');
       if (col === 'b2b_score_delta') return esc(log.back_to_back_scale_shadow?.score_delta ?? '');
+      if (col === 'dq_weighted_quality_shadow') return esc(log.data_quality_decision_shadow?.weighted_data_quality_shadow ?? '');
+      if (col === 'dq_weighted_confidence_shadow') return esc(log.data_quality_decision_shadow?.weighted_confidence_shadow ?? '');
+      if (col === 'dq_weighted_below_gate') return esc(log.data_quality_decision_shadow?.weighted_below_gate_shadow ?? '');
+      if (col === 'dq_gate_would_change') return esc(log.data_quality_decision_shadow?.gate_would_change ?? '');
+      if (col === 'dq_confidence_would_change') return esc(log.data_quality_decision_shadow?.confidence_would_change ?? '');
       if (col === 'spread_shadow_line') return esc(log.spread_prediction_shadow?.reference_spread_line ?? '');
       if (col === 'spread_shadow_home_prob') return esc(log.spread_prediction_shadow?.home?.motor_prob ?? '');
       if (col === 'spread_shadow_away_prob') return esc(log.spread_prediction_shadow?.away?.motor_prob ?? '');
@@ -7629,6 +7652,35 @@ function _botBuildDataQualitySnapshot(variables, missingVariables = []) {
     // Garde-fou explicite : le nouveau score est observationnel uniquement.
     drives_decision: false,
     decision_score_field: 'data_quality',
+  };
+}
+
+function _botBuildDataQualityDecisionShadow(analysis, dataQualityObserved) {
+  const legacyScore = dataQualityObserved?.legacy_coverage_score ?? null;
+  const weightedScore = dataQualityObserved?.weighted_quality_score ?? null;
+  const threshold = 0.55;
+
+  const currentConfidence = _botComputeConfidence(analysis, legacyScore);
+  const weightedConfidence = _botComputeConfidence(analysis, weightedScore);
+  const currentBelowGate = legacyScore == null || legacyScore < threshold;
+  const weightedBelowGate = weightedScore == null || weightedScore < threshold;
+
+  return {
+    status: weightedScore == null ? 'UNAVAILABLE' : 'AVAILABLE',
+    threshold,
+    current_data_quality: legacyScore,
+    weighted_data_quality_shadow: weightedScore,
+    data_quality_delta: legacyScore != null && weightedScore != null
+      ? Math.round((weightedScore - legacyScore) * 1000) / 1000
+      : null,
+    current_confidence: currentConfidence,
+    weighted_confidence_shadow: weightedConfidence,
+    current_below_gate: currentBelowGate,
+    weighted_below_gate_shadow: weightedBelowGate,
+    gate_would_change: currentBelowGate !== weightedBelowGate,
+    confidence_would_change: currentConfidence !== weightedConfidence,
+    semantics: 'OBSERVATION_ONLY_WEIGHTED_DQ_COUNTERFACTUAL',
+    drives_decision: false,
   };
 }
 
