@@ -35,6 +35,18 @@ One settlement state per `analysis_id`.
 
 This table is intentionally mutable through an upsert so a force-settle or corrected official result can update settlement metadata while the original prediction remains immutable.
 
+### `nba_match_outcomes`
+
+One canonical official outcome per `match_id`.
+
+This table solves the multi-checkpoint problem: H6/H4/H2/H1 can create several immutable `analysis_id` rows for the same game, while the official score/result/closing snapshot exists only once. Historical calibration must join:
+
+`nba_analysis_history.match_id = nba_match_outcomes.match_id`
+
+This avoids copying the latest checkpoint's `motor_was_right`, recommendation settlement or CLV onto earlier checkpoints, whose probabilities and taken prices may differ.
+
+The outcome row is mutable by upsert so official corrections / force-settle can update the game result without mutating any original analysis snapshot.
+
 ## Provisioning
 
 Do not commit a fake D1 UUID to `wrangler.jsonc`.
@@ -75,6 +87,7 @@ Migrations currently tracked:
 - `migrations/0001_nba_immutable_history.sql` · tables append-only analysis + settlement
 - `migrations/0002_nba_analysis_checkpoints.sql` · métadonnées `checkpoint_id` / `checkpoint_minutes_to_tip`
 - `migrations/0003_nba_verified_closing_line.sql` · closing quote, âge/source/provider et prix ML au settlement
+- `migrations/0004_nba_match_outcomes.sql` · résultat officiel + closing quote canonique par `match_id`
 
 ## Rollout
 
@@ -87,9 +100,12 @@ Migrations currently tracked:
    - same `analysis_id` in both;
    - second analysis of same match creates a second D1 row.
 5. Validate nightly settlement:
-   - original analysis row unchanged;
-   - settlement row created/updated.
-6. Only after runtime proof, begin using D1 for historical/calibration reads.
+   - original analysis rows unchanged;
+   - per-analysis settlement row created/updated for the current KV snapshot;
+   - one `nba_match_outcomes` row created for the game;
+   - every H6/H4/H2/H1 analysis for that `match_id` joins to the same outcome.
+6. Historical calibration reads must join immutable analyses to `nba_match_outcomes`; derived correctness/CLV is recalculated per analysis.
+7. Only after runtime proof, begin using D1 for historical/calibration reads.
 
 ## Safety guarantees
 
