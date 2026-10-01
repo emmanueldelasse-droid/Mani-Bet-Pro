@@ -58,7 +58,10 @@ Avant proposer ajustement poids · calculer pour la fenêtre cible ·
 ## Rollback calibration
 
 - Toute calibration nouvelle = revertable via `git revert`
-- Préserver historique version moteur dans les logs · TODO P2 ajouter champ `engine_version` à chaque log généré par cron
+- Chaque analyse NBA porte désormais `engine_version` et `analysis_schema_version`.
+- Calibration/backtest : **ne jamais mélanger plusieurs `engine_version` dans un même échantillon principal** sans breakdown explicite.
+- Baseline actuelle : `nba-2026.10.01-baseline` · schéma `nba-analysis-v1`.
+- Règle de bump : changement prédictif (formule/poids/seuil/variable/gate décisionnel) ⇒ nouvelle `engine_version`. Changement incompatible de structure/sémantique de payload ⇒ nouvelle `analysis_schema_version`.
 
 ## Sport status flags (état mai 2026)
 
