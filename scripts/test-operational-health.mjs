@@ -154,9 +154,9 @@ assert(
   'NBA cron writes its heartbeat'
 );
 const heartbeatPos = nbaCron.indexOf('NBA_CRON_HEARTBEAT_KEY');
-const espnLoadPos = nbaCron.indexOf('const espnData = await espnFetch');
+const firstEspnFetchPos = nbaCron.indexOf('espnFetch(');
 assert(
-  heartbeatPos >= 0 && espnLoadPos >= 0 && heartbeatPos < espnLoadPos,
+  heartbeatPos >= 0 && firstEspnFetchPos >= 0 && heartbeatPos < firstEspnFetchPos,
   'NBA heartbeat is written before ESPN/provider dependency'
 );
 

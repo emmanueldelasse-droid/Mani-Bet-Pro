@@ -3682,15 +3682,38 @@ async function _runBotCron(env, forceRun = false) {
     } catch (err) { console.warn('[BOT] heartbeat write error:', err.message); }
   }
 
-  // Charger les matchs du jour
-  const espnData = await espnFetch(`${ESPN_SCOREBOARD}?dates=${dateStr}&limit=25`);
-  if (!espnData) {
+  // ESPN classe un match selon sa date locale US. Pour les prime-time US,
+  // cette date peut être Paris-1 au moment où le match se joue en France.
+  // Charger les deux slates évite de perdre les matchs de nuit sans modifier
+  // le reste du scheduler.
+  const prevDateStr = _botPreviousCompactDate(dateStr);
+  const [espnData, espnDataPrev] = await Promise.all([
+    espnFetch(`${ESPN_SCOREBOARD}?dates=${dateStr}&limit=25`),
+    prevDateStr
+      ? espnFetch(`${ESPN_SCOREBOARD}?dates=${prevDateStr}&limit=25`)
+      : Promise.resolve(null),
+  ]);
+
+  if (!espnData && !espnDataPrev) {
     cronLog.error = 'espn_unavailable';
+    cronLog.fetch_dates = [dateStr, prevDateStr].filter(Boolean);
     console.warn('[BOT-CRON-LOG]', JSON.stringify(cronLog));
     return;
   }
 
-  const parsed = parseESPNMatches(espnData, dateStr);
+  const parsedCurr = espnData ? parseESPNMatches(espnData, dateStr) : [];
+  const parsedPrev = espnDataPrev && prevDateStr
+    ? parseESPNMatches(espnDataPrev, prevDateStr)
+    : [];
+
+  // Le slate Paris courant a priorité si ESPN expose le même event dans les 2.
+  const byMatchId = new Map();
+  for (const match of [...parsedCurr, ...parsedPrev]) {
+    if (!match?.id || byMatchId.has(match.id)) continue;
+    byMatchId.set(match.id, match);
+  }
+  const parsed = [...byMatchId.values()];
+  cronLog.fetch_dates = [dateStr, prevDateStr].filter(Boolean);
   cronLog.espn_game_ids_seen = parsed.map(m => ({
     id: m.id,
     home: m.home_team?.name ?? null,
@@ -7761,6 +7784,21 @@ function _botFormatDate(date = new Date()) {
   const d = parts.find(p => p.type === 'day').value;
   return `${y}${m}${d}`;
 }
+function _botPreviousCompactDate(dateStr) {
+  const s = String(dateStr ?? '').trim();
+  if (!/^\d{8}$/.test(s)) return null;
+  const y = Number(s.slice(0, 4));
+  const m = Number(s.slice(4, 6));
+  const d = Number(s.slice(6, 8));
+  const ts = Date.UTC(y, m - 1, d);
+  if (!Number.isFinite(ts)) return null;
+  const prev = new Date(ts - 86400000);
+  const py = prev.getUTCFullYear();
+  const pm = String(prev.getUTCMonth() + 1).padStart(2, '0');
+  const pd = String(prev.getUTCDate()).padStart(2, '0');
+  return `${py}${pm}${pd}`;
+}
+
 // Legacy : _botNowParis renvoyait un Date dont les champs UTC étaient les heures Paris.
 // Remplacé par appels directs à Date + _botFormatDate pour éviter ambiguïté.
 function _botNowParis() { return new Date(); }
