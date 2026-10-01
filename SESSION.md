@@ -1,7 +1,7 @@
 # Mani Bet Pro · état courant
 
 ## Branche active
-`main` · auto-deploy CF/GH Pages (build `646846f`)
+`main` · auto-deploy CF/GH Pages · identité runtime via `CF_VERSION_METADATA` / build `index.html`
 
 ## En cours
 [P1] Pré-saison NBA 2026-27 · validation runtime PR #241 · DRAFT
@@ -14,6 +14,11 @@
 - cible prioritaire · Miami Heat vs Toronto Raptors · 03/10/2026 23:00 UTC = 04/10 01:00 Paris
 - preuve forte · run horaire 22:00 UTC doit exécuter H1 alors que date Paris=20261004 et slate ESPN=20261003
 - vérifier · `fetch_dates` 20261004+20261003 · PRESEASON · season_type=1 · datetime exact · un seul H1 · heartbeat frais · aucune contamination stats regular
+
+[P1] Faux positifs audit MBP-A.1 · RÉCONCILIÉS 01/10
+- `ai_player_props_{date}` · écriture cache confirmée dans `handleNBAAIPlayerPropsBatch` · read 20h / TTL 24h
+- NBA.com injury PDF · `NBA_INJURY_BASE` fetché puis `parseInjuryPDF` · ne pas supprimer
+- docs providers/pipeline/known issues synchronisées · le code vivant prime
 
 [P1] Observabilité NBA 2026-27 · MERGÉE
 - PR #242 · `engine_version=nba-2026.10.01-baseline` + `analysis_schema_version=nba-analysis-v1`
@@ -119,10 +124,10 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
   - `SESSION.md`
 - [ ] P2 · NBA recheck calib à 80+ logs (actuel 53 v6.79)
 - [ ] P2 · Tennis `/bot/calibration/analyze?sport=tennis` post 50+ logs v6.95+
-- [ ] P2 · logger `pitcher_data_source` MLB · `engine_version` global · `closing_odds`
+- [ ] P2 · MLB/Tennis · compléter provenance provider + `engine_version` + closing line exploitable · NBA déjà versionné/closing ML
 - [ ] P2 · Option B NBA playoff gate · état dégradé visible UI (badge "Données blessures non confirmées") · ADR séparée requise · à arbitrer ChatGPT post-Option A
 - [ ] P2 · Option C NBA playoff gate · alignement architectural front/back (MBP-A.2 CRIT-1 toujours ouvert) · ADR séparée requise
-- [ ] P3 · supprimer code mort (5 vars NBA orphelines · `engine.mlb.betting.js` · `NBA_INJURY_BASE` · `MLB_PITCHER_KV_KEY`)
+- [ ] P3 · supprimer code mort confirmé uniquement (vars NBA orphelines · `engine.mlb.betting.js` · `MLB_PITCHER_KV_KEY`) · `NBA_INJURY_BASE` conservé car fetch vivant
 
 ## Documentation
 - Gouvernance racine · `GOVERNANCE.md` · `BOT_OBJECTIVE.md` · `PROJECT_RULES.md` (pointeurs · ordre lecture officiel via `CLAUDE.md`)
