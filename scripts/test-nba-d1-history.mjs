@@ -26,6 +26,7 @@ const migrations = [
   '0001_nba_immutable_history.sql',
   '0002_nba_analysis_checkpoints.sql',
   '0003_nba_verified_closing_line.sql',
+  '0004_nba_match_outcomes.sql',
 ].map(name => readFileSync(resolve(ROOT, 'migrations', name), 'utf8'));
 
 let assertions = 0;
@@ -218,15 +219,60 @@ eq(
   'verified closing quote metadata persists with settlement'
 );
 
+// Canonical match outcome is stored once and links ALL immutable checkpoints.
+await backend._botPersistMatchOutcomeD1(env, logB);
+
+eq(
+  db.prepare('SELECT COUNT(*) AS n FROM nba_match_outcomes WHERE match_id = ?').get('ESPN_GAME_1').n,
+  1,
+  'one canonical outcome row stored per match'
+);
+eq(
+  db.prepare('SELECT result_home_score, result_winner, closing_home_ml FROM nba_match_outcomes WHERE match_id = ?').get('ESPN_GAME_1'),
+  { result_home_score: 118, result_winner: 'HOME', closing_home_ml: -120 },
+  'match outcome retains official result and closing quote'
+);
+eq(
+  db.prepare(`
+    SELECT COUNT(*) AS n
+    FROM nba_analysis_history a
+    JOIN nba_match_outcomes o ON o.match_id = a.match_id
+    WHERE a.match_id = ?
+  `).get('ESPN_GAME_1').n,
+  2,
+  'both checkpoint analyses link to the same official match outcome'
+);
+eq(
+  db.prepare(`
+    SELECT COUNT(*) AS n
+    FROM nba_analysis_history a
+    LEFT JOIN nba_match_outcomes o ON o.match_id = a.match_id
+    WHERE a.match_id = ? AND o.match_id IS NULL
+  `).get('ESPN_GAME_1').n,
+  0,
+  'no immutable checkpoint remains outcome-orphaned once match settles'
+);
+
 logB.result_home_score = 119;
 logB.result_margin = 9;
 logB.settlement_source = 'manual_force';
 await backend._botPersistSettlementD1(env, logB);
+await backend._botPersistMatchOutcomeD1(env, logB);
 settlement = db.prepare(
   'SELECT result_home_score, settlement_source FROM nba_analysis_settlements WHERE analysis_id = ?'
 ).get('analysis-B');
 eq(settlement.result_home_score, 119, 'force re-settle updates settlement row');
 eq(settlement.settlement_source, 'manual_force', 'settlement provenance updated');
+eq(
+  db.prepare('SELECT result_home_score, settlement_source FROM nba_match_outcomes WHERE match_id = ?').get('ESPN_GAME_1'),
+  { result_home_score: 119, settlement_source: 'manual_force' },
+  'force re-settle updates one canonical match outcome row'
+);
+eq(
+  db.prepare('SELECT COUNT(*) AS n FROM nba_match_outcomes WHERE match_id = ?').get('ESPN_GAME_1').n,
+  1,
+  'force re-settle never duplicates match outcome'
+);
 eq(
   db.prepare('SELECT best_edge FROM nba_analysis_history WHERE analysis_id = ?').get('analysis-B').best_edge,
   8.2,
@@ -241,6 +287,16 @@ eq(
   JSON.parse(await kvOnly.get('bot_log_ESPN_GAME_1')).analysis_id,
   'analysis-C',
   'missing D1 binding does not block KV'
+);
+
+// Match outcome helper also fails closed when D1 is absent.
+eq(
+  await backend._botPersistMatchOutcomeD1({ PAPER_TRADING: kvOnly }, {
+    match_id: 'ESPN_GAME_1',
+    status: 'settled',
+  }),
+  { written: false, reason: 'D1_BINDING_OR_MATCH_ID_UNAVAILABLE' },
+  'missing D1 binding makes match outcome persistence a no-op'
 );
 
 // 7) Broken D1: helper fails closed, KV remains written.
@@ -260,6 +316,7 @@ const tables = db.prepare(
 ).all().map(r => r.name);
 assert(tables.includes('nba_analysis_history'), 'analysis table exists');
 assert(tables.includes('nba_analysis_settlements'), 'settlement table exists');
+assert(tables.includes('nba_match_outcomes'), 'canonical match outcome table exists');
 
 console.log('\nNBA immutable D1 history');
 console.log(`  assertions: ${assertions}`);

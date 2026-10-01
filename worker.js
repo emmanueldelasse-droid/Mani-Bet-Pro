@@ -4290,6 +4290,99 @@ async function _botPersistAnalysisD1(env, log) {
   }
 }
 
+async function _botPersistMatchOutcomeD1(env, log) {
+  const db = env?.MANI_HISTORY_DB;
+  if (!db || !log?.match_id) {
+    return { written: false, reason: 'D1_BINDING_OR_MATCH_ID_UNAVAILABLE' };
+  }
+
+  try {
+    const sql = `
+      INSERT INTO nba_match_outcomes (
+        match_id, season_id, event_type, season_type, nba_phase,
+        game_datetime, status, settled_at,
+        result_home_score, result_away_score, result_winner,
+        result_margin, result_total,
+        live_status, settlement_source, result_fetch_latency,
+        closing_snapshot_at, closing_snapshot_age_minutes, closing_source,
+        closing_provider_name, closing_home_ml, closing_away_ml,
+        payload_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(match_id) DO UPDATE SET
+        season_id = excluded.season_id,
+        event_type = excluded.event_type,
+        season_type = excluded.season_type,
+        nba_phase = excluded.nba_phase,
+        game_datetime = excluded.game_datetime,
+        status = excluded.status,
+        settled_at = excluded.settled_at,
+        result_home_score = excluded.result_home_score,
+        result_away_score = excluded.result_away_score,
+        result_winner = excluded.result_winner,
+        result_margin = excluded.result_margin,
+        result_total = excluded.result_total,
+        live_status = excluded.live_status,
+        settlement_source = excluded.settlement_source,
+        result_fetch_latency = excluded.result_fetch_latency,
+        closing_snapshot_at = excluded.closing_snapshot_at,
+        closing_snapshot_age_minutes = excluded.closing_snapshot_age_minutes,
+        closing_source = excluded.closing_source,
+        closing_provider_name = excluded.closing_provider_name,
+        closing_home_ml = excluded.closing_home_ml,
+        closing_away_ml = excluded.closing_away_ml,
+        payload_json = excluded.payload_json
+    `;
+
+    await db.prepare(sql).bind(
+      log.match_id,
+      log.season_id ?? null,
+      log.event_type ?? null,
+      log.season_type ?? null,
+      log.nba_phase ?? null,
+      log.datetime ?? null,
+      log.status ?? null,
+      log.settled_at ?? new Date().toISOString(),
+      log.result_home_score ?? null,
+      log.result_away_score ?? null,
+      log.result_winner ?? null,
+      log.result_margin ?? null,
+      log.result_total ?? null,
+      log.live_status ?? null,
+      log.settlement_source ?? null,
+      log.result_fetch_latency ?? null,
+      log.closing_snapshot_at ?? null,
+      log.closing_snapshot_age_minutes ?? null,
+      log.closing_source ?? null,
+      log.closing_provider_name ?? null,
+      log.closing_home_ml ?? null,
+      log.closing_away_ml ?? null,
+      _botD1Json({
+        match_id: log.match_id,
+        status: log.status ?? null,
+        settled_at: log.settled_at ?? null,
+        result_home_score: log.result_home_score ?? null,
+        result_away_score: log.result_away_score ?? null,
+        result_winner: log.result_winner ?? null,
+        result_margin: log.result_margin ?? null,
+        result_total: log.result_total ?? null,
+        live_status: log.live_status ?? null,
+        settlement_source: log.settlement_source ?? null,
+        closing_snapshot_at: log.closing_snapshot_at ?? null,
+        closing_snapshot_age_minutes: log.closing_snapshot_age_minutes ?? null,
+        closing_source: log.closing_source ?? null,
+        closing_provider_name: log.closing_provider_name ?? null,
+        closing_home_ml: log.closing_home_ml ?? null,
+        closing_away_ml: log.closing_away_ml ?? null,
+      }),
+    ).run();
+
+    return { written: true };
+  } catch (err) {
+    console.warn('[BOT] D1 match outcome write error:', err.message);
+    return { written: false, reason: 'D1_MATCH_OUTCOME_WRITE_FAILED' };
+  }
+}
+
 async function _botPersistSettlementD1(env, log) {
   const db = env?.MANI_HISTORY_DB;
   if (!db || !log?.analysis_id) return { written: false, reason: 'D1_BINDING_UNAVAILABLE' };
@@ -4749,6 +4842,7 @@ async function _botSettleDate(env, dateStr, options = {}) {
         if (cronRunId) log.cron_run_id = cronRunId;
         await env.PAPER_TRADING.put(key, JSON.stringify(log), { expirationTtl: 90 * 24 * 3600 });
         await _botPersistSettlementD1(env, log);
+        await _botPersistMatchOutcomeD1(env, log);
         if (espnMapped === BOT_LOG_STATUS.POSTPONED) postponed++; else cancelled++;
         continue;
       }
@@ -4878,6 +4972,7 @@ async function _botSettleDate(env, dateStr, options = {}) {
 
       await env.PAPER_TRADING.put(key, JSON.stringify(log), { expirationTtl: 90 * 24 * 3600 });
       await _botPersistSettlementD1(env, log);
+      await _botPersistMatchOutcomeD1(env, log);
       settled++;
     } catch (err) { console.warn(`[BOT] settle log ${result.id}:`, err.message); }
   }
