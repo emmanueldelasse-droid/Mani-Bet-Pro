@@ -4,12 +4,13 @@
 `main` · auto-deploy CF/GH Pages (build f9cd992)
 
 ## En cours
-[P1] NBA recent_form_ema · shadow sémantique λ · branche `feat/nba-recent-form-ema-shadow-20261001`
-- production inchangée : λ=0.85 regular / 0.92 playoffs pondère le nouveau résultat à 85% / 92%
-- shadow decay-lambda : nouveau résultat pondéré à 1−λ, uniquement pour observation
-- champs loggés : legacy / decay shadow / delta / λ · `drives_decision=false`
-- KV + CSV + D1 migration 0006 · aucune modification poids/seuil/formule décisionnelle
-- baseline moteur reste `nba-2026.10.01-baseline` car aucun comportement prédictif ne change
+[P1] NBA back_to_back · shadow parité échelle · branche `feat/nba-b2b-scale-shadow-20261001`
+- backend canonique reste ±0.6 ; frontend historique reste ±1
+- regular : poids B2B 0.02 ; impact contre-factuel attendu ~<=0.5 point de probabilité
+- playoffs : poids B2B 0 ; écart brut visible mais delta score nul
+- shadow logge valeur backend / valeur ±1 / score pondéré actuel / score shadow / delta
+- `drives_decision=false` · aucune modification prédictive · engine_version inchangée
+- KV + CSV + D1 migration 0007
 - PR #241 prime-time reste DRAFT jusqu'à preuve runtime pré-saison à partir du 03/10/2026
 
 ## Validation post-Fix#4 (à faire · prochain nightly ~10-11h UTC)
