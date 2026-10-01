@@ -4259,10 +4259,12 @@ async function _botPersistAnalysisD1(env, log) {
         game_datetime, analyzed_at, home_team, away_team, status,
         checkpoint_id, checkpoint_minutes_to_tip,
         engine_version, analysis_schema_version,
+        recent_form_ema_legacy, recent_form_ema_decay_shadow,
+        recent_form_ema_shadow_delta, recent_form_ema_lambda,
         motor_prob, model_raw_score, decision_prob, probability_status,
         confidence_level, data_quality, data_quality_observed,
         best_edge, best_market, best_side, payload_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const weightedDq = log.data_quality_observed?.weighted_quality_score ?? null;
@@ -4282,6 +4284,10 @@ async function _botPersistAnalysisD1(env, log) {
       log.checkpoint_minutes_to_tip ?? null,
       log.engine_version ?? NBA_ENGINE_VERSION,
       log.analysis_schema_version ?? NBA_ANALYSIS_SCHEMA_VERSION,
+      log.recent_form_ema_shadow?.legacy_value ?? null,
+      log.recent_form_ema_shadow?.decay_lambda_value ?? null,
+      log.recent_form_ema_shadow?.delta ?? null,
+      log.recent_form_ema_shadow?.lambda ?? null,
       log.motor_prob ?? null,
       log.model_raw_score ?? null,
       log.decision_prob ?? null,
@@ -5931,6 +5937,8 @@ async function handleBotLogsExportCSV(url, env, origin) {
       'analysis_id', 'logged_at', 'settled_at', 'match_id', 'date', 'home', 'away',
       'engine_version', 'analysis_schema_version',
       'checkpoint_id', 'checkpoint_minutes_to_tip',
+      'recent_form_ema_legacy', 'recent_form_ema_decay_shadow',
+      'recent_form_ema_shadow_delta', 'recent_form_ema_lambda',
       'motor_prob', 'model_raw_score', 'model_calibrated_prob', 'decision_prob', 'probability_status',
       'confidence_level', 'data_quality', 'best_edge', 'best_market', 'best_side',
       'result_home_score', 'result_away_score', 'result_winner', 'result_margin', 'result_total',
@@ -5970,6 +5978,10 @@ async function handleBotLogsExportCSV(url, env, origin) {
       }
       if (col === 'home_out')  return esc(log.absences_snapshot?.home_out ?? '');
       if (col === 'away_out')  return esc(log.absences_snapshot?.away_out ?? '');
+      if (col === 'recent_form_ema_legacy') return esc(log.recent_form_ema_shadow?.legacy_value ?? '');
+      if (col === 'recent_form_ema_decay_shadow') return esc(log.recent_form_ema_shadow?.decay_lambda_value ?? '');
+      if (col === 'recent_form_ema_shadow_delta') return esc(log.recent_form_ema_shadow?.delta ?? '');
+      if (col === 'recent_form_ema_lambda') return esc(log.recent_form_ema_shadow?.lambda ?? '');
       if (col === 'spread_shadow_line') return esc(log.spread_prediction_shadow?.reference_spread_line ?? '');
       if (col === 'spread_shadow_home_prob') return esc(log.spread_prediction_shadow?.home?.motor_prob ?? '');
       if (col === 'spread_shadow_away_prob') return esc(log.spread_prediction_shadow?.away?.motor_prob ?? '');
