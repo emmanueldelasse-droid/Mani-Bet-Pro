@@ -20,6 +20,14 @@
 - NBA.com injury PDF · `NBA_INJURY_BASE` fetché puis `parseInjuryPDF` · ne pas supprimer
 - docs providers/pipeline/known issues synchronisées · le code vivant prime
 
+[P2] Agent persistant · architecture PRÉPARÉE · non implémentée
+- spec · `docs/project/PERSISTENT_AGENT_ARCHITECTURE.md`
+- ADR · DECISION-006 · observer-first · statut PROPOSED
+- agent futur read-only par défaut · backend reste canonique
+- web externe = corroboration · jamais remplacement provider silencieux
+- aucune modification autonome poids/seuil/calibration/logs historiques · aucun auto-bet/auto-merge
+- pré-requis implémentation · #241 runtime validée + permissions/cadence/coût/storage/tests définis
+
 [P1] Observabilité NBA 2026-27 · MERGÉE
 - PR #242 · `engine_version=nba-2026.10.01-baseline` + `analysis_schema_version=nba-analysis-v1`
 - PR #243 · `recent_form_ema` legacy vs decay-lambda en shadow · `drives_decision=false`
@@ -80,6 +88,8 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
 - prochaine étape · ChatGPT review formelle PR · validation créateur · monitoring prod 24h sur cas OKC vs SAS 18/05/2026
 
 ## Derniers PR mergés
+- #247 · docs calibration/providers/Alon réconciliés avec code vivant
+- #246 · docs pré-saison/architecture/routes synchronisées
 - #245 · weighted Data Quality decision shadow · non décisionnel
 - #244 · back-to-back scale shadow · non décisionnel
 - #243 · recent-form EMA decay shadow · non décisionnel
@@ -124,6 +134,7 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
   - `SESSION.md`
 - [ ] P2 · NBA recheck calib à 80+ logs (actuel 53 v6.79)
 - [ ] P2 · Tennis `/bot/calibration/analyze?sport=tennis` post 50+ logs v6.95+
+- [ ] P2 · agent persistant · après #241 + D1/permissions/cadence définies · implémenter Phase 1 read-only selon DECISION-006
 - [ ] P2 · MLB/Tennis · compléter provenance provider + `engine_version` + closing line exploitable · NBA déjà versionné/closing ML
 - [ ] P2 · Option B NBA playoff gate · état dégradé visible UI (badge "Données blessures non confirmées") · ADR séparée requise · à arbitrer ChatGPT post-Option A
 - [ ] P2 · Option C NBA playoff gate · alignement architectural front/back (MBP-A.2 CRIT-1 toujours ouvert) · ADR séparée requise
@@ -131,10 +142,10 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
 
 ## Documentation
 - Gouvernance racine · `GOVERNANCE.md` · `BOT_OBJECTIVE.md` · `PROJECT_RULES.md` (pointeurs · ordre lecture officiel via `CLAUDE.md`)
-- Vision & règles · `docs/project/` (PROJECT_VISION · ARCHITECTURE · AI_WORKFLOW · MERGE_PROTOCOL · STATS_RULES · PROD_SAFETY_RULES · CALIBRATION_RULES · EXPERIMENTAL_FEATURES)
+- Vision & règles · `docs/project/` (PROJECT_VISION · ARCHITECTURE · AI_WORKFLOW · MERGE_PROTOCOL · STATS_RULES · PROD_SAFETY_RULES · CALIBRATION_RULES · EXPERIMENTAL_FEATURES · PERSISTENT_AGENT_ARCHITECTURE)
 - Moteur · `docs/engine/` (BETTING_LOGIC · DATA_PIPELINE)
 - Monitoring · `docs/monitoring/` (KNOWN_ISSUES · PROVIDERS_MATRIX · ROUTES_AUDIT · BOT_MONITORING · CATCHUP_SETTLE)
-- Décisions ADR · `docs/decisions/` (001 sécu · 002 NBA parity · 003 MLB proposed · 004 catchup · 005 NBA playoff gate observabilité)
+- Décisions ADR · `docs/decisions/` (001 sécu · 002 NBA parity · 003 MLB proposed · 004 catchup · 005 NBA playoff gate observabilité · 006 agent persistant observer proposed)
 - Tests · `docs/tests/NBA_ENGINE_PARITY.md`
 
 ## Tests automatisés

@@ -100,6 +100,15 @@ index.html + src/ui/*.js (GitHub Pages front)
 - **CRIT-2 résolu** MBP-FIX-A.2.1 · confidence aligné distance-based · **CRIT-3 résolu** MBP-FIX-A.2.2 · `home_away_split` aligné · **CRIT-1 anti-régression** PR #196 · test parité `scripts/test-nba-engine-parity.mjs` (492 assertions · 2 phases)
 - MED-1 `back_to_back` numérique (-0.6/+0.6 backend vs -1/+1 frontend) · reste pendant · documenté KNOWN-DIVERGENCE par le test parité
 
+## Agent persistant futur
+- Architecture préparatoire · `docs/project/PERSISTENT_AGENT_ARCHITECTURE.md`.
+- ADR proposée · `docs/decisions/DECISION-006-PERSISTENT-OBSERVER-AGENT.md`.
+- Position · couche read-only après backend/storage · jamais sur chemin décisionnel.
+- Backend + providers déclarés restent sources canoniques.
+- Navigation web agent = corroboration uniquement · pas remplacement silencieux provider/API.
+- Aucun agent persistant actuellement connecté · aucun cron/binding/storage ajouté.
+- Toute implémentation future · permissions minimales · journal séparé · idempotence · tests · validation selon gouvernance.
+
 ## Zones sensibles
 - `_botEngineCompute` (worker.js:5211) · cœur calcul NBA backend (cron · logs · calibration)
 - `EngineCore.compute` `EngineNBA.compute` `EngineRobustness.compute` · cœur calcul NBA frontend (runtime user)
