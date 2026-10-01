@@ -93,6 +93,14 @@ b2b_cumul_diff        0.02
 travel_load_diff      0.02
 ```
 
+### Back-to-back · échelle front/back en shadow
+- Backend canonique historique : B2B home seul = `-0.6`, away seul = `+0.6`.
+- Frontend historique : même signal à `-1/+1`.
+- Poids regular : `0.02` ; poids playoffs : `0`.
+- Le Worker calcule maintenant un `back_to_back_scale_shadow` : score pondéré actuel vs contre-factuel `±1`, delta et poids.
+- `drives_decision=false` : aucune substitution dans `variables_used`, aucune modification de recommandation.
+- Décision future : comparer les cohortes B2B sur historique versionné avant d'aligner l'échelle ; tout alignement backend est un changement prédictif et exige validation créateur + bump `engine_version`.
+
 ### Sémantique EMA NBA · observation shadow
 - Formule production historique : `ema = λ × nouveau_résultat + (1−λ) × ema_précédente`.
 - Donc `λ=0.85` donne ~85% de poids au résultat le plus récent ; `λ=0.92` ~92%.

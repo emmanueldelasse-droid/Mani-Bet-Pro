@@ -4190,6 +4190,7 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
     data_quality:          dataQuality,
     data_quality_observed: dataQualityObserved,
     recent_form_ema_shadow: analysis.recent_form_ema_shadow ?? null,
+    back_to_back_scale_shadow: analysis.back_to_back_scale_shadow ?? null,
     missing_variables:     analysis.missing_variables ?? [],
     signals:               analysis.signals ?? [],
     variables_used:        analysis.variables_used ?? {},
@@ -4261,10 +4262,12 @@ async function _botPersistAnalysisD1(env, log) {
         engine_version, analysis_schema_version,
         recent_form_ema_legacy, recent_form_ema_decay_shadow,
         recent_form_ema_shadow_delta, recent_form_ema_lambda,
+        b2b_backend_value, b2b_frontend_scale_shadow,
+        b2b_weighted_score_current, b2b_weighted_score_shadow, b2b_score_delta,
         motor_prob, model_raw_score, decision_prob, probability_status,
         confidence_level, data_quality, data_quality_observed,
         best_edge, best_market, best_side, payload_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const weightedDq = log.data_quality_observed?.weighted_quality_score ?? null;
@@ -4288,6 +4291,11 @@ async function _botPersistAnalysisD1(env, log) {
       log.recent_form_ema_shadow?.decay_lambda_value ?? null,
       log.recent_form_ema_shadow?.delta ?? null,
       log.recent_form_ema_shadow?.lambda ?? null,
+      log.back_to_back_scale_shadow?.backend_value ?? null,
+      log.back_to_back_scale_shadow?.frontend_scale_shadow_value ?? null,
+      log.back_to_back_scale_shadow?.weighted_sum_score_current ?? null,
+      log.back_to_back_scale_shadow?.weighted_sum_score_shadow ?? null,
+      log.back_to_back_scale_shadow?.score_delta ?? null,
       log.motor_prob ?? null,
       log.model_raw_score ?? null,
       log.decision_prob ?? null,
@@ -5939,6 +5947,8 @@ async function handleBotLogsExportCSV(url, env, origin) {
       'checkpoint_id', 'checkpoint_minutes_to_tip',
       'recent_form_ema_legacy', 'recent_form_ema_decay_shadow',
       'recent_form_ema_shadow_delta', 'recent_form_ema_lambda',
+      'b2b_backend_value', 'b2b_frontend_scale_shadow',
+      'b2b_weighted_score_current', 'b2b_weighted_score_shadow', 'b2b_score_delta',
       'motor_prob', 'model_raw_score', 'model_calibrated_prob', 'decision_prob', 'probability_status',
       'confidence_level', 'data_quality', 'best_edge', 'best_market', 'best_side',
       'result_home_score', 'result_away_score', 'result_winner', 'result_margin', 'result_total',
@@ -5982,6 +5992,11 @@ async function handleBotLogsExportCSV(url, env, origin) {
       if (col === 'recent_form_ema_decay_shadow') return esc(log.recent_form_ema_shadow?.decay_lambda_value ?? '');
       if (col === 'recent_form_ema_shadow_delta') return esc(log.recent_form_ema_shadow?.delta ?? '');
       if (col === 'recent_form_ema_lambda') return esc(log.recent_form_ema_shadow?.lambda ?? '');
+      if (col === 'b2b_backend_value') return esc(log.back_to_back_scale_shadow?.backend_value ?? '');
+      if (col === 'b2b_frontend_scale_shadow') return esc(log.back_to_back_scale_shadow?.frontend_scale_shadow_value ?? '');
+      if (col === 'b2b_weighted_score_current') return esc(log.back_to_back_scale_shadow?.weighted_sum_score_current ?? '');
+      if (col === 'b2b_weighted_score_shadow') return esc(log.back_to_back_scale_shadow?.weighted_sum_score_shadow ?? '');
+      if (col === 'b2b_score_delta') return esc(log.back_to_back_scale_shadow?.score_delta ?? '');
       if (col === 'spread_shadow_line') return esc(log.spread_prediction_shadow?.reference_spread_line ?? '');
       if (col === 'spread_shadow_home_prob') return esc(log.spread_prediction_shadow?.home?.motor_prob ?? '');
       if (col === 'spread_shadow_away_prob') return esc(log.spread_prediction_shadow?.away?.motor_prob ?? '');
@@ -6478,6 +6493,49 @@ function _botComputeScore(variables, weights) {
   return { score, signals, weights_used: effective };
 }
 
+function _botBuildB2BScaleShadow(variables, weights) {
+  const currentValue = variables?.back_to_back?.value ?? null;
+  if (currentValue === null || currentValue === undefined) {
+    return {
+      status: 'UNAVAILABLE',
+      backend_value: null,
+      frontend_scale_shadow_value: null,
+      weighted_sum_score_current: null,
+      weighted_sum_score_shadow: null,
+      score_delta: null,
+      weight: weights?.back_to_back ?? null,
+      drives_decision: false,
+    };
+  }
+
+  // Frontend encode un B2B isolé à ±1 ; backend historique à ±0.6.
+  const frontendScaleValue = currentValue === 0 ? 0 : (currentValue > 0 ? 1 : -1);
+  const currentScore = _botComputeScore(variables, weights)?.score ?? null;
+
+  const shadowVariables = {
+    ...variables,
+    back_to_back: {
+      ...(variables.back_to_back ?? {}),
+      value: frontendScaleValue,
+    },
+  };
+  const shadowScore = _botComputeScore(shadowVariables, weights)?.score ?? null;
+
+  return {
+    status: 'AVAILABLE',
+    backend_value: currentValue,
+    frontend_scale_shadow_value: frontendScaleValue,
+    weighted_sum_score_current: currentScore,
+    weighted_sum_score_shadow: shadowScore,
+    score_delta: currentScore !== null && shadowScore !== null
+      ? Math.round((shadowScore - currentScore) * 10000) / 10000
+      : null,
+    weight: weights?.back_to_back ?? null,
+    semantics: 'OBSERVATION_ONLY_FRONTEND_SCALE_COUNTERFACTUAL',
+    drives_decision: false,
+  };
+}
+
 function _botEngineCompute(matchData) {
   const phaseConfig  = _botGetWeights(matchData);
   const seasonId = matchData?.season_id ?? _botGetNBASeasonId(
@@ -6494,6 +6552,7 @@ function _botEngineCompute(matchData) {
   const missing      = Object.entries(variables).filter(([, v]) => v.quality === 'MISSING').map(([k]) => k);
 
   const computed     = _botComputeScore(variables, weights);
+  const backToBackScaleShadow = _botBuildB2BScaleShadow(variables, weights);
   let { score }      = computed;
 
   // Star absence modifier
@@ -6594,6 +6653,7 @@ function _botEngineCompute(matchData) {
     missing_variables:     missing,
     weights_used:          computed.weights_used,
     recent_form_ema_shadow: recentFormEmaShadow,
+    back_to_back_scale_shadow: backToBackScaleShadow,
     star_absence_modifier: starAbsenceModifier,
     market_divergence:     marketDivergence,
     confidence_penalty:    null,
