@@ -27,6 +27,7 @@ const migrations = [
   '0002_nba_analysis_checkpoints.sql',
   '0003_nba_verified_closing_line.sql',
   '0004_nba_match_outcomes.sql',
+  '0005_nba_engine_version.sql',
 ].map(name => readFileSync(resolve(ROOT, 'migrations', name), 'utf8'));
 
 let assertions = 0;
@@ -81,6 +82,8 @@ function makeLog(id, bestEdge = 6.5) {
     season_type: 2,
     event_type: 'REGULAR',
     nba_phase: 'regular',
+    engine_version: 'nba-2026.10.01-baseline',
+    analysis_schema_version: 'nba-analysis-v1',
     datetime: '2026-10-20T23:30:00.000Z',
     home: 'Boston Celtics',
     away: 'New York Knicks',
@@ -131,6 +134,14 @@ eq(
   db.prepare('SELECT checkpoint_id, checkpoint_minutes_to_tip FROM nba_analysis_history WHERE analysis_id = ?').get('analysis-A'),
   { checkpoint_id: 'H2', checkpoint_minutes_to_tip: 132 },
   'checkpoint metadata retained in immutable history'
+);
+eq(
+  db.prepare('SELECT engine_version, analysis_schema_version FROM nba_analysis_history WHERE analysis_id = ?').get('analysis-A'),
+  {
+    engine_version: 'nba-2026.10.01-baseline',
+    analysis_schema_version: 'nba-analysis-v1',
+  },
+  'engine and analysis schema versions retained in immutable history'
 );
 eq(
   JSON.parse(await kv.get('bot_log_ESPN_GAME_1')).analysis_id,
