@@ -420,7 +420,7 @@ Détail complet · `docs/decisions/DECISION-002-NBA-ENGINE-PARITY-MBP-A2.md`. R�
 
 | ID | Composant | Effort |
 |---|---|---|
-| MBP-A.2 MED-1 | `back_to_back` numérique différent (-0.6/+0.6 backend vs -1/+1 frontend) | 30 min |
+| MBP-A.2 MED-1 | `back_to_back` numérique différent (-0.6/+0.6 backend vs -1/+1 frontend) · shadow contre-factuel désormais loggé, décision inchangée | observation pré-saison |
 | MBP-A.2 MED-2 | `robustness_score` n'existe pas backend · confidence cron ignore cette dimension | 4-6h ou 1h selon stratégie |
 | MBP-A.2 MED-3 | `confidence_penalty.score` toujours `null` côté backend · code mort | 30 min |
 | MBP-A.2 MED-4 | Pill couleur UI requiert `quality ≥ 0.80` (seuil n'existe pas moteur) | 30 min |
