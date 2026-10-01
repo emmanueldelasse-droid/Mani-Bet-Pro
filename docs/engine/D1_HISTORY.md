@@ -88,6 +88,7 @@ Migrations currently tracked:
 - `migrations/0002_nba_analysis_checkpoints.sql` · métadonnées `checkpoint_id` / `checkpoint_minutes_to_tip`
 - `migrations/0003_nba_verified_closing_line.sql` · closing quote, âge/source/provider et prix ML au settlement
 - `migrations/0004_nba_match_outcomes.sql` · résultat officiel + closing quote canonique par `match_id`
+- `migrations/0005_nba_engine_version.sql` · `engine_version` + `analysis_schema_version` indexés pour isoler les générations de moteur
 
 ## Rollout
 
@@ -105,7 +106,8 @@ Migrations currently tracked:
    - one `nba_match_outcomes` row created for the game;
    - every H6/H4/H2/H1 analysis for that `match_id` joins to the same outcome.
 6. Historical calibration reads must join immutable analyses to `nba_match_outcomes`; derived correctness/CLV is recalculated per analysis.
-7. Only after runtime proof, begin using D1 for historical/calibration reads.
+7. Calibration datasets must filter/group by `engine_version` so two predictive generations are never silently mixed.
+8. Only after runtime proof, begin using D1 for historical/calibration reads.
 
 ## Safety guarantees
 

@@ -4,14 +4,13 @@
 `main` · auto-deploy CF/GH Pages (build f9cd992)
 
 ## En cours
-[P0] Health opérationnel NBA · branche `feat/health-operational-dashboard-20260930`
-- scheduler par match H6/H4/H2/H1 mergé via PR #234
-- closing line pré-tip + CLV MONEYLINE mergés via PR #235
-- `GET /health` devient un snapshot read-only KV/runtime : heartbeats NBA horaire + odds 15 min, checkpoints, logs/status, settlements en retard, présence/fraîcheur caches provider, état binding D1
-- aucun provider externe n'est appelé par `/health`
-- version réellement déployée exposée via binding Cloudflare `CF_VERSION_METADATA`
-- health `degraded` uniquement sur issues opérationnelles ; D1 non provisionné reste warning
-- la partie **date Paris vs slate US** reste séparée dans la PR draft #217 et nécessite toujours une preuve runtime réelle avant merge
+[P1] Versioning moteur NBA · branche `feat/nba-engine-versioning-20261001`
+- baseline logique : `nba-2026.10.01-baseline`
+- schéma analyse : `nba-analysis-v1`
+- propagation frontend/backend → KV → CSV → D1 → health
+- aucune modification prédictive
+- calibration future obligatoirement segmentée par `engine_version`
+- PR #241 prime-time reste DRAFT jusqu'à preuve runtime pré-saison à partir du 03/10/2026
 
 ## Validation post-Fix#4 (à faire · prochain nightly ~10-11h UTC)
 - vérifier que les matchs playoffs manquants réapparaissent en `missed_by_cron` dans `/bot/logs`
