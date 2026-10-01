@@ -93,6 +93,14 @@ b2b_cumul_diff        0.02
 travel_load_diff      0.02
 ```
 
+### Sémantique EMA NBA · observation shadow
+- Formule production historique : `ema = λ × nouveau_résultat + (1−λ) × ema_précédente`.
+- Donc `λ=0.85` donne ~85% de poids au résultat le plus récent ; `λ=0.92` ~92%.
+- Cette sémantique reste **inchangée** pour le score tant qu'elle n'a pas été validée empiriquement.
+- Shadow non décisionnel : `ema = (1−λ) × nouveau_résultat + λ × ema_précédente`, interprétation où λ représente la mémoire/décroissance.
+- Les deux valeurs + leur delta sont loggés sous `recent_form_ema_shadow` avec `drives_decision=false`.
+- Toute bascule de formule est un changement prédictif majeur : analyse forward/OOS + validation créateur + bump `engine_version`.
+
 ### Poids playoff (sports.config.js:116) · v6.0
 - EMA λ=0.92 · score cap 0.80 (vs 0.90 saison)
 - `absences_impact:0.20` · `recent_form_ema:0.15` · `home_away_split:0.14`
