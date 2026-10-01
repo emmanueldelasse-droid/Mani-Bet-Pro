@@ -4,13 +4,13 @@
 `main` · auto-deploy CF/GH Pages (build f9cd992)
 
 ## En cours
-[P1] NBA back_to_back · shadow parité échelle · branche `feat/nba-b2b-scale-shadow-20261001`
-- backend canonique reste ±0.6 ; frontend historique reste ±1
-- regular : poids B2B 0.02 ; impact contre-factuel attendu ~<=0.5 point de probabilité
-- playoffs : poids B2B 0 ; écart brut visible mais delta score nul
-- shadow logge valeur backend / valeur ±1 / score pondéré actuel / score shadow / delta
+[P1] NBA Data Quality · decision shadow pondéré · branche `feat/nba-dq-decision-shadow-20261001`
+- production inchangée : gate/confidence utilisent toujours `data_quality` coverage legacy
+- seuil actuel 0.55 inchangé
+- contre-factuel applique le même algorithme au `weighted_quality_score`
+- logge confidence shadow, weighted below gate, gate/confidence would change
 - `drives_decision=false` · aucune modification prédictive · engine_version inchangée
-- KV + CSV + D1 migration 0007
+- KV + CSV + D1 migration 0008
 - PR #241 prime-time reste DRAFT jusqu'à preuve runtime pré-saison à partir du 03/10/2026
 
 ## Validation post-Fix#4 (à faire · prochain nightly ~10-11h UTC)
