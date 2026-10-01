@@ -31,6 +31,13 @@ Source · SESSION.md + audit code + git log mai 2026.
 
 ## P2 (à traiter sous quelques semaines)
 
+### P2-0 · NBA recent_form_ema · sémantique λ à challenger
+- Formule production actuelle confirmée : `λ × résultat_récent + (1−λ) × historique`.
+- Avec λ=0.85 / 0.92, le dernier match pèse donc ~85% / 92% dans la récurrence finale.
+- Risque : signal trop réactif à un seul W/L ; diagnostic statistique requis, pas une correction intuitive.
+- Mitigation actuelle : shadow `decay_lambda` loggé en parallèle avec `drives_decision=false`.
+- Décision interdite avant sample forward suffisant, comparaison Brier/ROI/CLV/effect size et validation créateur.
+
 ### P2-1 · NBA recheck calibration à 80+ logs
 - Actuel · 53 logs hit 67.9% v6.79 valide mais petit échantillon
 - `travel_load_diff` signe inversé n=22 · ignoré pour l'instant
