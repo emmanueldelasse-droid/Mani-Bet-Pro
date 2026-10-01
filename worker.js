@@ -132,6 +132,8 @@ const TENNIS_ODDS_SNAP_PREFIX = 'tennis_odds_snap_';  // KV : historique cotes p
 const PAPER_BETS_INDEX_KEY = 'paper_bets_index';
 const BOT_LOG_PREFIX       = 'bot_log_';
 const BOT_RUN_KEY          = 'bot_last_run'; // telemetry only · no longer blocks a full day
+const NBA_ENGINE_VERSION = 'nba-2026.10.01-baseline';
+const NBA_ANALYSIS_SCHEMA_VERSION = 'nba-analysis-v1';
 const NBA_CHECKPOINT_PREFIX = 'nba_checkpoint_';
 const NBA_CHECKPOINT_TTL_SECONDS = 72 * 3600;
 const NBA_CRON_HEARTBEAT_KEY = 'nba_cron_heartbeat_v1';
@@ -446,6 +448,8 @@ async function handleOperationalHealth(env, origin) {
       status: 'degraded',
       health_schema_version: '2.0.0',
       worker: 'mani-bet-pro',
+      nba_engine_version: NBA_ENGINE_VERSION,
+      nba_analysis_schema_version: NBA_ANALYSIS_SCHEMA_VERSION,
       deployed_version: {
         id: env?.CF_VERSION_METADATA?.id ?? null,
         tag: env?.CF_VERSION_METADATA?.tag ?? null,
@@ -549,6 +553,8 @@ async function handleOperationalHealth(env, origin) {
     status: issues.length === 0 ? 'ok' : 'degraded',
     health_schema_version: '2.0.0',
     worker: 'mani-bet-pro',
+    nba_engine_version: NBA_ENGINE_VERSION,
+    nba_analysis_schema_version: NBA_ANALYSIS_SCHEMA_VERSION,
     deployed_version: {
       id: env?.CF_VERSION_METADATA?.id ?? null,
       tag: env?.CF_VERSION_METADATA?.tag ?? null,
@@ -4167,6 +4173,8 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
     event_type:  match.event_type ?? null,
     season_id:   analysis.season_id ?? match.season_id ?? _botGetNBASeasonId(match.datetime ?? match.date),
     nba_phase:   analysis.nba_phase ?? null,
+    engine_version: analysis.engine_version ?? NBA_ENGINE_VERSION,
+    analysis_schema_version: analysis.analysis_schema_version ?? NBA_ANALYSIS_SCHEMA_VERSION,
     _meta_playoff_gate_would_block: _metaPlayoffGateWouldBlock,
 
     // Analyse moteur complète
@@ -4249,10 +4257,11 @@ async function _botPersistAnalysisD1(env, log) {
         analysis_id, match_id, season_id, event_type, season_type, nba_phase,
         game_datetime, analyzed_at, home_team, away_team, status,
         checkpoint_id, checkpoint_minutes_to_tip,
+        engine_version, analysis_schema_version,
         motor_prob, model_raw_score, decision_prob, probability_status,
         confidence_level, data_quality, data_quality_observed,
         best_edge, best_market, best_side, payload_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const weightedDq = log.data_quality_observed?.weighted_quality_score ?? null;
@@ -4270,6 +4279,8 @@ async function _botPersistAnalysisD1(env, log) {
       log.status ?? BOT_LOG_STATUS.PENDING,
       log.checkpoint_id ?? null,
       log.checkpoint_minutes_to_tip ?? null,
+      log.engine_version ?? NBA_ENGINE_VERSION,
+      log.analysis_schema_version ?? NBA_ANALYSIS_SCHEMA_VERSION,
       log.motor_prob ?? null,
       log.model_raw_score ?? null,
       log.decision_prob ?? null,
@@ -5917,6 +5928,7 @@ async function handleBotLogsExportCSV(url, env, origin) {
 
     const colsCommon = [
       'analysis_id', 'logged_at', 'settled_at', 'match_id', 'date', 'home', 'away',
+      'engine_version', 'analysis_schema_version',
       'checkpoint_id', 'checkpoint_minutes_to_tip',
       'motor_prob', 'model_raw_score', 'model_calibrated_prob', 'decision_prob', 'probability_status',
       'confidence_level', 'data_quality', 'best_edge', 'best_market', 'best_side',
@@ -6512,6 +6524,8 @@ function _botEngineCompute(matchData) {
     confidence_penalty:    null,
     nba_phase:             phase,
     season_id:             seasonId,
+    engine_version:        NBA_ENGINE_VERSION,
+    analysis_schema_version: NBA_ANALYSIS_SCHEMA_VERSION,
     betting_recommendations: bettingRecs,
     total_prediction:      totalPrediction,
     player_props_prediction: playerPropsPrediction,
