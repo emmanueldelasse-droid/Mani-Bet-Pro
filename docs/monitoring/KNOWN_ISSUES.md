@@ -433,7 +433,7 @@ Détail complet · `docs/decisions/DECISION-002-NBA-ENGINE-PARITY-MBP-A2.md`. R�
 |---|---|
 | MBP-A.2 FAI-1 | 5 variables backend orphelines (`home_back_to_back`, `away_back_to_back`, `home_last5_avg_pts`, `away_last5_avg_pts`, `confidence_penalty.score`) |
 | MBP-A.2 FAI-2 | `ts_diff` · `avg_pts_diff` extraites poids 0 (morts v5) |
-| MBP-A.2 FAI-3 | Quality statuts plus détaillés frontend (5 niveaux) vs backend (2) · pas dégrader |
+| MBP-A.2 FAI-3 | Gate backend reste coverage legacy ; qualité pondérée 8 niveaux + shadow de décision disponibles en observation · ne pas basculer sans validation empirique |
 | MBP-A.2 FAI-4 | Strikethrough edge fantôme UI · message petit (user peut louper) |
 | MBP-A.2 FAI-5 | `__ema_lambda` magic field injecté par orchestrator · fragile sans guard |
 | MBP-A.2 FAI-6 | SIGNAL_LABELS UI hardcodé · pas synchro `sports.config.js` |
