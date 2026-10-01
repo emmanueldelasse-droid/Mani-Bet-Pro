@@ -114,6 +114,7 @@ function loadBackendSandbox() {
     '_botBuildDataQualitySnapshot',
     '_botPersistAnalysisD1',
     '_botPersistSettlementD1',
+    '_botPersistMatchOutcomeD1',
     '_botSaveLog',
     '_botComputeConfidence',
     '_botTennisConfidence',
