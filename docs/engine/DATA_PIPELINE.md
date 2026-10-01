@@ -36,6 +36,9 @@ Recos actives → MONEYLINE / OVER_UNDER / PLAYER_POINTS
 KV `bot_log_{matchId}` 90j = dernier snapshot du match
 D1 `nba_analysis_history` = tous les snapshots par `analysis_id` si binding disponible
   ↓
+Post-match : D1 `nba_match_outcomes` = 1 résultat officiel + closing quote par `match_id`
+(tous les checkpoints se rattachent au même outcome sans muter les analyses)
+  ↓
 Telegram uniquement au checkpoint H1 (run manuel inchangé)
 ```
 
