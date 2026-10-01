@@ -182,6 +182,7 @@ export class EngineCore {
       model_disagreement: null,  // V2 — Sprint 6
 
       variables_used:          engineResult.variables_used ?? {},
+      recent_form_ema_shadow: engineResult.recent_form_ema_shadow ?? null,
       weight_coverage:         engineResult.weight_coverage ?? null,
       score_method:            engineResult.score_method ?? null,
       star_absence_modifier:   engineResult.star_absence_modifier ?? null,
@@ -417,6 +418,7 @@ export class EngineCore {
       robustness_breakdown:    robustness ?? null,
       data_quality_breakdown:  dataQuality ?? null,
       model_disagreement:      null,
+      recent_form_ema_shadow: engineResult?.recent_form_ema_shadow ?? null,
       betting_recommendations: null,
       explanation_context:     null,
     };

@@ -4189,6 +4189,7 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
     confidence_level:      _botComputeConfidence(analysis, dataQuality),
     data_quality:          dataQuality,
     data_quality_observed: dataQualityObserved,
+    recent_form_ema_shadow: analysis.recent_form_ema_shadow ?? null,
     missing_variables:     analysis.missing_variables ?? [],
     signals:               analysis.signals ?? [],
     variables_used:        analysis.variables_used ?? {},
@@ -4258,10 +4259,12 @@ async function _botPersistAnalysisD1(env, log) {
         game_datetime, analyzed_at, home_team, away_team, status,
         checkpoint_id, checkpoint_minutes_to_tip,
         engine_version, analysis_schema_version,
+        recent_form_ema_legacy, recent_form_ema_decay_shadow,
+        recent_form_ema_shadow_delta, recent_form_ema_lambda,
         motor_prob, model_raw_score, decision_prob, probability_status,
         confidence_level, data_quality, data_quality_observed,
         best_edge, best_market, best_side, payload_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const weightedDq = log.data_quality_observed?.weighted_quality_score ?? null;
@@ -4281,6 +4284,10 @@ async function _botPersistAnalysisD1(env, log) {
       log.checkpoint_minutes_to_tip ?? null,
       log.engine_version ?? NBA_ENGINE_VERSION,
       log.analysis_schema_version ?? NBA_ANALYSIS_SCHEMA_VERSION,
+      log.recent_form_ema_shadow?.legacy_value ?? null,
+      log.recent_form_ema_shadow?.decay_lambda_value ?? null,
+      log.recent_form_ema_shadow?.delta ?? null,
+      log.recent_form_ema_shadow?.lambda ?? null,
       log.motor_prob ?? null,
       log.model_raw_score ?? null,
       log.decision_prob ?? null,
@@ -5930,6 +5937,8 @@ async function handleBotLogsExportCSV(url, env, origin) {
       'analysis_id', 'logged_at', 'settled_at', 'match_id', 'date', 'home', 'away',
       'engine_version', 'analysis_schema_version',
       'checkpoint_id', 'checkpoint_minutes_to_tip',
+      'recent_form_ema_legacy', 'recent_form_ema_decay_shadow',
+      'recent_form_ema_shadow_delta', 'recent_form_ema_lambda',
       'motor_prob', 'model_raw_score', 'model_calibrated_prob', 'decision_prob', 'probability_status',
       'confidence_level', 'data_quality', 'best_edge', 'best_market', 'best_side',
       'result_home_score', 'result_away_score', 'result_winner', 'result_margin', 'result_total',
@@ -5969,6 +5978,10 @@ async function handleBotLogsExportCSV(url, env, origin) {
       }
       if (col === 'home_out')  return esc(log.absences_snapshot?.home_out ?? '');
       if (col === 'away_out')  return esc(log.absences_snapshot?.away_out ?? '');
+      if (col === 'recent_form_ema_legacy') return esc(log.recent_form_ema_shadow?.legacy_value ?? '');
+      if (col === 'recent_form_ema_decay_shadow') return esc(log.recent_form_ema_shadow?.decay_lambda_value ?? '');
+      if (col === 'recent_form_ema_shadow_delta') return esc(log.recent_form_ema_shadow?.delta ?? '');
+      if (col === 'recent_form_ema_lambda') return esc(log.recent_form_ema_shadow?.lambda ?? '');
       if (col === 'spread_shadow_line') return esc(log.spread_prediction_shadow?.reference_spread_line ?? '');
       if (col === 'spread_shadow_home_prob') return esc(log.spread_prediction_shadow?.home?.motor_prob ?? '');
       if (col === 'spread_shadow_away_prob') return esc(log.spread_prediction_shadow?.away?.motor_prob ?? '');
@@ -6086,26 +6099,82 @@ const _BOT_BDL_IDS = {
 
 function _botGetBDLId(espnName) { return _BOT_BDL_IDS[espnName] ?? null; }
 
+function _botComputeRecentFormEMA(matches, lambda, mode = 'legacy_current') {
+  if (!Array.isArray(matches) || matches.length === 0) return null;
+  if (!Number.isFinite(lambda) || lambda < 0 || lambda > 1) return null;
+
+  const ordered = [...matches].reverse(); // ancien → récent
+  let ema = null;
+  for (const match of ordered) {
+    if (match?.won === null || match?.won === undefined) continue;
+    const result = match.won ? 1 : 0;
+    if (ema === null) {
+      ema = result;
+      continue;
+    }
+
+    if (mode === 'legacy_current') {
+      // Production historique : lambda pondère le NOUVEAU résultat.
+      ema = lambda * result + (1 - lambda) * ema;
+    } else {
+      // Shadow uniquement : lambda comme facteur de mémoire/décroissance.
+      ema = (1 - lambda) * result + lambda * ema;
+    }
+  }
+  return ema !== null ? ema * 2 - 1 : null;
+}
+
+function _botComputeRecentFormEMAShadow(homeRecent, awayRecent, lambda = 0.85) {
+  if (!homeRecent?.matches || !awayRecent?.matches || !Number.isFinite(lambda)) {
+    return {
+      status: 'UNAVAILABLE',
+      lambda: Number.isFinite(lambda) ? lambda : null,
+      legacy_value: null,
+      decay_lambda_value: null,
+      delta: null,
+      drives_decision: false,
+    };
+  }
+
+  const homeLegacy = _botComputeRecentFormEMA(homeRecent.matches, lambda, 'legacy_current');
+  const awayLegacy = _botComputeRecentFormEMA(awayRecent.matches, lambda, 'legacy_current');
+  const homeDecay = _botComputeRecentFormEMA(homeRecent.matches, lambda, 'decay_lambda');
+  const awayDecay = _botComputeRecentFormEMA(awayRecent.matches, lambda, 'decay_lambda');
+
+  if ([homeLegacy, awayLegacy, homeDecay, awayDecay].some(v => v === null)) {
+    return {
+      status: 'UNAVAILABLE',
+      lambda,
+      legacy_value: null,
+      decay_lambda_value: null,
+      delta: null,
+      drives_decision: false,
+    };
+  }
+
+  const legacyValue = homeLegacy - awayLegacy;
+  const decayValue = homeDecay - awayDecay;
+  return {
+    status: 'AVAILABLE',
+    lambda,
+    legacy_value: Math.round(legacyValue * 10000) / 10000,
+    decay_lambda_value: Math.round(decayValue * 10000) / 10000,
+    delta: Math.round((decayValue - legacyValue) * 10000) / 10000,
+    latest_result_weight_legacy: lambda,
+    latest_result_weight_decay: Math.round((1 - lambda) * 10000) / 10000,
+    semantics: 'OBSERVATION_ONLY_DECAY_LAMBDA_COMPARISON',
+    drives_decision: false,
+  };
+}
+
 function _botComputeEMADiff(homeRecent, awayRecent, lambda = 0.85) {
   if (!homeRecent?.matches || !awayRecent?.matches)
     return { value: null, source: 'balldontlie_v1', quality: 'MISSING' };
   if (homeRecent.matches.length < 3 || awayRecent.matches.length < 3)
     return { value: null, source: 'balldontlie_v1', quality: 'INSUFFICIENT_SAMPLE' };
 
-  const computeEMA = (matches, lam) => {
-    if (!matches?.length) return null;
-    const ordered = [...matches].reverse();
-    let ema = null;
-    for (const match of ordered) {
-      if (match.won === null || match.won === undefined) continue;
-      const result = match.won ? 1 : 0;
-      ema = ema === null ? result : lam * result + (1 - lam) * ema;
-    }
-    return ema !== null ? ema * 2 - 1 : null;
-  };
-
-  const homeEMA = computeEMA(homeRecent.matches, lambda);
-  const awayEMA = computeEMA(awayRecent.matches, lambda);
+  const homeEMA = _botComputeRecentFormEMA(homeRecent.matches, lambda, 'legacy_current');
+  const awayEMA = _botComputeRecentFormEMA(awayRecent.matches, lambda, 'legacy_current');
   if (homeEMA === null || awayEMA === null)
     return { value: null, source: 'balldontlie_v1', quality: 'INSUFFICIENT_SAMPLE' };
 
@@ -6417,6 +6486,11 @@ function _botEngineCompute(matchData) {
   const { weights, phase, score_cap, ema_lambda: emaLambda } = phaseConfig;
 
   const variables    = _botExtractVariables(matchData, emaLambda);
+  const recentFormEmaShadow = _botComputeRecentFormEMAShadow(
+    matchData?.home_recent,
+    matchData?.away_recent,
+    emaLambda,
+  );
   const missing      = Object.entries(variables).filter(([, v]) => v.quality === 'MISSING').map(([k]) => k);
 
   const computed     = _botComputeScore(variables, weights);
@@ -6519,6 +6593,7 @@ function _botEngineCompute(matchData) {
     variables_used:        variables,
     missing_variables:     missing,
     weights_used:          computed.weights_used,
+    recent_form_ema_shadow: recentFormEmaShadow,
     star_absence_modifier: starAbsenceModifier,
     market_divergence:     marketDivergence,
     confidence_penalty:    null,

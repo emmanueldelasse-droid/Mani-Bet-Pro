@@ -28,6 +28,7 @@ const migrations = [
   '0003_nba_verified_closing_line.sql',
   '0004_nba_match_outcomes.sql',
   '0005_nba_engine_version.sql',
+  '0006_nba_recent_form_ema_shadow.sql',
 ].map(name => readFileSync(resolve(ROOT, 'migrations', name), 'utf8'));
 
 let assertions = 0;
@@ -84,6 +85,14 @@ function makeLog(id, bestEdge = 6.5) {
     nba_phase: 'regular',
     engine_version: 'nba-2026.10.01-baseline',
     analysis_schema_version: 'nba-analysis-v1',
+    recent_form_ema_shadow: {
+      status: 'AVAILABLE',
+      lambda: 0.85,
+      legacy_value: 1.7,
+      decay_lambda_value: 0.3,
+      delta: -1.4,
+      drives_decision: false,
+    },
     datetime: '2026-10-20T23:30:00.000Z',
     home: 'Boston Celtics',
     away: 'New York Knicks',
@@ -142,6 +151,16 @@ eq(
     analysis_schema_version: 'nba-analysis-v1',
   },
   'engine and analysis schema versions retained in immutable history'
+);
+eq(
+  db.prepare('SELECT recent_form_ema_legacy, recent_form_ema_decay_shadow, recent_form_ema_shadow_delta, recent_form_ema_lambda FROM nba_analysis_history WHERE analysis_id = ?').get('analysis-A'),
+  {
+    recent_form_ema_legacy: 1.7,
+    recent_form_ema_decay_shadow: 0.3,
+    recent_form_ema_shadow_delta: -1.4,
+    recent_form_ema_lambda: 0.85,
+  },
+  'EMA shadow values retained in immutable history'
 );
 eq(
   JSON.parse(await kv.get('bot_log_ESPN_GAME_1')).analysis_id,

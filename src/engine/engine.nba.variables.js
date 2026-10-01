@@ -286,6 +286,77 @@ function computeHomeSplit(homeStats, awayStats) {
   };
 }
 
+function _computeRecentFormEMA(matches, lambda, mode = 'legacy_current') {
+  if (!Array.isArray(matches) || matches.length === 0) return null;
+  if (!Number.isFinite(lambda) || lambda < 0 || lambda > 1) return null;
+
+  const ordered = [...matches].reverse(); // ancien → récent
+  let ema = null;
+  for (const match of ordered) {
+    if (match?.won === null || match?.won === undefined) continue;
+    const result = match.won ? 1 : 0;
+    if (ema === null) {
+      ema = result;
+      continue;
+    }
+
+    // Comportement production historique : lambda est utilisé comme poids
+    // du NOUVEAU résultat (0.85 => 85% au dernier match).
+    if (mode === 'legacy_current') {
+      ema = lambda * result + (1 - lambda) * ema;
+    } else {
+      // Shadow uniquement : interprétation "decay lambda", où lambda porte
+      // la mémoire historique et le nouveau résultat reçoit (1-lambda).
+      ema = (1 - lambda) * result + lambda * ema;
+    }
+  }
+
+  return ema !== null ? ema * 2 - 1 : null;
+}
+
+export function computeRecentFormEMAShadow(homeRecent, awayRecent, lambda) {
+  if (!homeRecent?.matches || !awayRecent?.matches || !Number.isFinite(lambda)) {
+    return {
+      status: 'UNAVAILABLE',
+      lambda: Number.isFinite(lambda) ? lambda : null,
+      legacy_value: null,
+      decay_lambda_value: null,
+      delta: null,
+      drives_decision: false,
+    };
+  }
+
+  const homeLegacy = _computeRecentFormEMA(homeRecent.matches, lambda, 'legacy_current');
+  const awayLegacy = _computeRecentFormEMA(awayRecent.matches, lambda, 'legacy_current');
+  const homeDecay = _computeRecentFormEMA(homeRecent.matches, lambda, 'decay_lambda');
+  const awayDecay = _computeRecentFormEMA(awayRecent.matches, lambda, 'decay_lambda');
+
+  if ([homeLegacy, awayLegacy, homeDecay, awayDecay].some(v => v === null)) {
+    return {
+      status: 'UNAVAILABLE',
+      lambda,
+      legacy_value: null,
+      decay_lambda_value: null,
+      delta: null,
+      drives_decision: false,
+    };
+  }
+
+  const legacyValue = homeLegacy - awayLegacy;
+  const decayValue = homeDecay - awayDecay;
+  return {
+    status: 'AVAILABLE',
+    lambda,
+    legacy_value: Math.round(legacyValue * 10000) / 10000,
+    decay_lambda_value: Math.round(decayValue * 10000) / 10000,
+    delta: Math.round((decayValue - legacyValue) * 10000) / 10000,
+    latest_result_weight_legacy: lambda,
+    latest_result_weight_decay: Math.round((1 - lambda) * 10000) / 10000,
+    semantics: 'OBSERVATION_ONLY_DECAY_LAMBDA_COMPARISON',
+    drives_decision: false,
+  };
+}
+
 function safeEMADiff(homeRecent, awayRecent, lambda) {
   if (!homeRecent?.matches || !awayRecent?.matches)
     return { value: null, source: 'balldontlie_v1', quality: 'MISSING' };
@@ -294,20 +365,8 @@ function safeEMADiff(homeRecent, awayRecent, lambda) {
   if (homeRecent.matches.length < 3 || awayRecent.matches.length < 3)
     return { value: null, source: 'balldontlie_v1', quality: 'INSUFFICIENT_SAMPLE' };
 
-  const computeEMA = (matches, lam) => {
-    if (!matches?.length) return null;
-    const ordered = [...matches].reverse();
-    let ema = null;
-    for (const match of ordered) {
-      if (match.won === null || match.won === undefined) continue;
-      const result = match.won ? 1 : 0;
-      ema = ema === null ? result : lam * result + (1 - lam) * ema;
-    }
-    return ema !== null ? ema * 2 - 1 : null;
-  };
-
-  const homeEMA = computeEMA(homeRecent.matches, lambda);
-  const awayEMA = computeEMA(awayRecent.matches, lambda);
+  const homeEMA = _computeRecentFormEMA(homeRecent.matches, lambda, 'legacy_current');
+  const awayEMA = _computeRecentFormEMA(awayRecent.matches, lambda, 'legacy_current');
   if (homeEMA === null || awayEMA === null)
     return { value: null, source: 'balldontlie_v1', quality: 'INSUFFICIENT_SAMPLE' };
 
