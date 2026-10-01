@@ -75,5 +75,5 @@ jobs:
           fi
 
       - name: Live ESPN prime-time proof
-        if: github.event_name == 'pull_request' && github.head_ref == 'fix/nba-prime-time-slate-date-clean-20261001'
+        if: github.event_name == 'pull_request' && contains(github.head_ref, 'nba-prime-time-slate')
         run: node scripts/validate-nba-prime-time-live.mjs
