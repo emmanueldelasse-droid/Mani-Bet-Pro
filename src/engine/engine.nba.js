@@ -16,7 +16,13 @@
  *   Interface publique inchangée : compute() et computeFromVariables().
  */
 
-import { SPORTS_CONFIG, getNBAWeights, getNBASeasonId } from '../config/sports.config.js';
+import {
+  SPORTS_CONFIG,
+  getNBAWeights,
+  getNBASeasonId,
+  NBA_ENGINE_VERSION,
+  NBA_ANALYSIS_SCHEMA_VERSION,
+} from '../config/sports.config.js';
 import { Logger }                          from '../utils/utils.logger.js';
 import {
   extractVariables,
@@ -93,7 +99,10 @@ export class EngineNBA {
         variables_used: variables, weights_used: weights,
         star_absence_modifier: null, market_divergence: null,
         confidence_penalty: null, betting_recommendations: null,
-        nba_phase: phase, season_id: seasonId, computed_at: new Date().toISOString(),
+        nba_phase: phase, season_id: seasonId,
+        engine_version: NBA_ENGINE_VERSION,
+        analysis_schema_version: NBA_ANALYSIS_SCHEMA_VERSION,
+        computed_at: new Date().toISOString(),
         debug: { playoff_gate: 'absences_not_confirmed' },
       };
     }
@@ -176,6 +185,8 @@ export class EngineNBA {
       confidence_penalty:   confidencePenalty,
       nba_phase:            phase,
       season_id:            seasonId,
+      engine_version:       NBA_ENGINE_VERSION,
+      analysis_schema_version: NBA_ANALYSIS_SCHEMA_VERSION,
       debug: {
         ...(scoreDebug ?? {}),
         absences_impact_value:  variables.absences_impact?.value ?? null,
