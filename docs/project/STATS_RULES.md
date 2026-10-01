@@ -64,7 +64,13 @@ Le prix d'exécution MONEYLINE est le maximum décimal disponible. Une liste de 
 
 Garde-fou de la correction initiale : le meilleur prix peut améliorer l'EV/Kelly/la cote affichée d'une recommandation déjà détectée, mais **ne crée pas à lui seul une recommandation** si le gate historique du marché de référence n'a pas été franchi.
 
-Spread/total ne suivent pas encore cette règle de maximum global : leurs prix ne sont comparables que pour une **même ligne**. Jusqu'à une implémentation line-aware dédiée, leur sélection historique est conservée.
+Pour les spreads et totals, la comparaison de prix est désormais **line-aware** :
+- le marché de référence historique reste inchangé pour le calcul du gate/edge ;
+- le prix d'exécution est le meilleur prix disponible uniquement parmi les bookmakers cotant exactement la même ligne ;
+- une meilleure cote sur une ligne différente est ignorée ;
+- le meilleur prix d'exécution peut améliorer EV/Kelly, mais ne peut pas faire franchir à lui seul le seuil historique.
+
+Les champs `reference_market_line` et `reference_line_matches_target` permettent de mesurer les éventuels écarts entre la ligne de référence historique et la ligne réellement analysée avant toute future correction du gate.
 
 
 ## CLV · Closing Line Value

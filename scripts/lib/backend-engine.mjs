@@ -101,6 +101,7 @@ function loadBackendSandbox() {
     '_botNoVigPair',
     '_botComputeMarketDivergence',
     '_botSelectBestMoneylineExecutionBook',
+    '_botSelectBestSameLineExecutionBook',
     '_botComputeBettingRecs',
     '_botPredictNBATotal',
     '_getAIPlayerPropsLines',

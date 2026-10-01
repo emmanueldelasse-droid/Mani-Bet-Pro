@@ -105,31 +105,44 @@ export function computeBettingRecommendations(score, odds, matchData, variables,
     const zHome = ((-spreadLine) - expectedMargin) / NBA_SIGMA;
     const pSpreadHome = 1 - normalCDF(zHome);
 
-    const bestHome = getBestBookOdds(marketOdds, 'HOME', 'spreads');
-    const bestAway = getBestBookOdds(marketOdds, 'AWAY', 'spreads');
+    const referenceHome = getBestBookOdds(marketOdds, 'HOME', 'spreads');
+    const referenceAway = getBestBookOdds(marketOdds, 'AWAY', 'spreads');
+    const executionHome = getBestBookOdds(marketOdds, 'HOME', 'spreads', spreadLine) ?? referenceHome;
+    const executionAway = getBestBookOdds(marketOdds, 'AWAY', 'spreads', -spreadLine) ?? referenceAway;
 
-    const checkSpreadSide = (motorProb, bestBook, side, sLine) => {
-      if (!bestBook) return;
-      const impliedProb = decimalToProb(bestBook.decimalOdds);
+    const checkSpreadSide = (motorProb, referenceBook, executionBook, side, sLine) => {
+      if (!referenceBook || !executionBook) return;
+      const impliedProb = decimalToProb(referenceBook.decimalOdds);
       if (impliedProb === null) return;
       const edge     = motorProb - impliedProb;
       const hasValue = edge >= EDGE_THRESHOLDS.SPREAD;
+      const executionImplied = decimalToProb(executionBook.decimalOdds);
       recs.push({
         type: 'SPREAD', label: 'Handicap (spread)', side,
-        odds_line: bestBook.odds, odds_decimal: bestBook.decimalOdds, odds_source: bestBook.bookmaker,
+        odds_line: executionBook.odds,
+        odds_decimal: executionBook.decimalOdds,
+        odds_source: executionBook.bookmaker,
+        odds_book_key: executionBook.bookmakerKey ?? null,
+        execution_price_selection: executionBook.priceSelection ?? 'REFERENCE_FALLBACK',
         spread_line: sLine,
+        reference_book: referenceBook.bookmaker ?? null,
+        reference_market_line: referenceBook.referenceLine ?? null,
+        reference_line_matches_target: referenceBook.referenceLine == null
+          ? null
+          : Math.abs(referenceBook.referenceLine - sLine) <= 1e-9,
         motor_prob:   Math.round(motorProb * 100),
         implied_prob: Math.round(impliedProb * 100),
+        execution_implied_prob: executionImplied == null ? null : Math.round(executionImplied * 100),
         edge:         Math.round(edge * 100),
         confidence:   hasValue ? edgeToConfidence(edge) : null,
         has_value:    hasValue,
-        kelly_stake:  hasValue ? computeKelly(motorProb, bestBook.odds) : null,
+        kelly_stake:  hasValue ? computeKelly(motorProb, executionBook.odds) : null,
         is_contrarian: false,
       });
     };
 
-    checkSpreadSide(pSpreadHome,     bestHome, 'HOME',  spreadLine);
-    checkSpreadSide(1 - pSpreadHome, bestAway, 'AWAY', -spreadLine);
+    checkSpreadSide(pSpreadHome,     referenceHome, executionHome, 'HOME',  spreadLine);
+    checkSpreadSide(1 - pSpreadHome, referenceAway, executionAway, 'AWAY', -spreadLine);
   }
 
   // ── OVER/UNDER ────────────────────────────────────────────────────────────
@@ -189,19 +202,31 @@ export function computeBettingRecommendations(score, odds, matchData, variables,
       // Toujours ajouter Over ET Under avec motor_prob calculé.
       // has_value = true seulement si edge suffisant — mais motor_prob toujours affiché.
       for (const [side, motorProb] of [['OVER', motorProbOver], ['UNDER', motorProbUnder]]) {
-        const bestBook = getBestBookOdds(marketOdds, side, 'totals');
-        if (!bestBook) continue;
-        const impliedProb = decimalToProb(bestBook.decimalOdds);
+        const referenceBook = getBestBookOdds(marketOdds, side, 'totals');
+        if (!referenceBook) continue;
+        const executionBook = getBestBookOdds(marketOdds, side, 'totals', ouLine) ?? referenceBook;
+        const impliedProb = decimalToProb(referenceBook.decimalOdds);
         if (impliedProb === null) continue;
+        const executionImplied = decimalToProb(executionBook.decimalOdds);
         const edge     = motorProb - impliedProb;
         const hasValue = edge >= EDGE_THRESHOLDS.OVER_UNDER;
 
         recs.push({
           type: 'OVER_UNDER', label: 'Total de points', side,
-          odds_line: bestBook.odds, odds_decimal: bestBook.decimalOdds, odds_source: bestBook.bookmaker,
+          odds_line: executionBook.odds,
+          odds_decimal: executionBook.decimalOdds,
+          odds_source: executionBook.bookmaker,
+          odds_book_key: executionBook.bookmakerKey ?? null,
+          execution_price_selection: executionBook.priceSelection ?? 'REFERENCE_FALLBACK',
           ou_line:          ouLine,
+          reference_book:   referenceBook.bookmaker ?? null,
+          reference_market_line: referenceBook.referenceLine ?? null,
+          reference_line_matches_target: referenceBook.referenceLine == null
+            ? null
+            : Math.abs(referenceBook.referenceLine - ouLine) <= 1e-9,
           motor_prob:       Math.round(motorProb * 100),
           implied_prob:     Math.round(impliedProb * 100),
+          execution_implied_prob: executionImplied == null ? null : Math.round(executionImplied * 100),
           predicted_total:  Math.round(projectedTotal),
           market_total:     ouLine,
           home_last5_avg:   homeLast5Raw,
@@ -210,7 +235,7 @@ export function computeBettingRecommendations(score, odds, matchData, variables,
           confidence: hasValue ? edgeToConfidence(edge) : null,
           has_value:  hasValue,
           note:       noteBase,
-          kelly_stake: hasValue ? computeKelly(motorProb, bestBook.odds) : null,
+          kelly_stake: hasValue ? computeKelly(motorProb, executionBook.odds) : null,
         });
       }
     }
@@ -298,7 +323,7 @@ export function computeKelly(p, americanOdds) {
   return Math.min(kelly * KELLY_FRACTION, KELLY_MAX_PCT);
 }
 
-export function getBestBookOdds(marketOdds, side, market) {
+export function getBestBookOdds(marketOdds, side, market, targetLine = null) {
   if (!marketOdds?.bookmakers?.length) return null;
 
   const PRIORITY = ['pinnacle', 'winamax', 'betclic', 'unibet_eu', 'betsson', 'bet365'];
@@ -342,15 +367,77 @@ export function getBestBookOdds(marketOdds, side, market) {
     return best;
   }
 
-  // Spread / total : conserver la logique historique tant qu'on ne compare pas
-  // explicitement des prix associés à la MÊME ligne.
+  // Spread / total :
+  // - sans targetLine => comportement historique (book prioritaire), utilisé
+  //   comme marché de référence afin de ne PAS modifier le gate/edge.
+  // - avec targetLine => meilleur prix uniquement parmi les books qui cotent
+  //   EXACTEMENT la même ligne. C'est le prix d'exécution.
+  if (targetLine !== null && targetLine !== undefined && (market === 'spreads' || market === 'totals')) {
+    const wanted = Number(targetLine);
+    if (!Number.isFinite(wanted)) return null;
+
+    const rank = key => {
+      const i = PRIORITY.indexOf(key);
+      return i === -1 ? 999 : i;
+    };
+    const lineFor = bk => {
+      if (market === 'totals') return Number(bk?.total_line);
+      // Le parser stocke la ligne HOME dans spread_line.
+      // Pour AWAY +5.5, la ligne HOME équivalente attendue est -5.5.
+      return Number(bk?.spread_line);
+    };
+    const wantedStoredLine = market === 'spreads' && side === 'AWAY' ? -wanted : wanted;
+
+    let best = null;
+    for (const bk of marketOdds.bookmakers) {
+      const quotedLine = lineFor(bk);
+      if (!Number.isFinite(quotedLine) || Math.abs(quotedLine - wantedStoredLine) > 1e-9) continue;
+
+      const oddsDecimal = Number(_getOdds(bk));
+      if (!Number.isFinite(oddsDecimal) || oddsDecimal <= 1) continue;
+
+      const american = oddsDecimal >= 2
+        ? Math.round((oddsDecimal - 1) * 100)
+        : Math.round(-100 / (oddsDecimal - 1));
+      const candidate = {
+        odds: american,
+        decimalOdds: oddsDecimal,
+        bookmaker: bk.title ?? bk.key,
+        bookmakerKey: bk.key ?? null,
+        marketLine: wanted,
+        priceSelection: market === 'spreads'
+          ? 'BEST_AVAILABLE_SAME_LINE_SPREAD'
+          : 'BEST_AVAILABLE_SAME_LINE_TOTAL',
+      };
+
+      if (!best ||
+          oddsDecimal > best.decimalOdds ||
+          (oddsDecimal === best.decimalOdds &&
+           rank(candidate.bookmakerKey) < rank(best.bookmakerKey))) {
+        best = candidate;
+      }
+    }
+    return best;
+  }
+
   for (const key of PRIORITY) {
     const bk = marketOdds.bookmakers.find(b => b.key === key);
     if (!bk) continue;
     const oddsDecimal = _getOdds(bk);
     if (!oddsDecimal || oddsDecimal <= 1) continue;
     const american = oddsDecimal >= 2 ? Math.round((oddsDecimal - 1) * 100) : Math.round(-100 / (oddsDecimal - 1));
-    return { odds: american, decimalOdds: oddsDecimal, bookmaker: bk.title ?? bk.key };
+    return {
+      odds: american,
+      decimalOdds: oddsDecimal,
+      bookmaker: bk.title ?? bk.key,
+      bookmakerKey: bk.key ?? null,
+      referenceLine: market === 'spreads'
+        ? (side === 'HOME' ? Number(bk.spread_line) : -Number(bk.spread_line))
+        : market === 'totals'
+          ? Number(bk.total_line)
+          : null,
+      priceSelection: 'REFERENCE_BOOK_PRIORITY',
+    };
   }
 
   let best = null;
@@ -359,7 +446,18 @@ export function getBestBookOdds(marketOdds, side, market) {
     if (!oddsDecimal || oddsDecimal <= 1) continue;
     const american = oddsDecimal >= 2 ? Math.round((oddsDecimal - 1) * 100) : Math.round(-100 / (oddsDecimal - 1));
     if (!best || oddsDecimal > best.decimalOdds) {
-      best = { odds: american, decimalOdds: oddsDecimal, bookmaker: bk.title ?? bk.key };
+      best = {
+        odds: american,
+        decimalOdds: oddsDecimal,
+        bookmaker: bk.title ?? bk.key,
+        bookmakerKey: bk.key ?? null,
+        referenceLine: market === 'spreads'
+          ? (side === 'HOME' ? Number(bk.spread_line) : -Number(bk.spread_line))
+          : market === 'totals'
+            ? Number(bk.total_line)
+            : null,
+        priceSelection: 'REFERENCE_FALLBACK',
+      };
     }
   }
   return best;

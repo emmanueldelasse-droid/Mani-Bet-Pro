@@ -6549,6 +6549,56 @@ function _botComputeBettingRecs(score, matchData, signals, marketDivergence) {
 // de la forme récente BDL et des absences de stars.
 // Entièrement indépendant du moteur ML — ne modifie aucun calcul 1X2.
 
+function _botSelectBestSameLineExecutionBook(mktOdds, market, side, targetLine) {
+  if (!mktOdds?.bookmakers?.length || !['spreads', 'totals'].includes(market)) return null;
+  const wanted = Number(targetLine);
+  if (!Number.isFinite(wanted)) return null;
+
+  const priority = ['pinnacle', 'winamax', 'betclic', 'unibet_eu', 'betsson', 'bet365'];
+  const rank = key => {
+    const i = priority.indexOf(key);
+    return i === -1 ? 999 : i;
+  };
+
+  const wantedStoredLine = market === 'spreads' && side === 'AWAY' ? -wanted : wanted;
+  let best = null;
+
+  for (const bk of mktOdds.bookmakers) {
+    const storedLine = market === 'totals' ? Number(bk?.total_line) : Number(bk?.spread_line);
+    if (!Number.isFinite(storedLine) || Math.abs(storedLine - wantedStoredLine) > 1e-9) continue;
+
+    const decimalOdds = Number(
+      market === 'totals'
+        ? (side === 'OVER' ? bk?.over_total : bk?.under_total)
+        : (side === 'HOME' ? bk?.home_spread : bk?.away_spread)
+    );
+    if (!Number.isFinite(decimalOdds) || decimalOdds <= 1) continue;
+
+    const american = decimalOdds >= 2
+      ? Math.round((decimalOdds - 1) * 100)
+      : Math.round(-100 / (decimalOdds - 1));
+    const candidate = {
+      odds: american,
+      decimalOdds,
+      bookmaker: bk.title ?? bk.key ?? 'Unknown',
+      bookmaker_key: bk.key ?? null,
+      market_line: wanted,
+      price_selection: market === 'totals'
+        ? 'BEST_AVAILABLE_SAME_LINE_TOTAL'
+        : 'BEST_AVAILABLE_SAME_LINE_SPREAD',
+    };
+
+    if (!best ||
+        decimalOdds > best.decimalOdds ||
+        (decimalOdds === best.decimalOdds &&
+         rank(candidate.bookmaker_key) < rank(best.bookmaker_key))) {
+      best = candidate;
+    }
+  }
+
+  return best;
+}
+
 function _botPredictNBATotal(matchData) {
   const hs = matchData?.home_season_stats ?? {};
   const as = matchData?.away_season_stats ?? {};
@@ -6675,6 +6725,22 @@ function _botPredictNBATotal(matchData) {
     ? { side: 'OVER',  edge: overEdge,  prob: overProb,  implied: overImplied,  odds: book.over_total, fair: fairPair?.fair_a ?? null }
     : { side: 'UNDER', edge: underEdge, prob: underProb, implied: underImplied, odds: book.under_total, fair: fairPair?.fair_b ?? null };
 
+  // Gate historique inchangé : best.edge vient toujours du book de référence.
+  // Une meilleure cote sur la même ligne améliore seulement l'exécution/EV.
+  const executionBook = _botSelectBestSameLineExecutionBook(
+    matchData?.market_odds,
+    'totals',
+    best.side,
+    line,
+  ) ?? {
+    odds: _decToAm(best.odds),
+    decimalOdds: best.odds,
+    bookmaker: book.title ?? book.key,
+    bookmaker_key: book.key ?? null,
+    market_line: line,
+    price_selection: 'REFERENCE_FALLBACK',
+  };
+
   const recommendation = best.edge >= 5 ? {
     type:         'OVER_UNDER',
     side:         best.side,
@@ -6682,13 +6748,19 @@ function _botPredictNBATotal(matchData) {
     est_total:    estTotal,
     motor_prob:   Math.round(best.prob * 100),
     implied_prob: Math.round(best.implied * 100),
+    execution_implied_prob: Math.round((1 / executionBook.decimalOdds) * 100),
     market_raw_prob: Math.round(best.implied * 10000) / 10000,
     market_fair_prob_no_vig: best.fair != null ? Math.round(best.fair * 10000) / 10000 : null,
     edge_no_vig: best.fair != null ? Math.round((best.prob - best.fair) * 10000) / 100 : null,
-    odds_decimal: best.odds,
-    odds_line:    _decToAm(best.odds),
-    odds_source:  book.title ?? book.key,
-    expected_value: Math.round((best.prob * best.odds - 1) * 10000) / 10000,
+    odds_decimal: executionBook.decimalOdds,
+    odds_line:    executionBook.odds,
+    odds_source:  executionBook.bookmaker,
+    odds_book_key: executionBook.bookmaker_key ?? null,
+    execution_price_selection: executionBook.price_selection ?? null,
+    reference_book: book.title ?? book.key,
+    reference_market_line: line,
+    reference_line_matches_target: true,
+    expected_value: Math.round((best.prob * executionBook.decimalOdds - 1) * 10000) / 10000,
     edge:         best.edge,
     has_value:    true,
   } : null;
