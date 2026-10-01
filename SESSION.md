@@ -1,17 +1,27 @@
 # Mani Bet Pro · état courant
 
 ## Branche active
-`main` · auto-deploy CF/GH Pages (build f9cd992)
+`main` · auto-deploy CF/GH Pages (build `646846f`)
 
 ## En cours
-[P1] NBA Data Quality · decision shadow pondéré · branche `feat/nba-dq-decision-shadow-20261001`
-- production inchangée : gate/confidence utilisent toujours `data_quality` coverage legacy
-- seuil actuel 0.55 inchangé
-- contre-factuel applique le même algorithme au `weighted_quality_score`
-- logge confidence shadow, weighted below gate, gate/confidence would change
-- `drives_decision=false` · aucune modification prédictive · engine_version inchangée
-- KV + CSV + D1 migration 0008
-- PR #241 prime-time reste DRAFT jusqu'à preuve runtime pré-saison à partir du 03/10/2026
+[P1] Pré-saison NBA 2026-27 · validation runtime PR #241 · DRAFT
+- branche · `fix/nba-prime-time-slate-date-clean-20261001`
+- objectif · découvrir les matchs ESPN classés date US veille alors que Paris est déjà au lendemain
+- correction isolée · fetch date Paris + date calendrier précédente · fusion · dédup ESPN `match_id`
+- aucun changement scoring · gate · calibration · confidence · odds · injuries
+- CI 01/10 · 36 suites régression · 0 fail · test prime-time 12 assertions · health 46 assertions
+- merge BLOQUÉ jusqu'à preuve runtime réelle
+- cible prioritaire · Miami Heat vs Toronto Raptors · 03/10/2026 23:00 UTC = 04/10 01:00 Paris
+- preuve forte · run horaire 22:00 UTC doit exécuter H1 alors que date Paris=20261004 et slate ESPN=20261003
+- vérifier · `fetch_dates` 20261004+20261003 · PRESEASON · season_type=1 · datetime exact · un seul H1 · heartbeat frais · aucune contamination stats regular
+
+[P1] Observabilité NBA 2026-27 · MERGÉE
+- PR #242 · `engine_version=nba-2026.10.01-baseline` + `analysis_schema_version=nba-analysis-v1`
+- PR #243 · `recent_form_ema` legacy vs decay-lambda en shadow · `drives_decision=false`
+- PR #244 · échelle B2B backend ±0.6 vs frontend ±1 en shadow · `drives_decision=false`
+- PR #245 · Data Quality pondérée appliquée au gate/confidence en shadow · seuil prod 0.55 inchangé · `drives_decision=false`
+- historique shadow persisté KV/CSV · migrations D1 0005→0008 prêtes
+- D1 `MANI_HISTORY_DB` reste optionnel et non déclaré dans `wrangler.jsonc` tant que DB réelle non provisionnée
 
 ## Validation post-Fix#4 (à faire · prochain nightly ~10-11h UTC)
 - vérifier que les matchs playoffs manquants réapparaissent en `missed_by_cron` dans `/bot/logs`
@@ -65,6 +75,20 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
 - prochaine étape · ChatGPT review formelle PR · validation créateur · monitoring prod 24h sur cas OKC vs SAS 18/05/2026
 
 ## Derniers PR mergés
+- #245 · weighted Data Quality decision shadow · non décisionnel
+- #244 · back-to-back scale shadow · non décisionnel
+- #243 · recent-form EMA decay shadow · non décisionnel
+- #242 · versionnage moteur/analyse NBA
+- #240 · D1 outcomes canoniques par match
+- #239 · spread shadow parity backend
+- #238 · meilleur prix exécution spread/total même ligne
+- #237 · meilleur prix exécution moneyline
+- #236 · health opérationnel NBA
+- #235 · closing line pré-tip vérifiée · CLV
+- #234 · checkpoints NBA H6/H4/H2/H1 par match
+- #233 · historique NBA D1 append-only optionnel
+- #232 · `season_id` canonique NBA
+- #231 · Data Quality pondérée observabilité
 - #215 · Playoff Gate Fix #4 · recovery auto NBA dans nightly settle (c221c28)
 - #214 · docs · clôture incident Playoff Gate Fix #1/#2/#3 (e41ce43)
 - #213 · Playoff Gate Fix #3 · badge statuts logs recovery UI (5e3673b)
@@ -76,6 +100,9 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
 - #196 · NBA engine parity test (492 assertions)
 
 ## TODO prioritaire
+- [ ] P1 · 03/10 pré-saison · preuve runtime PR #241 sur H1 Miami–Toronto · aucun merge avant preuve
+- [ ] P1 · après preuve #241 · review finale ChatGPT · merge squash uniquement si runtime conforme + MEMORY FILES UPDATED
+- [ ] P1 · provisionner D1 `MANI_HISTORY_DB` séparément seulement avec UUID Cloudflare réel · appliquer migrations 0001→0008 · valider KV↔D1 sur pré-saison
 - [ ] P1 · DECISION-003 MLB v6.94 · audit empirique 421 logs · validation créateur (proposed)
 - [ ] P1 · validation prod endpoints catchup PR #205 · 4 curl tests documentés `docs/monitoring/CATCHUP_SETTLE.md`
 - [ ] P1 · debug OKC vs SAS 18/05/2026 via `/bot/recover-missed?sport=NBA&date=20260518` (post-Option A · grep CF `NBA_PLAYOFF_GATE_BLOCKED`)
@@ -105,5 +132,7 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
 - Décisions ADR · `docs/decisions/` (001 sécu · 002 NBA parity · 003 MLB proposed · 004 catchup · 005 NBA playoff gate observabilité)
 - Tests · `docs/tests/NBA_ENGINE_PARITY.md`
 
-## Tests automatisés · 958 assertions · 0 fail
-`scripts/test-{nba-engine-parity,nba-playoff-gate,data-quality-gate,bot-monitoring-summary,bot-bet-classifier,tennis-best-bets-summary,catchup-settle,audit-mlb-logs,merge-injury-reports,absences-confirmed-front,bot-log-status-ui,nightly-recover}.mjs`
+## Tests automatisés
+- workflow `.github/workflows/regression-tests.yml` · auto-découverte `scripts/test-*.mjs`
+- validation PR #241 · 01/10/2026 · **36 suites · 0 fail**
+- couvre notamment · parité moteur NBA · checkpoints · closing line · D1 · season/event classification · pré-saison · prime-time dual-slate · shadows EMA/B2B/DQ/spread · settlement · health · sécurité marchés props/parlay
