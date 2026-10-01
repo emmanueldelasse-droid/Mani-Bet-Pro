@@ -4145,6 +4145,11 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
     analysis.missing_variables ?? [],
   );
   const dataQuality = dataQualityObserved.legacy_coverage_score;
+  const confidenceLevel = _botComputeConfidence(analysis, dataQuality);
+  const dataQualityDecisionShadow = _botBuildDataQualityDecisionShadow(
+    analysis,
+    dataQualityObserved,
+  );
 
   // Line movement snapshot (si historique dispo dans KV)
   let lineMovement = null;
@@ -4186,9 +4191,10 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
     decision_prob:         analysis.decision_prob ?? analysis.score ?? null,
     probability_status:    analysis.probability_status ?? 'UNAVAILABLE',
     score_method:          analysis.score_method,
-    confidence_level:      _botComputeConfidence(analysis, dataQuality),
+    confidence_level:      confidenceLevel,
     data_quality:          dataQuality,
     data_quality_observed: dataQualityObserved,
+    data_quality_decision_shadow: dataQualityDecisionShadow,
     recent_form_ema_shadow: analysis.recent_form_ema_shadow ?? null,
     back_to_back_scale_shadow: analysis.back_to_back_scale_shadow ?? null,
     missing_variables:     analysis.missing_variables ?? [],
@@ -7629,6 +7635,35 @@ function _botBuildDataQualitySnapshot(variables, missingVariables = []) {
     // Garde-fou explicite : le nouveau score est observationnel uniquement.
     drives_decision: false,
     decision_score_field: 'data_quality',
+  };
+}
+
+function _botBuildDataQualityDecisionShadow(analysis, dataQualityObserved) {
+  const legacyScore = dataQualityObserved?.legacy_coverage_score ?? null;
+  const weightedScore = dataQualityObserved?.weighted_quality_score ?? null;
+  const threshold = 0.55;
+
+  const currentConfidence = _botComputeConfidence(analysis, legacyScore);
+  const weightedConfidence = _botComputeConfidence(analysis, weightedScore);
+  const currentBelowGate = legacyScore == null || legacyScore < threshold;
+  const weightedBelowGate = weightedScore == null || weightedScore < threshold;
+
+  return {
+    status: weightedScore == null ? 'UNAVAILABLE' : 'AVAILABLE',
+    threshold,
+    current_data_quality: legacyScore,
+    weighted_data_quality_shadow: weightedScore,
+    data_quality_delta: legacyScore != null && weightedScore != null
+      ? Math.round((weightedScore - legacyScore) * 1000) / 1000
+      : null,
+    current_confidence: currentConfidence,
+    weighted_confidence_shadow: weightedConfidence,
+    current_below_gate: currentBelowGate,
+    weighted_below_gate_shadow: weightedBelowGate,
+    gate_would_change: currentBelowGate !== weightedBelowGate,
+    confidence_would_change: currentConfidence !== weightedConfidence,
+    semantics: 'OBSERVATION_ONLY_WEIGHTED_DQ_COUNTERFACTUAL',
+    drives_decision: false,
   };
 }
 
