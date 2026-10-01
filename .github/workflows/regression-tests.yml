@@ -73,3 +73,7 @@ jobs:
             echo "::error::${failures} regression suite(s) failed"
             exit 1
           fi
+
+      - name: Live ESPN prime-time proof
+        if: github.event_name == 'pull_request' && github.head_ref == 'fix/nba-prime-time-slate-date-clean-20261001'
+        run: node scripts/validate-nba-prime-time-live.mjs
