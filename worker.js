@@ -4190,6 +4190,7 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
     data_quality:          dataQuality,
     data_quality_observed: dataQualityObserved,
     recent_form_ema_shadow: analysis.recent_form_ema_shadow ?? null,
+    back_to_back_scale_shadow: analysis.back_to_back_scale_shadow ?? null,
     missing_variables:     analysis.missing_variables ?? [],
     signals:               analysis.signals ?? [],
     variables_used:        analysis.variables_used ?? {},
@@ -6478,6 +6479,49 @@ function _botComputeScore(variables, weights) {
   return { score, signals, weights_used: effective };
 }
 
+function _botBuildB2BScaleShadow(variables, weights) {
+  const currentValue = variables?.back_to_back?.value ?? null;
+  if (currentValue === null || currentValue === undefined) {
+    return {
+      status: 'UNAVAILABLE',
+      backend_value: null,
+      frontend_scale_shadow_value: null,
+      weighted_sum_score_current: null,
+      weighted_sum_score_shadow: null,
+      score_delta: null,
+      weight: weights?.back_to_back ?? null,
+      drives_decision: false,
+    };
+  }
+
+  // Frontend encode un B2B isolé à ±1 ; backend historique à ±0.6.
+  const frontendScaleValue = currentValue === 0 ? 0 : (currentValue > 0 ? 1 : -1);
+  const currentScore = _botComputeScore(variables, weights)?.score ?? null;
+
+  const shadowVariables = {
+    ...variables,
+    back_to_back: {
+      ...(variables.back_to_back ?? {}),
+      value: frontendScaleValue,
+    },
+  };
+  const shadowScore = _botComputeScore(shadowVariables, weights)?.score ?? null;
+
+  return {
+    status: 'AVAILABLE',
+    backend_value: currentValue,
+    frontend_scale_shadow_value: frontendScaleValue,
+    weighted_sum_score_current: currentScore,
+    weighted_sum_score_shadow: shadowScore,
+    score_delta: currentScore !== null && shadowScore !== null
+      ? Math.round((shadowScore - currentScore) * 10000) / 10000
+      : null,
+    weight: weights?.back_to_back ?? null,
+    semantics: 'OBSERVATION_ONLY_FRONTEND_SCALE_COUNTERFACTUAL',
+    drives_decision: false,
+  };
+}
+
 function _botEngineCompute(matchData) {
   const phaseConfig  = _botGetWeights(matchData);
   const seasonId = matchData?.season_id ?? _botGetNBASeasonId(
@@ -6494,6 +6538,7 @@ function _botEngineCompute(matchData) {
   const missing      = Object.entries(variables).filter(([, v]) => v.quality === 'MISSING').map(([k]) => k);
 
   const computed     = _botComputeScore(variables, weights);
+  const backToBackScaleShadow = _botBuildB2BScaleShadow(variables, weights);
   let { score }      = computed;
 
   // Star absence modifier
@@ -6594,6 +6639,7 @@ function _botEngineCompute(matchData) {
     missing_variables:     missing,
     weights_used:          computed.weights_used,
     recent_form_ema_shadow: recentFormEmaShadow,
+    back_to_back_scale_shadow: backToBackScaleShadow,
     star_absence_modifier: starAbsenceModifier,
     market_divergence:     marketDivergence,
     confidence_penalty:    null,
