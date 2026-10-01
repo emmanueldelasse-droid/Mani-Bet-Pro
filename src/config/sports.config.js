@@ -40,6 +40,9 @@ export const APP_CONFIG = {
   GITHUB_PAGES_URL: 'https://emmanueldelasse-droid.github.io/mani-bet-pro',
 };
 
+export const NBA_ENGINE_VERSION = 'nba-2026.10.01-baseline';
+export const NBA_ANALYSIS_SCHEMA_VERSION = 'nba-analysis-v1';
+
 export const SPORTS_CONFIG = {
 
   // NBA
