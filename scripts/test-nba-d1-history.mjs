@@ -29,6 +29,7 @@ const migrations = [
   '0004_nba_match_outcomes.sql',
   '0005_nba_engine_version.sql',
   '0006_nba_recent_form_ema_shadow.sql',
+  '0007_nba_b2b_scale_shadow.sql',
 ].map(name => readFileSync(resolve(ROOT, 'migrations', name), 'utf8'));
 
 let assertions = 0;
@@ -91,6 +92,16 @@ function makeLog(id, bestEdge = 6.5) {
       legacy_value: 1.7,
       decay_lambda_value: 0.3,
       delta: -1.4,
+      drives_decision: false,
+    },
+    back_to_back_scale_shadow: {
+      status: 'AVAILABLE',
+      backend_value: -0.6,
+      frontend_scale_shadow_value: -1,
+      weighted_sum_score_current: 0.51,
+      weighted_sum_score_shadow: 0.506,
+      score_delta: -0.004,
+      weight: 0.02,
       drives_decision: false,
     },
     datetime: '2026-10-20T23:30:00.000Z',
@@ -161,6 +172,17 @@ eq(
     recent_form_ema_lambda: 0.85,
   },
   'EMA shadow values retained in immutable history'
+);
+eq(
+  db.prepare('SELECT b2b_backend_value, b2b_frontend_scale_shadow, b2b_weighted_score_current, b2b_weighted_score_shadow, b2b_score_delta FROM nba_analysis_history WHERE analysis_id = ?').get('analysis-A'),
+  {
+    b2b_backend_value: -0.6,
+    b2b_frontend_scale_shadow: -1,
+    b2b_weighted_score_current: 0.51,
+    b2b_weighted_score_shadow: 0.506,
+    b2b_score_delta: -0.004,
+  },
+  'B2B scale shadow values retained in immutable history'
 );
 eq(
   JSON.parse(await kv.get('bot_log_ESPN_GAME_1')).analysis_id,
