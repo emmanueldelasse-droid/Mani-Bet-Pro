@@ -4,8 +4,8 @@
 `main` · auto-deploy CF/GH Pages · identité runtime via `CF_VERSION_METADATA` / build `index.html`
 
 ## En cours
-[P1] Pré-saison NBA 2026-27 · PR #249 · preuve pré-merge VALIDÉE
-- branche · `fix/nba-prime-time-slate-clean-v2-20261001`
+[P1] Pré-saison NBA 2026-27 · PR #249 · MERGÉE · validation production scheduler restante
+- merge · #249 · squash `969e8c8` · déploiement Cloudflare + build final verts
 - objectif · découvrir les matchs ESPN classés date US veille alors que Paris est déjà au lendemain
 - correction isolée · fetch date Paris + date calendrier précédente · fusion · dédup ESPN `match_id`
 - aucun changement scoring · gate · calibration · confidence · odds · injuries
@@ -14,8 +14,8 @@
 - Miami Heat @ Toronto Raptors réellement découvert sur slate `20261003` alors que date Paris=`20261004`
 - classification validée · PRESEASON · season_type=1 · H1=60 min · marqueur H1 persisté · analyse unique après dédup
 - limite honnête · les Cron Triggers Cloudflare ne ciblent pas les previews · validation scheduler réel seulement après déploiement production
-- PR #241 · remplacée par #249 car historique Git divergé/dirty · scope fonctionnel inchangé
-- post-merge · vérifier heartbeat/fetch_dates/H1 sur exécution Cloudflare réelle du 03/10 22:00 UTC
+- PR #241 · fermée sans merge · remplacée par #249 car historique Git divergé/dirty · scope fonctionnel inchangé
+- post-merge restant · vérifier heartbeat/fetch_dates/H1 sur exécution Cloudflare réelle du 03/10 22:00 UTC
 
 [P1] Faux positifs audit MBP-A.1 · RÉCONCILIÉS 01/10
 - `ai_player_props_{date}` · écriture cache confirmée dans `handleNBAAIPlayerPropsBatch` · read 20h / TTL 24h
@@ -90,6 +90,7 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
 - prochaine étape · ChatGPT review formelle PR · validation créateur · monitoring prod 24h sur cas OKC vs SAS 18/05/2026
 
 ## Derniers PR mergés
+- #249 · NBA prime-time dual-slate · correction cron pré-saison · preuve ESPN live validée
 - #248 · agent persistant observer-first · architecture docs-only
 - #247 · docs calibration/providers/Alon réconciliés avec code vivant
 - #246 · docs pré-saison/architecture/routes synchronisées
