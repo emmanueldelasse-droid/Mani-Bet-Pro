@@ -16,6 +16,7 @@
 | BallDontLie | NBA | Gratuit/payant | `BALLDONTLIE_API_KEY` | OUI (recent form) |
 | MLB Stats API | MLB | Gratuit | Aucune | OUI |
 | OpenWeather | MLB | Gratuit/quota | `WEATHER_API_KEY` | NON (facultatif) |
+| NBA.com injury report PDF | NBA | Gratuit | Aucune | OUI (blessures officielles) |
 
 ---
 
@@ -109,11 +110,19 @@
 - Cache · `pinnacle_pp_{date}` 6h
 
 ## BasketUSA (scraper)
-- Rôle · à vérifier précisément
-- Route debug `/debug/basketusa` (guard `DEBUG_SECRET`)
-- Helpers · `_buNormalizeText` `_buExtractCandidatesFromHtml` `_buScoreCandidate` `_findBestBasketUSAArticle` (worker.js:2053-2204)
-- Limites · HTML parsing fragile · dépend structure site
-- Statut · usage actuel à confirmer
+- Rôle · preview/article fallback dans team-detail.
+- Route debug `/debug/basketusa` (guard `DEBUG_SECRET`).
+- Helpers · `_buNormalizeText` · `_buExtractCandidatesFromHtml` · `_buScoreCandidate` · `_findBestBasketUSAArticle`.
+- Limites · HTML parsing fragile · dépend structure site.
+- Statut · code vivant · importance produit secondaire.
+
+## NBA.com injury report PDF
+- Base · `https://ak-static.cms.nba.com/referee/injury/Injury-Report_`.
+- Rôle · rapport officiel blessures NBA horodaté.
+- Handler · boucle timestamps → fetch PDF → `parseInjuryPDF`.
+- Coût · gratuit · pas d'auth.
+- Fallback si absent · autres sources blessures peuvent dégrader explicitement la qualité.
+- Statut · code vivant confirmé 01/10/2026.
 
 ## BallDontLie
 - Base · `https://api.balldontlie.io/v1`
@@ -170,10 +179,9 @@
 - Quota TheOddsAPI restant (peut être consulté en runtime via header)
 - Clé Claude model `claude-sonnet-4-20250514` (worker.js:195) · à upgrader vers sonnet-4-6 ou haiku-4-5
 - ✓ BasketUSA · **code vivant** (appelé dans `handleNBATeamDetail` worker.js:508) · `_findBestBasketUSAArticle` worker.js:2204 · cache `basketusa_best_v3_*` 45min · usage UI à confirmer (article_type `preview_fallback`)
-- ✗ NBA.com injury PDF · constante `NBA_INJURY_BASE` worker.js:117 définie · **jamais fetchée** · code mort
+- ✓ NBA.com injury PDF · fetch vivant via `NBA_INJURY_BASE` + `parseInjuryPDF` · fausse alerte MBP-A.1 clôturée 01/10/2026
 
-## Confirmé MBP-A.1 (10/13 providers actifs)
-- ESPN · Tank01 · TheOddsAPI · Anthropic Claude · BDL · MLB Stats · Sackmann CSV · Pinnacle · Telegram · OpenWeather → actifs
-- api-tennis · **désactivé par défaut** (gate stricte)
-- BasketUSA · code vivant mais usage UI ambigu (preview_fallback)
-- NBA.com PDF · **code mort** (URL constante jamais utilisée)
+## État providers réconcilié · 01/10/2026
+- Actifs · ESPN · Tank01 · TheOddsAPI · Anthropic Claude · BDL · MLB Stats · Sackmann CSV · Pinnacle · Telegram · OpenWeather · BasketUSA · NBA.com injury PDF.
+- api-tennis · désactivé par défaut via gate.
+- Toute disponibilité runtime reste à surveiller · provider déclaré actif ≠ SLA garanti.

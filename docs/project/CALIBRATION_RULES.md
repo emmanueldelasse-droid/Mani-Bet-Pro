@@ -11,13 +11,15 @@ Règles process. Détails statistiques · `docs/project/STATS_RULES.md`. Spec mo
 
 ## Datasets minimum par sport
 
-| Sport | Cible | Actuel (mai 2026) | Statut |
+| Sport | Cible recalibration | État exploitable | Statut |
 |---|---|---|---|
-| NBA | 80+ logs settled | 53 (v6.79) | INSUFFISANT · TODO P2 |
-| MLB | 200+ logs settled | 421 (v6.94) | ATTEINT mais IC indistinguable random |
-| Tennis | 100+ logs / phase | 273 mélangé 4 phases | INSUFFISANT par phase |
+| NBA | 80+ logs settled **même engine_version** | historique v6.79 non assimilable silencieusement à `nba-2026.10.01-baseline` | nouvelle baseline · forward validation requise |
+| MLB | 200+ logs settled | audit 421 logs v6.94 à finaliser | sample atteint · edge non prouvé |
+| Tennis | 100+ logs / phase | historique mélangé plusieurs phases | insuffisant par phase |
 
-Tennis · risque sous-segmentation · 273 logs / (9 vars × 4 phases) ≈ 7-8 obs par couple variable×phase · insuffisant pour calibrer par phase.
+Edge réel · règle plus stricte `BOT_OBJECTIVE.md` · 100+ logs sport-spécifiques + Wilson `IC_low > 52.4%` + CLV ≥ 0 + Brier < 0.245.
+
+Pré-saison NBA · pipeline/qualité uniquement · ne pas mélanger aux métriques regular/postseason.
 
 ## Critères déclenchement recalibration
 
@@ -36,12 +38,12 @@ Avant proposer ajustement poids · calculer pour la fenêtre cible ·
 - Hit rate par confidence (HIGH/MEDIUM/LOW/INCONCLUSIVE) + IC
 - Brier score décomposé par bucket motor_prob
 - ROI flat-stake (si `odds_at_analysis` disponible · sinon DIRE non calculable)
-- CLV moyen (si `closing_odds` disponible · TODO P2 logger)
+- CLV moyen · NBA : closing line pré-tip capturée quand snapshot éligible · autres sports : dire non calculable si absente
 - Effect size par variable + IC
 
 ## Workflow ajustement poids
 
-1. Alon agent (`.claude/agents/alon.md`) · rapport sur 50+ logs settled
+1. Alon agent (`.claude/agents/alon.md`) · rapport segmenté sport + version + phase + checkpoint
 2. ChatGPT review · effect size + IC par variable · validité statistique
 3. Proposition ajustement poids documentée dans une ADR
 4. Validation créateur (changement majeur calibration · cf `MERGE_PROTOCOL.md`)
@@ -63,15 +65,15 @@ Avant proposer ajustement poids · calculer pour la fenêtre cible ·
 - Baseline actuelle : `nba-2026.10.01-baseline` · schéma `nba-analysis-v1`.
 - Règle de bump : changement prédictif (formule/poids/seuil/variable/gate décisionnel) ⇒ nouvelle `engine_version`. Changement incompatible de structure/sémantique de payload ⇒ nouvelle `analysis_schema_version`.
 
-## Sport status flags (état mai 2026)
+## Sport status flags · 01/10/2026
 
 Mis à jour dans `docs/project/EXPERIMENTAL_FEATURES.md` · `docs/decisions/`.
 
 | Sport | Maturité | Décision en attente |
 |---|---|---|
-| NBA | Prototype avancé (53 logs) | Recheck 80+ logs (TODO P2) |
-| MLB | Expérimental (421 logs · random) | DECISION-003 · validation créateur requise |
-| Tennis | Pré-production fragile (273 logs) | Validation post 50 logs v6.95+ · sous-phase IC trop large |
+| NBA | nouvelle baseline versionnée · pré-saison observation | accumuler forward regular-season sur même `engine_version` |
+| MLB | expérimental · audit empirique disponible | DECISION-003 · validation créateur requise |
+| Tennis | pré-production fragile · phases séparées | forward par phase + IC |
 
 ## Refonte vs ajustement
 
@@ -80,8 +82,8 @@ Refonte (changement formule · ajout vars · suppression vars structurelle) ·
 - Validation créateur obligatoire
 - 300+ logs forward post-refonte avant validation
 
-Ajustement (poids ±10% sur var existante) ·
-- ChatGPT review suffit
+Ajustement (poids sur var existante) ·
+- Validation créateur obligatoire · `MERGE_PROTOCOL.md` classe calibration comme changement majeur
 - 100+ logs forward avant validation
 
 ## Sources empiriques cron

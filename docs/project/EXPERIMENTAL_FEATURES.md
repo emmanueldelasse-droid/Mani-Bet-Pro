@@ -6,6 +6,16 @@ Audits détaillés · `docs/decisions/`. Bugs et dette · `docs/monitoring/KNOWN
 
 ## Features actuellement expérimentales
 
+### NBA · shadows observabilité 2026-27
+- Statut · mergés · non décisionnels · `drives_decision=false`.
+- `recent_form_ema_shadow` · legacy λ vs decay-lambda · PR #243.
+- `back_to_back_scale_shadow` · backend ±0.6 vs contre-factuel ±1 · PR #244.
+- `data_quality_decision_shadow` · coverage legacy vs score pondéré · PR #245.
+- spread shadow · recherche parity · PR #239.
+- Métriques · delta décision/confidence · Brier · ROI · CLV · volume par `engine_version`.
+- Critère activation · forward sample suffisant · résultat stable out-of-sample · ADR · validation créateur.
+- Critère suppression · aucun signal utile / surcoût observabilité non justifié.
+
 ### MLB · garde-fou edge [5,10] (v6.94)
 - Hypothèse · zone `edge_7-10` profitable (54.7% sur 64 paris cités)
 - Métrique cible · hit rate ≥ 55% IC 95% borne basse > 52.4%
@@ -63,14 +73,14 @@ Base · 315 logs settled · v6.94. Voir `docs/engine/BETTING_LOGIC.md` MLB secti
 - Objectif · différencier perf quand FIP confirmé vs ERA fallback vs 4.20 ligue
 - Statut · non implémenté · à ajouter dans `_mlbAnalyzeMatch`
 
-### Logger `engine_version` dans logs
-- Objectif · isoler perf par version moteur pour éviter mélange
-- Statut · non implémenté
+### Version moteur · couverture cross-sport
+- NBA · implémenté PR #242 · `engine_version=nba-2026.10.01-baseline` + `analysis_schema_version` dans analyses/KV/CSV/D1/health.
+- MLB/Tennis · versionnement équivalent à compléter avant recalibration inter-version.
 
-### Logger `closing_odds` au coup d'envoi
-- Objectif · CLV vrai (pas seulement post-match)
-- Statut · `odds_snap_*` collecté mais jamais associé au log final
-- Lien · `STATS_RULES.md` § CLV
+### Closing line · couverture cross-sport
+- NBA MONEYLINE · implémenté PR #235 · dernier snapshot strictement pré-tip · âge maximal 20 min · statut explicite sinon indisponible.
+- MLB/Tennis · couverture CLV équivalente à compléter.
+- Règle · absence closing observée → "CLV non calculable" · jamais extrapoler.
 
 ### NBA · réactivation paris contrarian
 - Hypothèse · viable après 200+ logs · cotes ≥ 3

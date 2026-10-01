@@ -124,11 +124,11 @@ Source · SESSION.md + audit code + git log mai 2026.
 - Mix backend bot inline + handlers routes
 - Refactor possible · découper en modules · mais risque régression élevé · pas prioritaire
 
-### Pas de tests automatisés
-- Pas de Jest · Vitest · etc.
-- Tests manuels uniquement (curl + UI)
-- Risque régression à chaque merge
-- TODO long terme · suite tests unitaires (à valider ChatGPT)
+### Tests automatisés
+- Résolu · workflow GitHub `.github/workflows/regression-tests.yml`.
+- Auto-découverte `scripts/test-*.mjs` · Node ESM.
+- Validation 01/10/2026 PR #241 · 36 suites · 0 fail.
+- Tests manuels/runtime restent requis pour preuves providers/cron réels.
 
 ### Duplication moteur NBA
 - Frontend `src/engine/engine.nba.js` (4 fichiers split)
@@ -213,26 +213,21 @@ Source · SESSION.md + audit code + git log mai 2026.
 - ✓ 5 routes guardées effectivement (worker.js:1937, 1973, 2487, 2545, 2345)
 - **Nouvelles critiques MBP-A.4** remplacent · voir section dédiée ci-dessous
 
-### MBP-A.1 · CRIT-2 · Routes Paper sans auth HTTP
-- `/paper/state` `/paper/bet` `/paper/bet/:id` `/paper/reset` (worker.js:401-410)
-- Aucun JWT · clé API · token
-- Guard = binding KV `PAPER_TRADING` existant
-- N'importe quel client public peut placer · settle · reset bets
-- Risque · corruption état · vol bankroll · DoS
-- Fix · ajouter clé partagée header ou JWT (validation ChatGPT requise)
+### MBP-A.1 · CRIT-2 · Routes Paper sans auth HTTP · RÉSOLU MBP-S.2/S.2.1
+- 4 routes Paper protégées par `requirePaperApiKey` · header `X-API-Key` · fail-close.
+- Détail canonique · section MBP-A.4 CRIT-A + `PROD_SAFETY_RULES.md`.
 
-### MBP-A.1 · CRIT-3 · Erreur globale fuite message brut
-- `worker.js:438` · `errorResponse(\`Internal error: ${err.message}\`, 500, origin)`
-- Stack traces · chemins internes · clés API potentiellement exposées si erreur format
-- Fix · sanitize avant retour user · log full côté Cloudflare uniquement
+### MBP-A.1 · CRIT-3 · Erreur globale fuite message brut · RÉSOLU MBP-S.1
+- Réponses client génériques `SAFE_ERROR_MSG_*`.
+- Détail erreur conservé côté logs serveur uniquement.
 
 ## Moyen
 
-### MBP-A.1 · MED-1 · `ai_player_props_{date}` lu jamais écrit
-- Lu worker.js:1401, 4362, 4656
-- Aucun `PAPER_TRADING.put('ai_player_props_*'` trouvé en grep
-- Risque · feature props NBA toujours retourne cache vide
-- À vérifier · écriture dans `src/` ou autre cron · ou bug réel
+### MBP-A.1 · MED-1 · `ai_player_props_{date}` lu jamais écrit · FAUSSE ALERTE RÉSOLUE 01/10/2026
+- `handleNBAAIPlayerPropsBatch` construit `cacheKey = ai_player_props_{date}`.
+- Écriture vivante · `PAPER_TRADING.put(cacheKey, JSON.stringify(payload), { expirationTtl: WRITE_TTL_S })`.
+- Freshness lecture 20h · TTL écriture 24h.
+- Cause audit initial · grep cherchait un préfixe littéral alors que l'écriture utilise variable `cacheKey`.
 
 ### MBP-A.1 · MED-2 · Cron 30h TTL idempotence trop large
 - `bot_last_run` 30h · `mlb_bot_last_run` 30h · `tennis_bot_last_run` 30h
@@ -246,21 +241,20 @@ Source · SESSION.md + audit code + git log mai 2026.
 - Décalage minuit UTC vs Paris (1-2h selon DST)
 - Risque · double appel Claude à minuit UTC
 
-### MBP-A.1 · MED-4 · `/health` version hardcodée
-- `worker.js:419` · `version: '6.85.0'`
-- Actuel changelog v7.01 tennis-espn
-- Pas synced · maintenance manuelle oubliée
+### MBP-A.1 · MED-4 · `/health` version hardcodée · RÉSOLU
+- `CF_VERSION_METADATA` expose version Worker réellement déployée.
+- Health opérationnel couvre heartbeats/checkpoints/storage.
 
 ### MBP-A.1 · MED-5 · Constante `MLB_PITCHER_KV_KEY` morte
 - `worker.js:7372` · `MLB_PITCHER_KV_KEY = 'mlb_pitchers_cache'`
 - Constante définie · jamais référencée par get/put
 - Suppression possible
 
-### MBP-A.1 · MED-6 · NBA injury report PDF constante morte
-- `worker.js:117` · `NBA_INJURY_BASE = 'https://ak-static.cms.nba.com/referee/injury/Injury-Report_'`
-- Aucun fetch détecté
-- Fallback actuel · ESPN + Claude AI (v6.30+)
-- Suppression possible · décision ChatGPT
+### MBP-A.1 · MED-6 · NBA injury report PDF constante morte · FAUSSE ALERTE RÉSOLUE 01/10/2026
+- `NBA_INJURY_BASE` est utilisé par le handler officiel blessures.
+- Fetch vivant · `${NBA_INJURY_BASE}${timestamp}.pdf` puis `parseInjuryPDF`.
+- Ne pas supprimer · provider officiel actif.
+- Cause audit initial · recherche incomplète.
 
 ### MBP-A.1 · MED-7 · `mlb_team_recent_*` lu jamais écrit
 - worker.js:7822 lu
@@ -302,8 +296,8 @@ Source · SESSION.md + audit code + git log mai 2026.
 - 54 routes HTTP recensées (21 NBA · 11 MLB · 9 Tennis · 6 Bot · 4 Paper · 6 Debug · 2 Health)
 - 7 cron handlers
 - 50+ clés KV trackées
-- 10 providers actifs · 1 désactivé (api-tennis) · 1 ambigu (BasketUSA) · 1 mort (NBA PDF)
-- 3 clés KV mortes ou orphelines détectées
+- Providers actifs incluent NBA.com injury PDF · api-tennis reste désactivé par défaut · BasketUSA code vivant
+- Faux positif `ai_player_props_*` retiré · autres clés orphelines à vérifier individuellement
 - 19 variables d'environnement recensées
 
 ---

@@ -1,10 +1,11 @@
 # Data pipeline Mani Bet Pro
 
 ## Vue d'ensemble
-- Worker stateless · pas de DB SQL
-- Cache · état · logs → KV `PAPER_TRADING` unique namespace
-- Sources externes fetched on-demand · cachées dans KV avec TTL
-- Logs settlés conservés 90j
+- Worker stateless.
+- KV `PAPER_TRADING` · chemin runtime/caches/latest snapshots/paper/checkpoints.
+- D1 `MANI_HISTORY_DB` · optionnel · historique NBA append-only si binding provisionné.
+- Sources externes fetched on-demand · caches KV avec TTL.
+- KV logs latest snapshot conservés 90j · D1 prévu pour historique long terme multi-checkpoint.
 
 ## Flux NBA
 ```
@@ -19,7 +20,7 @@ H6 (5–7h) · H4 (3–5h) · H2 (1h30–3h) · H1 (0–1h30)
   ↓
 Idempotence KV `nba_checkpoint_{matchId}_{checkpoint}`
   ↓
-Tank01 → rosters + stats équipe (cache `tank01_teams_stats` 6h)
+Tank01 → rosters + stats équipe (cache `tank01_teams_stats` 24h)
 ESPN /injuries → blessures officielles
 Claude API → blessures non-officielles (rate-limited 1/25h)
 BallDontLie → 10-20 derniers matchs (recent_form_ema)
@@ -103,13 +104,13 @@ Le trigger 15 minutes est isolé dans `scheduled()` : il ne lance jamais les mot
 - NBA officiel · ESPN `/injuries`
 - NBA Tank01 · roster + status (cache `tank01_roster_injuries_v1` 24h)
 - NBA non-officiel · Claude web search (`_callClaudeWithWebSearch` worker.js:1847)
-- NBA injury report PDF (nba.com) · parsing `parseInjuryPDF` (worker.js:6214)
+- NBA injury report PDF (nba.com) · fetch via `NBA_INJURY_BASE` + parsing `parseInjuryPDF` · code vivant confirmé 01/10/2026
 - Merge dans `_botMergeInjuries` (worker.js:5836)
 - Impact calc `_botComputeAbsencesImpact` (worker.js:5104)
 
 ## Flux rosters
 - Tank01 `/getNBATeams` · cache `tank01_teams_stats` 6h read / 8h write
-- Cache enrichi `nba_rosters_teams_v3` 24h pour team-detail
+- Cache enrichi `nba_rosters_teams_v3` 6h pour team-detail
 - Helpers normalisation `_normalizeName` (worker.js:179) · v6.34 fix matching ESPN ↔ Tank01
 
 ## Flux paper betting
@@ -133,17 +134,21 @@ GET /paper/state → UI affichage
 
 ## Flux calibration logs
 ```
-Logs settlés (motor_was_right ≠ null)
+Logs pré-match settlés admissibles
   ↓
-/bot/calibration/analyze?sport=X (worker.js:4034)
+Exclusions recovery/missed/cancelled/postponed/invalid + INCONCLUSIVE non exploitable
   ↓
-Stats par bucket motor_prob · hit rate · Brier · biais
+Segmentation sport · engine_version · season/event phase · checkpoint · marché
   ↓
-Alon agent (.claude/agents/alon.md) · proposition ajustements poids
+/bot/calibration/analyze?sport=X + analyse Alon read-only
   ↓
-[Validation ChatGPT]
+Wilson · ROI flat · CLV si observée · Brier · effect size · shadows
   ↓
-Edit sports.config.js · commit · merge
+Hypothèse documentée · jamais changement automatique
+  ↓
+Review ChatGPT → ADR → validation créateur
+  ↓
+PR moteur/calibration versionnée → forward validation
 ```
 
 ## Flux monitoring (MBP-monitoring · PR #198)
@@ -288,7 +293,7 @@ Helper · `_rateLimitIpHash(request)` worker.js:914.
 | `ai_injuries_batch_rate_{YYYYMMDD}_{ipHash}` | 25h (90_000s) | Rate limit batch (1/jour par IP) |
 | `ai_injuries_only_{date}_{away}_{home}` | 8h | Cache single injuries (clé inchangée) |
 | `ai_injuries_rate_{date}_{ipHash}` | 25h | Rate limit single par IP |
-| `ai_player_props_{date}` | ~20h | Cache Claude props batch (**lu mais write non trouvée par grep · à vérifier**) |
+| `ai_player_props_{date}` | read freshness 20h · write TTL 24h | Cache Claude props batch · écrit via `PAPER_TRADING.put(cacheKey, ...)` dans `handleNBAAIPlayerPropsBatch` |
 | `ai_player_props_rate_{YYYYMMDD}_{ipHash}` | 25h | Rate limit props par IP |
 
 Sécu MBP-S.4 ·
@@ -301,7 +306,6 @@ Sécu MBP-S.4 ·
 |---|---|---|
 | `MLB_PITCHER_KV_KEY = 'mlb_pitchers_cache'` (worker.js:7372) | constante définie · **jamais référencée** | suppression possible |
 | `mlb_team_recent_{teamId}_{season}` (worker.js:7822) | lu · **write non trouvée** | à vérifier |
-| `ai_player_props_{date}` | lu (worker.js:1401, 4362, 4656) · **write non trouvée** | à vérifier dans `src/` ou cron AI |
 
 ## Idempotence cron
 - NBA : idempotence **par match + checkpoint** via `nba_checkpoint_{matchId}_{checkpoint}`. Les fenêtres H6/H4/H2/H1 peuvent donc produire plusieurs analyses pré-match du même match.
@@ -338,8 +342,8 @@ Sécu MBP-S.4 ·
 - Tout heure UTC dans logs · UI convertit local user
 
 ## Risques KV/cache (audit MBP-A.4)
-- `paper_trading_state` exposé via `/paper/state` sans auth · lecture bankroll publique
-- `bot_log_*` exposés via `/bot/logs` `/bot/logs/export.csv` · reverse-engineering moteur possible
+- Routes Paper protégées par `X-API-Key` · risque résiduel = secret local user + concurrence KV single-tenant.
+- `bot_log_*` exposés via `/bot/logs` `/bot/logs/export.csv` · reverse-engineering moteur possible.
 - `ai_injuries_*` 8h · `ai_player_props_*` 20h cache stale · pas de warning dans réponse
 - Pas d'isolation user · single-tenant
 - Pas de lock RW sur `paper_trading_state` · corruption concurrent possible
@@ -351,7 +355,6 @@ Sécu MBP-S.4 ·
 - ✓ `_runMLBBotCron` worker.js:8066 (confirmé)
 - ✓ `_runTennisBotCron` worker.js:9372 (confirmé)
 - ✓ Liste routes debug → `docs/monitoring/ROUTES_AUDIT.md` (5 NBA + 1 BasketUSA)
-- Écriture `ai_player_props_{date}` · semble manquer (lu mais pas écrit par worker.js)
 - `mlb_team_recent_*` write inconnu
 - `_todayParisKey()` timezone Paris vs UTC · risque drift rate limiters minuit
 - Pas de locking sur `paper_trading_state` · risque corruption RW concurrent
