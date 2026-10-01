@@ -30,6 +30,7 @@ const migrations = [
   '0005_nba_engine_version.sql',
   '0006_nba_recent_form_ema_shadow.sql',
   '0007_nba_b2b_scale_shadow.sql',
+  '0008_nba_dq_decision_shadow.sql',
 ].map(name => readFileSync(resolve(ROOT, 'migrations', name), 'utf8'));
 
 let assertions = 0;
@@ -102,6 +103,15 @@ function makeLog(id, bestEdge = 6.5) {
       weighted_sum_score_shadow: 0.506,
       score_delta: -0.004,
       weight: 0.02,
+      drives_decision: false,
+    },
+    data_quality_decision_shadow: {
+      status: 'AVAILABLE',
+      weighted_data_quality_shadow: 0.48,
+      weighted_confidence_shadow: 'INCONCLUSIVE',
+      weighted_below_gate_shadow: true,
+      gate_would_change: true,
+      confidence_would_change: true,
       drives_decision: false,
     },
     datetime: '2026-10-20T23:30:00.000Z',
@@ -183,6 +193,16 @@ eq(
     b2b_score_delta: -0.004,
   },
   'B2B scale shadow values retained in immutable history'
+);
+eq(
+  db.prepare('SELECT dq_weighted_confidence_shadow, dq_weighted_below_gate, dq_gate_would_change, dq_confidence_would_change FROM nba_analysis_history WHERE analysis_id = ?').get('analysis-A'),
+  {
+    dq_weighted_confidence_shadow: 'INCONCLUSIVE',
+    dq_weighted_below_gate: 1,
+    dq_gate_would_change: 1,
+    dq_confidence_would_change: 1,
+  },
+  'weighted DQ decision shadow retained in immutable history'
 );
 eq(
   JSON.parse(await kv.get('bot_log_ESPN_GAME_1')).analysis_id,
