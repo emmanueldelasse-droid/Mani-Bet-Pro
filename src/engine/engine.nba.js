@@ -28,6 +28,7 @@ import {
   extractVariables,
   assessMissing,
   computeStarAbsenceModifier,
+  computeRecentFormEMAShadow,
 } from './engine.nba.variables.js';
 import {
   computeScore,
@@ -75,6 +76,11 @@ export class EngineNBA {
     });
 
     const variables = extractVariables(enrichedData);
+    const recentFormEmaShadow = computeRecentFormEMAShadow(
+      matchData?.home_recent,
+      matchData?.away_recent,
+      emaLambda,
+    );
     const { missing, missingCritical } = assessMissing(variables);
 
     // ── require_absences_confirmed en playoffs ───────────────────────────────
@@ -97,6 +103,7 @@ export class EngineNBA {
         signals: [], volatility: null, missing_variables: missing,
         missing_critical: missingCritical, uncalibrated_weights: [],
         variables_used: variables, weights_used: weights,
+        recent_form_ema_shadow: recentFormEmaShadow,
         star_absence_modifier: null, market_divergence: null,
         confidence_penalty: null, betting_recommendations: null,
         nba_phase: phase, season_id: seasonId,
@@ -180,6 +187,7 @@ export class EngineNBA {
       uncalibrated_weights: uncalibrated,
       variables_used:       variables,
       weights_used:         weightsUsed,
+      recent_form_ema_shadow: recentFormEmaShadow,
       star_absence_modifier: starAbsenceModifier,
       market_divergence:    marketDivergence,
       confidence_penalty:   confidencePenalty,
