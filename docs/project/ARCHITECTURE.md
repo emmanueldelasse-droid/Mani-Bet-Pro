@@ -9,7 +9,8 @@ index.html + src/ui/*.js (GitHub Pages front)
   Tank01 · ESPN · TheOddsAPI · api-tennis · Sackmann CSV
   Claude API · Telegram · Pinnacle · BallDontLie
            ↓
-  KV PAPER_TRADING (Cloudflare)
+  KV PAPER_TRADING (canonique compatibilité)
+  D1 MANI_HISTORY_DB (optionnel · historique NBA append-only)
 ```
 
 ## Front (GitHub Pages)
@@ -34,13 +35,12 @@ index.html + src/ui/*.js (GitHub Pages front)
 - `ui.loading.js` · spinners
 - `ui.theme-toggle.js` · dark/light
 
-## Worker (`worker.js` 10634 lignes · MBP-A.1 audit + ajouts sécu MBP-S.1 à S.4)
+## Worker (`worker.js`)
 - Point d'entrée unique · Cloudflare Worker
-- Export default `worker.js:234` · `fetch` `worker.js:248` · `scheduled` `worker.js:238`
-- Router = if/else chain linéaire (pas de switch · pas de table) · lignes 248-432
-- Categories routes : 21 NBA · 11 MLB · 9 Tennis · 6 Bot · 4 Paper · 6 Debug · 2 Health → **54 routes HTTP total**
-- 7 cron handlers (scheduled)
-- Détail exhaustif · `docs/monitoring/docs/monitoring/ROUTES_AUDIT.md`
+- Router = if/else chain linéaire · code réel prime sur anciennes références de lignes
+- 2 triggers Cloudflare · pipeline principal horaire + snapshots odds toutes les 15 min
+- 7 handlers scheduled · moteurs jamais lancés par le trigger 15 min
+- Détail routes/auth · `docs/monitoring/ROUTES_AUDIT.md`
 
 ## Modules src/ (importés par worker.js)
 - `src/ai/` · client Claude · contexte · garde-fous · prompts
@@ -60,34 +60,38 @@ index.html + src/ui/*.js (GitHub Pages front)
 - `assets.binding: ASSETS` · directory `.`
 - `observability.enabled: true`
 - KV binding `PAPER_TRADING` · id `17eb7ddc41a949dd99bd840142832cfd`
-- Cron `0 * * * *` (toutes les heures)
+- Crons · `0 * * * *` pipeline principal · `*/15 * * * *` snapshots de cotes uniquement
+- D1 `MANI_HISTORY_DB` · optionnel · absent de `wrangler.jsonc` tant qu'une DB Cloudflare réelle n'est pas provisionnée
 
-## KV Namespace `PAPER_TRADING`
-- Unique namespace · multi-usage
-- Voir docs/engine/DATA_PIPELINE.md section KV pour clés détaillées
+## Stockage
+- KV `PAPER_TRADING` · chemin canonique compatibilité/runtime · logs latest snapshot · paper state · caches · checkpoints
+- D1 `MANI_HISTORY_DB` · optionnel · historique NBA immutable par `analysis_id` + outcomes canoniques par `match_id`
+- D1 ne bloque jamais KV · absence binding = comportement moteur inchangé
+- Migrations D1 0001→0008 présentes · détails `docs/engine/D1_HISTORY.md`
+- Voir `docs/engine/DATA_PIPELINE.md` pour caches/flux
 
 ## Cron handler (worker.js scheduled)
-- `_runBotCron` · NBA · fenêtre dynamique ~1h avant 1er match
+- `_runBotCron` · NBA · horaire · checkpoints H6/H4/H2/H1 par match
 - `_runMLBBotCron` (worker.js:8066) · MLB · idem
 - `_runTennisBotCron` (worker.js:9372) · Tennis · idem
 - `_runNightlySettle` (worker.js:4237) · 10-11h UTC · settle J-1 J-2 (tennis J-10)
-- `_runOddsSnapshot` (worker.js:4298) · chaque heure
+- `_runOddsSnapshot` · trigger dédié toutes les 15 min · snapshots odds seulement
 - `_runAIPlayerPropsCron` (worker.js:4350) · 22h UTC · Claude batch props
 - `_runCalibrationCron` (worker.js:4415) · lundi 7h UTC · Telegram résumé hebdo
 
-## Routes principales (extrait · détail `docs/monitoring/docs/monitoring/ROUTES_AUDIT.md`)
-- `/health` · status worker · version hardcodée `6.85.0` (worker.js:419 · non sync changelog)
+## Routes principales (extrait · détail `docs/monitoring/ROUTES_AUDIT.md`)
+- `/health` · read-only KV/runtime · heartbeats · checkpoints · stockage · version déployée via `CF_VERSION_METADATA`
 - `/nba/*` · 21 routes · matches · injuries · stats · odds · team-detail · 5 debug
 - `/mlb/*` · 11 routes · matches · pitchers · standings · weather · bot
 - `/tennis/*` · 10 routes · tournaments · odds · stats · bot · _espn_probe · `/tennis/provider/sports-debug` (DEBUG_SECRET · PR #200 · audit registre vs TheOddsAPI)
 - `/bot/*` · 6 routes · logs · settle · calibration · run · odds-history
-- `/paper/*` · 4 routes · state · bet · reset · **aucune auth HTTP**
+- `/paper/*` · 4 routes · state · bet · settle · reset · auth stricte `X-API-Key` / `PAPER_API_KEY`
 
 ## Séparation front / backend
 - Front fetch worker via HTTPS · CORS `_headers`
-- Worker stateless · état → KV
+- Worker stateless · état runtime → KV
 - Cron Cloudflare = scheduler · pas de serveur persistant
-- Pas de DB SQL · KV uniquement
+- D1 optionnel uniquement pour historique NBA long terme · KV reste compatibilité canonique tant que rollout D1 non validé
 
 ## 2 moteurs NBA coexistent (audit MBP-A.2 · `docs/decisions/DECISION-002-NBA-ENGINE-PARITY-MBP-A2.md`)
 - **Backend** · `_botEngineCompute` (worker.js:5211) · appelé uniquement par cron `_runBotCron` (worker.js:3528) · sortie logs KV `bot_log_*` → calibration Alon
@@ -111,20 +115,14 @@ index.html + src/ui/*.js (GitHub Pages front)
 - `handlePaperPlaceBet` · `handlePaperSettleBet` (worker.js:5887, 5937) · paper trading
 
 ## Infra tests (Node ESM · pas de framework)
-- `scripts/test-nba-engine-parity.mjs` · 492 assertions parité backend↔frontend NBA (PR #196 · MBP-A.2)
-- `scripts/test-data-quality-gate.mjs` · 44 assertions boundaries gate 6 surfaces (PR #197 · MBP-P1)
-- `scripts/test-bot-monitoring-summary.mjs` · 50 assertions rapport monitoring (PR #198)
-- `scripts/test-bot-bet-classifier.mjs` · 34 assertions classifier UI 3 catégories (PR #202)
-- `scripts/test-tennis-best-bets-summary.mjs` · 29 assertions rapport tennis dédié (PR #203)
-- `scripts/report-bot-monitoring.mjs` · CLI read-only multi-sports · 3 modes (`--demo` · `--url <origin>` · `--fixture <path>`)
-- `scripts/report-tennis-best-bets.mjs` · CLI read-only dédié tennis best bets (PR #203) · même API 3 modes + filtre `--date`
-- `scripts/lib/dom-stub.mjs` · stub `window.location` + `localStorage` pour imports Logger en Node
-- `scripts/lib/backend-engine.mjs` · vm sandbox worker.js · expose fonctions pures `_bot*` + `_mlbEngineCompute` + `getWeightsForPhase`
-- `scripts/lib/monitoring-summary.mjs` · `summarize` + `formatReport` + `evaluateFetchErrors` (PR #198/#199)
-- `scripts/lib/tennis-best-bets-summary.mjs` · `summarizeTennisBestBets` + `formatTennisBestBetsReport` (PR #203)
-- `src/ui/ui.bot.classifier.js` · classifier UI pure réutilisable (PR #202) · importé par `ui.bot.js` ET les tests/scripts monitoring tennis
-- Aucun framework lourd (Jest/Vitest) · ESM natif Node 20+ · pas de dépendance npm
-- Total · 649 assertions actives sur 5 scripts
+- workflow `.github/workflows/regression-tests.yml` · découvre automatiquement tous les `scripts/test-*.mjs`
+- validation 01/10/2026 sur PR #241 · **36 suites · 0 fail**
+- parité backend↔frontend NBA · checkpoints H6/H4/H2/H1 · closing line/CLV · historique D1 · event/season/preseason · settlement/recovery · health
+- shadows non décisionnels testés · recent-form EMA · B2B scale · weighted DQ decision · spread parity
+- sécurité marchés · props bookmaker requis · parlay bloqué tant que corrélations non validées
+- scripts monitoring · `report-bot-monitoring.mjs` · `report-tennis-best-bets.mjs`
+- helpers tests · `scripts/lib/backend-engine.mjs` · `scripts/lib/monitoring-summary.mjs` · `scripts/lib/dom-stub.mjs`
+- aucun framework lourd · ESM natif Node · CI Node 22
 
 ## Sécurité (post chantier MBP-A.4 · `docs/decisions/DECISION-001-SECURITY-AUDIT-MBP-A4.md`)
 **6/6 critiques résolues** ·
@@ -166,5 +164,5 @@ index.html + src/ui/*.js (GitHub Pages front)
 - ✗ Lignes exactes handlers MLB approximatives · ré-auditer si besoin
 
 ## Audit MBP-A.1
-Voir `docs/monitoring/docs/monitoring/ROUTES_AUDIT.md` · routes + auth + provider + cache par ligne.
-Voir `docs/monitoring/docs/monitoring/KNOWN_ISSUES.md` section "Écarts MBP-A.1" · incohérences critiques.
+Voir `docs/monitoring/ROUTES_AUDIT.md` · routes + auth + provider + cache par ligne.
+Voir `docs/monitoring/KNOWN_ISSUES.md` section "Écarts MBP-A.1" · incohérences critiques.
