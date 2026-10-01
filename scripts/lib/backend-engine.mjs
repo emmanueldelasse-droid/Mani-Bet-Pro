@@ -116,6 +116,7 @@ function loadBackendSandbox() {
     '_botPersistSettlementD1',
     '_botPersistMatchOutcomeD1',
     '_botSaveLog',
+    '_botComputeRecentFormEMAShadow',
     '_botComputeConfidence',
     '_botTennisConfidence',
     '_botEngineCompute',
