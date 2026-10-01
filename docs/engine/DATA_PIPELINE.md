@@ -26,9 +26,12 @@ BallDontLie → 10-20 derniers matchs (recent_form_ema)
 TheOddsAPI → cotes décimales bookmakers
 Pinnacle (gratuit guest) → cotes justes
   ↓
-_botExtractVariables · _botEngineCompute (worker.js:5211)
+_botExtractVariables · _botEngineCompute
   ↓
-Reco → `_botComputeBettingRecs` (worker.js:5334)
+Spread shadow → `_botPredictNBASpreadShadow`
+(research_only · drives_recommendation=false · jamais injecté dans les recos)
+  ↓
+Recos actives → MONEYLINE / OVER_UNDER / PLAYER_POINTS
   ↓
 KV `bot_log_{matchId}` 90j = dernier snapshot du match
 D1 `nba_analysis_history` = tous les snapshots par `analysis_id` si binding disponible

@@ -107,11 +107,12 @@ travel_load_diff      0.02
 - divergence ≥ 28 pts OU
 - divergence ≥ 20 pts ET data_quality < 0.7
 
-### Recos NBA (worker.js:5334)
-- Marchés : MONEYLINE · SPREAD · OVER_UNDER · PLAYER_POINTS
-- Kelly fractionné (frac=0.25 · max 5% bankroll)
-- Edge minimum : 5% ML · 3% spread / O/U
-- Cap probabilité [0.20, 0.80]
+### Recos NBA backend
+- Marchés actuellement exploitables dans le Worker : MONEYLINE · OVER_UNDER · PLAYER_POINTS.
+- SPREAD : **shadow mode uniquement** via `_botPredictNBASpreadShadow` ; calcul/log/CSV pour parité et backtest, mais aucune insertion dans `betting_recommendations`.
+- Le shadow spread reproduit la formule frontend (CDF σ=12) et expose le résultat hypothétique du gate historique à titre d'observation seulement.
+- Toute activation de SPREAD backend nécessite une validation statistique et une PR séparée.
+- Kelly/edge des marchés actifs : logique existante inchangée.
 
 ### Hit rate cible
 - > 55% hit rate

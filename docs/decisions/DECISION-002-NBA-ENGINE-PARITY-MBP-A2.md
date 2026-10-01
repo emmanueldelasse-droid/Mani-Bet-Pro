@@ -327,10 +327,16 @@ INCONCLUSIVE · si score/robust/dq null
 
 | Marché | Backend `_botComputeBettingRecs` | Frontend `engine.nba.betting.js` |
 |---|---|---|
-| MONEYLINE | ✓ edge ≥ 5% · Kelly 0.25 cap 5% | ✓ idem |
-| SPREAD | ✓ ajustement motorisé · CDF σ=12 · edge 3% | ✓ idem |
-| OVER_UNDER | ✓ projection + playoffAdj -4.5 · edge 5% | ✓ idem |
-| PLAYER_POINTS | ✓ `_botPredictPlayerPoints` (worker.js:5592) | partiel (lecture cache `ai_player_props_*`) |
+| MONEYLINE | ✓ exploitable · edge/gate historique | ✓ exploitable |
+| SPREAD | **SHADOW ONLY** · `_botPredictNBASpreadShadow` · `research_only=true` · `drives_recommendation=false` | ✓ logique historique frontend |
+| OVER_UNDER | ✓ exploitable · projection + phase match | ✓ exploitable |
+| PLAYER_POINTS | ✓ projection + marché vérifié uniquement | partiel / UI |
+
+### Statut spread backend
+
+Le backend canonique **ne produit pas encore de recommandation SPREAD exploitable**. La formule frontend (CDF σ=12 + ajustements de signaux) est maintenant calculée côté Worker uniquement en shadow mode afin de mesurer la parité sur données réelles et de constituer un historique.
+
+Le shadow spread est persisté séparément dans `spread_prediction_shadow` et n'est jamais poussé dans `betting_recommendations.recommendations`, ne peut pas devenir `best` et ne peut pas déclencher un pari. Toute activation future exige une validation statistique dédiée et une PR séparée approuvée par le créateur.
 
 ### Garde-fous edge
 

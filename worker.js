@@ -4027,6 +4027,15 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
   const analysis = _botEngineCompute(matchData);
   if (!analysis) return null;
 
+  // Spread backend : SHADOW ONLY.
+  // Calcule la même projection que le frontend pour mesurer la parité et
+  // constituer un historique, mais ne pousse aucune recommandation dans
+  // betting_recommendations et ne peut jamais devenir "best".
+  analysis.spread_prediction_shadow = _botPredictNBASpreadShadow(
+    matchData,
+    analysis.signals ?? [],
+  );
+
   // Phase 3 : matching projections joueurs ↔ lignes marché
   // Chaîne de fetch : Pinnacle (gratuit, vraies cotes) → TheOddsAPI → AI cache fallback
   if (env && analysis.player_props_prediction?.available) {
@@ -4196,6 +4205,9 @@ async function _botAnalyzeMatch(match, dateStr, injuryData, oddsData, advancedDa
 
     // Prédiction props joueur NBA (Phase 1) — projections pures sans marché
     player_props_prediction: analysis.player_props_prediction ?? null,
+
+    // Spread frontend↔backend parity · observation uniquement.
+    spread_prediction_shadow: analysis.spread_prediction_shadow ?? null,
 
     // Post-match (rempli par handleBotSettleLogs)
     result_home_score: null,
@@ -5819,6 +5831,8 @@ async function handleBotLogsExportCSV(url, env, origin) {
       'closing_snapshot_at', 'closing_snapshot_age_minutes', 'closing_source',
       'closing_provider_name', 'closing_home_ml', 'closing_away_ml',
       'est_total_nba', 'ou_line_nba', 'ou_diff_nba', 'ou_prediction_side', 'ou_prediction_edge',
+      'spread_shadow_line', 'spread_shadow_home_prob', 'spread_shadow_away_prob',
+      'spread_shadow_best_side', 'spread_shadow_best_edge',
     ];
     const colsNbaExtra = [
       'season_id', 'season_type', 'event_type', 'nba_phase',
@@ -5848,6 +5862,11 @@ async function handleBotLogsExportCSV(url, env, origin) {
       }
       if (col === 'home_out')  return esc(log.absences_snapshot?.home_out ?? '');
       if (col === 'away_out')  return esc(log.absences_snapshot?.away_out ?? '');
+      if (col === 'spread_shadow_line') return esc(log.spread_prediction_shadow?.reference_spread_line ?? '');
+      if (col === 'spread_shadow_home_prob') return esc(log.spread_prediction_shadow?.home?.motor_prob ?? '');
+      if (col === 'spread_shadow_away_prob') return esc(log.spread_prediction_shadow?.away?.motor_prob ?? '');
+      if (col === 'spread_shadow_best_side') return esc(log.spread_prediction_shadow?.best_shadow?.side ?? '');
+      if (col === 'spread_shadow_best_edge') return esc(log.spread_prediction_shadow?.best_shadow?.edge ?? '');
       return esc(log[col]);
     }).join(','));
 
@@ -6597,6 +6616,146 @@ function _botSelectBestSameLineExecutionBook(mktOdds, market, side, targetLine) 
   }
 
   return best;
+}
+
+function _botNormalCDF(z) {
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const d = 0.3989423 * Math.exp(-z * z / 2);
+  const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.7814779 + t * (-1.8212560 + t * 1.3302744))));
+  return z >= 0 ? 1 - p : p;
+}
+
+function _botPredictNBASpreadShadow(matchData, signals = []) {
+  const mktOdds = matchData?.market_odds ?? null;
+  const odds = matchData?.odds ?? {};
+
+  const preferredReferenceBook = mktOdds?.bookmakers?.find(b => b.key === 'winamax')
+    ?? mktOdds?.bookmakers?.find(b => b.key === 'pinnacle')
+    ?? mktOdds?.bookmakers?.[0]
+    ?? null;
+
+  const rawSpread = odds?.spread != null
+    ? Number(odds.spread)
+    : preferredReferenceBook?.spread_line != null
+      ? Number(preferredReferenceBook.spread_line)
+      : null;
+
+  if (!Number.isFinite(rawSpread)) {
+    return {
+      available: false,
+      reason: 'NO_REFERENCE_SPREAD_LINE',
+      research_only: true,
+      drives_recommendation: false,
+    };
+  }
+
+  const spreadLine = rawSpread;
+  const NBA_SIGMA = 12;
+  const sig = id => Number(signals.find(s => s?.variable === id)?.normalized ?? 0) || 0;
+  const adjustment = sig('net_rating_diff') * 3.0
+    + sig('efg_diff') * 1.5
+    + sig('recent_form_ema') * 1.0
+    + sig('absences_impact') * 2.5;
+  const boundedAdjustment = Math.max(-8, Math.min(8, adjustment));
+  const marketMargin = -spreadLine;
+  const expectedMargin = marketMargin + boundedAdjustment;
+  const zHome = ((-spreadLine) - expectedMargin) / NBA_SIGMA;
+  const pHome = 1 - _botNormalCDF(zHome);
+  const pAway = 1 - pHome;
+
+  const priority = ['pinnacle', 'winamax', 'betclic', 'unibet_eu', 'betsson', 'bet365'];
+  const referenceFor = side => {
+    const priceField = side === 'HOME' ? 'home_spread' : 'away_spread';
+    for (const key of priority) {
+      const bk = mktOdds?.bookmakers?.find(b => b.key === key);
+      const dec = Number(bk?.[priceField]);
+      if (Number.isFinite(dec) && dec > 1) {
+        return {
+          bookmaker: bk.title ?? bk.key,
+          bookmaker_key: bk.key ?? null,
+          decimal_odds: dec,
+          stored_home_line: Number.isFinite(Number(bk?.spread_line)) ? Number(bk.spread_line) : null,
+          side_line: Number.isFinite(Number(bk?.spread_line))
+            ? (side === 'HOME' ? Number(bk.spread_line) : -Number(bk.spread_line))
+            : null,
+        };
+      }
+    }
+    const bk = mktOdds?.bookmakers?.find(b => {
+      const dec = Number(b?.[priceField]);
+      return Number.isFinite(dec) && dec > 1;
+    });
+    if (!bk) return null;
+    return {
+      bookmaker: bk.title ?? bk.key,
+      bookmaker_key: bk.key ?? null,
+      decimal_odds: Number(bk[priceField]),
+      stored_home_line: Number.isFinite(Number(bk?.spread_line)) ? Number(bk.spread_line) : null,
+      side_line: Number.isFinite(Number(bk?.spread_line))
+        ? (side === 'HOME' ? Number(bk.spread_line) : -Number(bk.spread_line))
+        : null,
+    };
+  };
+
+  const buildSide = (side, motorProb, sideLine) => {
+    const reference = referenceFor(side);
+    const execution = _botSelectBestSameLineExecutionBook(mktOdds, 'spreads', side, sideLine)
+      ?? (reference
+        ? {
+            odds: reference.decimal_odds >= 2
+              ? Math.round((reference.decimal_odds - 1) * 100)
+              : Math.round(-100 / (reference.decimal_odds - 1)),
+            decimalOdds: reference.decimal_odds,
+            bookmaker: reference.bookmaker,
+            bookmaker_key: reference.bookmaker_key,
+            market_line: sideLine,
+            price_selection: 'REFERENCE_FALLBACK',
+          }
+        : null);
+
+    const implied = reference?.decimal_odds > 1 ? 1 / reference.decimal_odds : null;
+    const edge = implied == null ? null : motorProb - implied;
+    return {
+      side,
+      line: sideLine,
+      motor_prob: Math.round(motorProb * 10000) / 10000,
+      reference_book: reference?.bookmaker ?? null,
+      reference_book_key: reference?.bookmaker_key ?? null,
+      reference_market_line: reference?.side_line ?? null,
+      reference_line_matches_target: reference?.side_line == null
+        ? null
+        : Math.abs(reference.side_line - sideLine) <= 1e-9,
+      reference_decimal_odds: reference?.decimal_odds ?? null,
+      reference_implied_prob: implied == null ? null : Math.round(implied * 10000) / 10000,
+      edge: edge == null ? null : Math.round(edge * 10000) / 100,
+      would_have_value_at_legacy_5pct_gate: edge == null ? false : edge >= 0.05,
+      execution_odds_decimal: execution?.decimalOdds ?? null,
+      execution_odds_american: execution?.odds ?? null,
+      execution_book: execution?.bookmaker ?? null,
+      execution_book_key: execution?.bookmaker_key ?? null,
+      execution_price_selection: execution?.price_selection ?? null,
+    };
+  };
+
+  const home = buildSide('HOME', pHome, spreadLine);
+  const away = buildSide('AWAY', pAway, -spreadLine);
+  const candidates = [home, away].filter(s => s.edge != null);
+  candidates.sort((a, b) => b.edge - a.edge);
+
+  return {
+    available: true,
+    research_only: true,
+    drives_recommendation: false,
+    method: 'FRONTEND_SPREAD_PARITY_SHADOW_V1',
+    reference_spread_line: spreadLine,
+    market_margin: Math.round(marketMargin * 10) / 10,
+    signal_adjustment: Math.round(boundedAdjustment * 1000) / 1000,
+    expected_margin: Math.round(expectedMargin * 1000) / 1000,
+    nba_sigma: NBA_SIGMA,
+    home,
+    away,
+    best_shadow: candidates[0] ?? null,
+  };
 }
 
 function _botPredictNBATotal(matchData) {
