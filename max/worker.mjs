@@ -206,13 +206,19 @@ export async function collect(env,fetcher=fetch,now=new Date()) {
     injuryAgeMinutes=oldReport?.captured_at?Math.floor((nowMs-new Date(oldReport.captured_at).getTime())/60000):null;
     if(injuryAgeMinutes!==null&&injuryAgeMinutes>=0&&injuryAgeMinutes<=120)injuryReport=oldReport.payload;
   } else {
-    await putJSON(env.MAX_STATE,'max:injuries:last',{captured_at:nowISO,payload:injuriesResult},86400);
+    const storedReport=await readJSON(env.MAX_STATE,'max:injuries:last');
+    const different=JSON.stringify(storedReport?.payload?.by_team??null)!==JSON.stringify(injuriesResult.by_team);
+    const lastSaved=new Date(storedReport?.captured_at??0).getTime();
+    if(different||!Number.isFinite(lastSaved)||nowMs-lastSaved>=30*60000){
+      await putJSON(env.MAX_STATE,'max:injuries:last',{captured_at:nowISO,payload:injuriesResult},86400);
+    }
   }
   const injuriesFresh=Boolean(injuryReport?.by_team&&injuryAgeMinutes!==null&&injuryAgeMinutes<=120);
   const raw=normalizeGames(matchResults);
   const previousEvents=await readJSON(env.MAX_STATE,KEY_EVENTS);
   const events=Array.isArray(previousEvents)?previousEvents.slice(0,50):[];
   const today=[];
+  let changesDetected=0;
   let aiCalls=0;
   const maxAICalls=Math.max(0,Math.min(2,Number(env.MAX_AI_CALLS_PER_CYCLE??1)));
   const dayKey='max:ai:daily:'+nowISO.slice(0,10);
@@ -244,21 +250,24 @@ export async function collect(env,fetcher=fetch,now=new Date()) {
       }catch(err){console.warn('[MAX_AI]',String(err.message).slice(0,80));}
     }
     if(changes) {
+      changesDetected++;
       events.unshift({id:item.id,at:nowISO,changes,match:item.away.name+' @ '+item.home.name});
       await putJSON(env.MAX_STATE,'max:history:'+item.id+':'+nowMs,
         {schema_version:VERSION,at:nowISO,game},86400*30);
     }
-    await putJSON(env.MAX_STATE,'max:game:'+item.id,game,86400*90);
+    if(!previous||changes||(game.analysis&&!previous?.analysis)){
+      await putJSON(env.MAX_STATE,'max:game:'+item.id,game,86400*90);
+    }
     today.push(game);
   }
   const slate={schema_version:VERSION,updated_at:nowISO,games:today,sources,
     mode:'SHADOW',ai_status:env.MAX_AI_ENABLED==='1'&&env.OPENAI_API_KEY&&env.MAX_OPENAI_MODEL?'ENABLED':'NOT_CONFIGURED',
     disclaimer:'Collecte automatique, pas de pronostics ManiBetProMax validés.'};
   await putJSON(env.MAX_STATE,KEY_LATEST,slate,86400*3);
-  await putJSON(env.MAX_STATE,KEY_EVENTS,events.slice(0,50),86400*30);
+  if(changesDetected)await putJSON(env.MAX_STATE,KEY_EVENTS,events.slice(0,50),86400*30);
   health.last_success=nowISO;health.game_count=today.length;
   await putJSON(env.MAX_STATE,KEY_HEALTH,health);
-  return {...health,updated:true,events_new:events.length-(Array.isArray(previousEvents)?previousEvents.length:0),ai_calls:aiCalls};
+  return {...health,updated:true,events_new:changesDetected,ai_calls:aiCalls};
 }
 export default {
   async fetch(request,env) {
