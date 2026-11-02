@@ -1,101 +1,105 @@
 import assert from 'node:assert/strict';
-import {slateDates,normalizeGames,teamInjuries,detectChange,fingerprint,collect} from '../worker.mjs';
-
-const ts=new Date('2026-11-02T23:40:00.000Z');
-let checks=0;
-function check(x,message){assert.ok(x,message);checks++;}
-function eq(a,b,message){assert.deepEqual(a,b,message);checks++;}
-function game(status='STATUS_SCHEDULED'){
- return {id:'GAME-1',datetime:'2026-11-03T02:00:00.000Z',status,home_team:{name:'Denver Nuggets',abbreviation:'DEN',record:'4-2'},away_team:{name:'Los Angeles Lakers',abbreviation:'LAL',record:'3-3'},home_season_stats:{ppg:112},away_season_stats:{ppg:110}};
-}
-function payload(status='STATUS_SCHEDULED'){return {matches:[game(status)]};}
-function report(status='Out'){
- return {available:true,by_team:{'Denver Nuggets':[{player:'Joueur Alpha',status,detail:'Cheville'}],'Los Angeles Lakers':[]}};
-}
-function kv(){
- const state=new Map(),writes=[];
- return {state,writes,async get(k,options){let v=state.get(k);return options?.type==='json'&&v!==undefined?JSON.parse(v):v??null;},
- async put(k,v){writes.push(k);state.set(k,v);}};
-}
-const dates=slateDates(ts);
-eq(dates,['20261101','20261102','20261103'],'dates UTC voisines');
-eq(normalizeGames([payload(),payload()]).length,1,'déduplication ESPN');
-eq(normalizeGames([{matches:[{id:'X',datetime:'NOT_DATE',home_team:{name:'A'},away_team:{name:'B'}}]}]).length,0,'heure invalide filtrée');
-eq(teamInjuries(report(),{name:'Dénver Nuggets',abbreviation:'DEN'}).length,1,'noms normalisés');
-eq(teamInjuries(null,{name:'Denver Nuggets'}),null,'blessures inconnues != 0');
-eq(teamInjuries({available:false,by_team:{}},{name:'Denver Nuggets'}),null,'source absente');
-const normalized=normalizeGames([payload()])[0];
-const current={...normalized,injuries:{home:teamInjuries(report(),normalized.home),away:[]}};
-const prior={...current,injuries:{home:teamInjuries(report('Questionable'),normalized.home),away:[]}};
-eq(detectChange(null,current),null,'premier snapshot sans événement artificiel');
-eq(detectChange(prior,current),['RAPPORT_BLESSURES'],'blessure mise à jour');
-eq(detectChange({...prior,status:'STATUS_FINAL'},current),['STATUT_MATCH','RAPPORT_BLESSURES'],'deux changements');
-eq(fingerprint({...current,analyzed_at:'2026-11-02'}),fingerprint({...current,analyzed_at:'2026-11-03'}),'horodatage ignoré dans fingerprint');
-const mock=kv();const calls=[];let currentStatus='STATUS_SCHEDULED',inj='Questionable',scheduleFailure=false,injuryFailure=false;
-const fetcher=async (url)=>{
- calls.push(url);
- if(url.includes('/nba/matches')) {
-   if(scheduleFailure)throw new Error('source indisponible');
-   return {ok:true,json:async()=>payload(currentStatus)};
- }
- if(url.includes('/nba/injuries/espn')) {
-   if(injuryFailure)throw new Error('blessures indisponibles');
-   return {ok:true,json:async()=>report(inj)};
- }
- throw new Error('appel non autorisé: '+url);
+import {slateDates,detectChange,collect} from '../worker.mjs';
+import {parseESPNScoreboards,parseESPNInjuries,injuriesForTeam,verifiedFinalGames,teamProfile,estimateElo,analyzeNBA} from '../engine.mjs';
+let n=0;const eq=(a,b,m)=>{assert.deepEqual(a,b,m);n++};
+const ok=(x,m)=>{assert.ok(x,m);n++};
+const now=new Date('2026-11-02T21:40:00.000Z');
+const fixture=(id,date,status,homeID='1',awayID='2',scoreH=null,scoreA=null)=>{
+ const club=id=>({1:['Denver Nuggets','DEN'],2:['Los Angeles Lakers','LAL'],3:['Utah Jazz','UTA'],4:['Phoenix Suns','PHX']}[id]);
+ const competitor=(teamID,side,score)=>({homeAway:side,team:{id:String(teamID),displayName:club(teamID)[0],abbreviation:club(teamID)[1]},score});
+ return {id,date,status:{type:{name:status}},season:{type:2},
+ competitions:[{seasonType:2,competitors:[competitor(homeID,'home',scoreH),competitor(awayID,'away',scoreA)]}]};
 };
-let result=await collect({MAX_STATE:mock},fetcher,ts);
-check(result.updated===true,'première collecte réussie');
-eq(result.game_count,1,'match dédupliqué');
-eq(result.events_new,0,'pas de fausse alerte au premier run');
-check(calls.length===4,'3 dates + blessures');
-check(calls.every(x=>x.startsWith('https://manibetpro.emmanueldelasse.workers.dev/nba/')),'pas de source facturée');
-let stored=JSON.parse(mock.state.get('max:slate:latest'));
-eq(stored.games[0].coverage.status,'INCONCLUSIVE','stats avancées non vérifiées => abstention');
-check(stored.games[0].coverage.missing.includes('STATS_AVANCEES_NON_DISPONIBLES'),'impossible de qualifier stats ESPN comme statistiques avancées');
-eq(stored.games[0].analysis,null,'aucun résultat GPT inventé');
-eq(stored.games[0].historical_model_reference,null,'aucun résultat moteur inventé');
-inj='Out';
-result=await collect({MAX_STATE:mock},fetcher,new Date(ts.getTime()+15*60000));
-check(result.updated===true,'deuxième collecte');
-let events=JSON.parse(mock.state.get('max:events:latest'));
-eq(events.length,1,'changement blessure historisé');
-eq(events[0].changes,['RAPPORT_BLESSURES'],'type événement');
-check([...mock.state.keys()].some(x=>x.startsWith('max:history:GAME-1:')),'snapshot historique');
-result=await collect({MAX_STATE:mock},fetcher,new Date(ts.getTime()+30*60000));
-eq(JSON.parse(mock.state.get('max:events:latest')).length,1,'anti-doublon à information inchangée');
-eq(mock.writes.filter(k=>k==='max:game:GAME-1').length,2,'pas de KV write game sans changement');
-eq(mock.writes.filter(k=>k==='max:events:latest').length,1,'pas de KV write events sans changement');
-injuryFailure=true;
-result=await collect({MAX_STATE:mock},fetcher,new Date(ts.getTime()+45*60000));
-eq(result.sources.injuries.state,'ERROR','dégradation source affichée');
-stored=JSON.parse(mock.state.get('max:slate:latest'));
-check(stored.games[0].injuries.cached_age_minutes>0,'cache source tracé');
-scheduleFailure=true;
-const preserved=mock.state.get('max:slate:latest');
-result=await collect({MAX_STATE:mock},fetcher,new Date(ts.getTime()+60*60000));
-check(result.updated===false,'indisponibilité matches fail closed');
-eq(mock.state.get('max:slate:latest'),preserved,'dernier snapshot non écrasé si provider down');
-check(![...mock.state.keys()].some(k=>k.includes('betting_recommendations')||k.includes('motor_prob')),'aucune écriture sur moteur historique');
-// Le raccordement interne vers le Worker historique doit primer sur fetch public.
-scheduleFailure=false;injuryFailure=false;
-const serviceKV=kv();let boundCalls=0;
-// ESPN retourne HTTP 200 et un rapport vide même lorsque available=false.
-const unavailableKV=kv();
-const temporarilyUnavailable=async url=>({
- ok:true,json:async()=>url.includes('/nba/injuries/espn')
- ? {available:false,by_team:{},players:[]}
- : payload()
-});
-const noInjury=await collect({MAX_STATE:unavailableKV},temporarilyUnavailable,ts);
-eq(noInjury.sources.injuries.state,'ERROR','ESPN available=false signifie source en panne');
-const unavailableSlate=JSON.parse(unavailableKV.state.get('max:slate:latest'));
-eq(unavailableSlate.games[0].coverage.status,'INCONCLUSIVE','source blessures indisponible => abstention');
-eq(unavailableSlate.games[0].injuries.home,null,'rapport absent != équipe sans blessure');
-const legacyService={fetch:async request=>{boundCalls++;return fetcher(request.url);}};
-const bound=await collect({MAX_STATE:serviceKV,LEGACY_SERVICE:legacyService},
-  async()=>{throw new Error('fetch public interdit')},ts);
-check(bound.updated===true,'service binding fonctionne');
-eq(boundCalls,4,'les 4 lectures passent par service binding');
-eq(JSON.parse(serviceKV.state.get('max:slate:latest')).games.length,1,'slate via liaison interne');
-console.log('ManiBetProMax tests:',checks,'assertions · 0 échec');
+function mockKV(){
+ const state=new Map(),writes=[];
+ return {state,writes,async get(key,opt){const v=state.get(key);return opt?.type==='json'?v===undefined?null:JSON.parse(v):v??null;},
+ async put(key,v){state.set(key,v);writes.push(key);}};
+}
+const contest=fixture('401999999','2026-11-03T02:00:00Z','STATUS_SCHEDULED');
+const finals=[
+ fixture('401000001','2026-10-26T02:00:00Z','STATUS_FINAL','1','3',120,100),
+ fixture('401000002','2026-10-27T02:00:00Z','STATUS_FINAL','4','2',104,112),
+ fixture('401000003','2026-10-28T02:00:00Z','STATUS_FINAL','1','4',111,109),
+ fixture('401000004','2026-10-29T02:00:00Z','STATUS_FINAL','3','2',105,113),
+ fixture('401000005','2026-10-30T02:00:00Z','STATUS_FINAL','1','3',119,108),
+ fixture('401000006','2026-10-31T02:00:00Z','STATUS_FINAL','4','2',103,109),
+ fixture('401000007','2026-11-01T02:00:00Z','STATUS_FINAL','1','4',127,122)
+];
+const sample={events:[contest,finals[0]]};
+eq(slateDates(now),['20261101','20261102','20261103'],'jours alentours');
+const parsed=parseESPNScoreboards([sample,sample]);
+eq(parsed.length,2,'dedup source ESPN');
+eq(parsed.find(x=>x.id===contest.id).home.name,'Denver Nuggets','équipe ESPN');
+eq(parseESPNScoreboards([{events:[fixture('bad','wrong','STATUS_FINAL')]}]).length,0,'événements invalides ignorés');
+const r={injuries:[
+ {displayName:'Denver Nuggets',injuries:[{athlete:{displayName:'Joueur X'},status:'Questionable',shortComment:'ankle'}]},
+ {displayName:'Los Angeles Lakers',injuries:[]}
+]};
+const report=parseESPNInjuries(r);
+eq(injuriesForTeam(report,{name:'Denver Nuggets'})[0].status,'Questionable','informations blessure');
+eq(injuriesForTeam(report,{name:'Los Angeles Lakers'}),[],'équipe explicitement présente sans blessé');
+eq(injuriesForTeam(report,{name:'Utah Jazz'}),null,'équipe absente du rapport est inconnue');
+eq(parseESPNInjuries({other:[]}),null,'feed incorrect');
+const finalGames=verifiedFinalGames(parseESPNScoreboards([{events:finals}]),'2026-11-03T02:00:00Z');
+eq(finalGames.length,7,'uniquement finales avant tip');
+eq(teamProfile('1',finalGames,contest.date).played,4,'échantillon Denver');
+eq(teamProfile('2',finalGames,contest.date).played,3,'échantillon Lakers');
+const g=parsed.find(x=>x.id===contest.id);
+const projected=estimateElo(g,finalGames);
+ok(projected.probability_home>0&&projected.probability_home<1,'Elo borné');
+eq(Number((projected.probability_home+projected.probability_away).toFixed(3)),1,'probabilités complémentaires');
+eq(projected.calibrated,false,'pas de fausse calibration');
+eq(projected.drives_bet,false,'pas de paris');
+const conditional=analyzeNBA(g,finalGames,report,'2026-11-02T21:40:00Z');
+eq(conditional.pregame,true,'pré-match');
+eq(conditional.elo,null,'échantillon insuffisant => pas de chiffre');
+eq(conditional.betting_recommendations,[],'pas de pari');
+eq(analyzeNBA(g,finalGames,report,'2026-11-04T00:00:00Z').elo,null,'aucune prédiction rétroactive');
+eq(detectChange(null,{status:'A',injuries:{}}),null,'pas de faux événement au premier snapshot');
+eq(detectChange({status:'A',injuries:{home:[],away:[]}},
+ {status:'B',injuries:{home:[],away:[]}}),['STATUT_MATCH'],'changement status détecté');
+const data=new Map();
+const kv=mockKV();let injuryStatus='Questionable',injuryDown=false,allDown=false;
+const calls=[];
+const sourceFetch=async (url)=>{
+ calls.push(url);
+ if(!url.startsWith('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/'))
+  throw new Error('UNAUTHORIZED_SOURCE '+url);
+ if(allDown)throw new Error('PROVIDER_DOWN');
+ if(url.endsWith('/injuries')){
+  return {ok:true,json:async()=>injuryDown?{error:'unavailable'}:
+   {injuries:[
+    {displayName:'Denver Nuggets',injuries:[{athlete:{displayName:'Joueur X'},status:injuryStatus,shortComment:'ankle'}]},
+    {displayName:'Los Angeles Lakers',injuries:[]}
+   ]}};
+ }
+ const d=url.match(/dates=(\d{8})/)?.[1];
+ const current=d==='20261102'||d==='20261103';
+ return {ok:true,json:async()=>({events:current?[contest]:
+   finals.filter(e=>e.date.slice(0,10).replace(/-/g,'')===d)})};
+};
+const first=await collect({MAX_STATE:kv},sourceFetch,now);
+ok(first.updated,'collecte initiale');
+ok(calls.length>=4,'appels ESPN direct');
+ok(calls.every(u=>!u.includes('manibetpro.emmanueldelasse')),'aucune dépendance ManiBetPro');
+ok(![...kv.state.keys()].some(k=>k.startsWith('bot_log_')),'pas de logs historiques touchés');
+const slate=JSON.parse(kv.state.get('max:slate:latest'));
+eq(slate.mode,'INDEPENDENT_SHADOW','mode indépendant');
+eq(slate.games.find(x=>x.id===contest.id).injuries.home[0].status,'Questionable','injury direct');
+eq(slate.games.find(x=>x.id===contest.id).independent_analysis.source_type,'REAL','état source');
+ok(kv.state.has('max:pre:'+contest.id+':H6'),'pré-match enregistré à checkpoint H6');
+let after=await collect({MAX_STATE:kv},sourceFetch,new Date(now.getTime()+15*60000));
+eq(JSON.parse(kv.state.get('max:events:latest')??'[]').length,0,'pas de changement fictif');
+injuryStatus='Out';
+after=await collect({MAX_STATE:kv},sourceFetch,new Date(now.getTime()+30*60000));
+const events=JSON.parse(kv.state.get('max:events:latest'));
+ok(events.some(x=>x.changes.includes('RAPPORT_BLESSURES')),'changement blessure réel historisé');
+injuryDown=true;
+after=await collect({MAX_STATE:kv},sourceFetch,new Date(now.getTime()+45*60000));
+eq(after.sources.injuries.state,'ERROR','rapport blessure indisponible');
+allDown=true;
+const priorSlate=kv.state.get('max:slate:latest');
+after=await collect({MAX_STATE:kv},sourceFetch,new Date(now.getTime()+60*60000));
+eq(after.updated,false,'source dates indisponible => fail closed');
+eq(kv.state.get('max:slate:latest'),priorSlate,'dernier état conservé');
+console.log('ManiBetProMax independent:',n,'assertions OK');
