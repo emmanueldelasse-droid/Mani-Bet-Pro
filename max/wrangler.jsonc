@@ -1,0 +1,20 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "manibetpromax-shadow",
+  "main": "dist/worker.mjs",
+  "compatibility_date": "2026-11-02",
+  "observability": {
+    "enabled": true
+  },
+  "kv_namespaces": [
+    {
+      "binding": "MAX_STATE",
+      "id": "4bd994e0a9344db0a3e1764c3bf59a26"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "*/15 * * * *"
+    ]
+  }
+}
