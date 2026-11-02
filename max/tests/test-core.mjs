@@ -79,6 +79,18 @@ check(![...mock.state.keys()].some(k=>k.includes('betting_recommendations')||k.i
 // Le raccordement interne vers le Worker historique doit primer sur fetch public.
 scheduleFailure=false;injuryFailure=false;
 const serviceKV=kv();let boundCalls=0;
+// ESPN retourne HTTP 200 et un rapport vide même lorsque available=false.
+const unavailableKV=kv();
+const temporarilyUnavailable=async url=>({
+ ok:true,json:async()=>url.includes('/nba/injuries/espn')
+ ? {available:false,by_team:{},players:[]}
+ : payload()
+});
+const noInjury=await collect({MAX_STATE:unavailableKV},temporarilyUnavailable,ts);
+eq(noInjury.sources.injuries.state,'ERROR','ESPN available=false signifie source en panne');
+const unavailableSlate=JSON.parse(unavailableKV.state.get('max:slate:latest'));
+eq(unavailableSlate.games[0].coverage.status,'INCONCLUSIVE','source blessures indisponible => abstention');
+eq(unavailableSlate.games[0].injuries.home,null,'rapport absent != équipe sans blessure');
 const legacyService={fetch:async request=>{boundCalls++;return fetcher(request.url);}};
 const bound=await collect({MAX_STATE:serviceKV,LEGACY_SERVICE:legacyService},
   async()=>{throw new Error('fetch public interdit')},ts);
