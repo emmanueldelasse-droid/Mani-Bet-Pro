@@ -36,7 +36,7 @@ details{margin-top:13px;border-top:1px solid var(--edge);padding-top:11px}summar
 const $=id=>document.getElementById(id);
 const escapeHtml=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const local=t=>t?new Date(t).toLocaleString('fr-FR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',timeZone:'Europe/Paris'}):'—';
-let state={games:[],events:[],updated_at:null,sources:null,ai_status:null};
+let state={games:[],events:[],updated_at:null,sources:null,ai_status:null,health:null};
 const shortStatus=v=>{const x=String(v||'').toUpperCase();if(x.includes('FINAL'))return 'Terminé';if(x.includes('IN_PROGRESS')||x.includes('HALFTIME'))return 'En cours';if(x.includes('POSTPONED'))return 'Reporté';if(x.includes('CANCELED'))return 'Annulé';return 'Pré-match'};
 const injury=(items,team)=>{if(!Array.isArray(items))return '<p>Statuts non vérifiés — aucune conclusion possible.</p>';if(!items.length)return '<p>Aucune absence enregistrée dans la source disponible, à reconfirmer avant le match.</p>';return '<div class="notes">'+items.map(p=>escapeHtml(p.player)+' · '+escapeHtml(p.status)+(p.detail?' · '+escapeHtml(p.detail):'')).join('<br>')+'</div>'};
 function card(g){
@@ -59,20 +59,22 @@ function render(){
  $('upcoming').textContent=games.filter(g=>Date.parse(g.start)>Date.now()).length;
  $('inc').textContent=games.filter(g=>g.coverage?.status==='INCONCLUSIVE').length;
  $('changes').textContent=state.events?.length||0;
- $('last').textContent=local(state.updated_at);
- $('matches-health').textContent=state.sources?.matches?.state||'—';
- $('injuries-health').textContent=state.sources?.injuries?.state||'—';
+ $('last').textContent=local(state.health?.last_success||state.updated_at);
+ $('matches-health').textContent=state.health?.sources?.matches?.state||state.sources?.matches?.state||'—';
+ $('injuries-health').textContent=state.health?.sources?.injuries?.state||state.sources?.injuries?.state||'—';
  $('ai-health').textContent=state.ai_status==='ENABLED'?'Activée':'Non configurée';
- $('updated').textContent=state.updated_at?'Mise à jour '+local(state.updated_at)+' · Fuseau Paris':'Aucune collecte réussie';
+ const stale=!state.health?.last_success||(Date.now()-Date.parse(state.health.last_success)>45*60000);
+ const down=state.health?.sources?.matches?.state==='ERROR';
+ $('updated').textContent=down?'Source matchs indisponible · dernier état conservé':stale?'Données anciennes · collecte à vérifier':'Collecte confirmée '+local(state.health?.last_success)+' · Paris';
  $('events').innerHTML=state.events?.length?state.events.slice(0,12).map(e=>'<div class="event"><strong>'+escapeHtml(e.match)+'</strong>'+escapeHtml(e.changes.join(' · '))+'<br><span>'+escapeHtml(local(e.at))+'</span></div>').join(''):'<div class="empty">Aucun changement détecté pour le moment.</div>';
 }
 async function load(){
  $('refresh').disabled=true;
  try{
-  const [slate,events]=await Promise.all([fetch('/api/slate',{cache:'no-store'}),fetch('/api/events',{cache:'no-store'})]);
-  if(!slate.ok||!events.ok)throw new Error('Données non disponibles');
-  const d=await slate.json(),e=await events.json();
-  state={...d,events:e.events||[]};render();
+  const [slate,events,health]=await Promise.all([fetch('/api/slate',{cache:'no-store'}),fetch('/api/events',{cache:'no-store'}),fetch('/api/health',{cache:'no-store'})]);
+  if(!slate.ok||!events.ok||!health.ok)throw new Error('Données non disponibles');
+  const d=await slate.json(),e=await events.json(),h=await health.json();
+  state={...d,events:e.events||[],health:h};render();
  }catch(err){$('updated').textContent='Erreur de lecture · '+err.message;}
  finally{$('refresh').disabled=false;}
 }
