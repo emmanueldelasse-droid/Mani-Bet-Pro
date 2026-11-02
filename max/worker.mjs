@@ -32,6 +32,14 @@ export function detectChange(old,current){
   changes.push('RAPPORT_BLESSURES');
  return changes.length?changes:null;
 }
+export function changesForGame(prior,current){
+ if(!prior||!prior.independent_analysis)return []; // old schema: migration != injury news
+ const changes=detectChange(prior,current)??[];
+ const oldResearch=prior.research_fingerprint??prior.research?.generated_at??null;
+ const newResearch=current.research_fingerprint??current.research?.generated_at??null;
+ if(oldResearch!==newResearch)changes.push('RECHERCHE_MACFLY');
+ return changes;
+}
 async function read(kv,key){try{return await kv.get(key,{type:'json'});}catch{return null;}}
 async function put(kv,key,obj,ttl=GAME_CACHE_TTL){
  await kv.put(key,JSON.stringify(obj),{expirationTtl:ttl});
@@ -187,8 +195,7 @@ export async function collect(env,fetcher=fetch,now=new Date()){
    research_fingerprint:verifiedResearch?.generated_at??null,
    ai_review:verifiedResearch?{...verifiedResearch,
      model:'MacFly · ChatGPT',web_search_enabled:true}:null};
-  const changes=detectChange(prior,g)??[];
-  if(prior&&prior.research_fingerprint!==g.research_fingerprint)changes.push('RECHERCHE_MACFLY');
+  const changes=changesForGame(prior,g);
   if(changes.length){
    changed++;
    events.unshift({id:g.id,match:g.away.name+' @ '+g.home.name,changes,at:nowISO});
@@ -203,7 +210,7 @@ export async function collect(env,fetcher=fetch,now=new Date()){
     context_status:statistical.status,injuries:statistical.injuries,
     analysis_schema:statistical.schema_version,drives_bet:false},86400*90);
   }
-  if(!prior||changes.length)await put(kv,'max:game:'+g.id,g);
+  if(!prior||!prior.independent_analysis||changes.length)await put(kv,'max:game:'+g.id,g);
   games.push(g);
  }
  const slate={schema_version:VERSION,engine_version:ENGINE_VERSION,
