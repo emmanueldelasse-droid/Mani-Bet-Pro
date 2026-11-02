@@ -4,6 +4,15 @@
 `main` · auto-deploy CF/GH Pages · identité runtime via `CF_VERSION_METADATA` / build `index.html`
 
 ## En cours
+
+[P1] D1 historique NBA · PR D'ACTIVATION EN PRÉPARATION · 02/11/2026
+- base Cloudflare `manibetpro-history` · juridiction `eu` · UUID réel vérifié
+- migrations SQL 0001→0008 appliquées · `d1_migrations`=8 · tables/index/triggers contrôlés
+- binding `MANI_HISTORY_DB` proposé dans `wrangler.jsonc` · pas de changement de scoring/calibration/KV
+- avant merge · CI 0 fail · revue ChatGPT · validation créateur (architecture majeure)
+- après merge · `/health` D1 configured · vérifier KV↔D1 sur checkpoint H6/H4/H2/H1 + outcome nightly
+- rollback · revert binding/config · KV canonique préservé · base D1 non supprimée
+
 [P1] Pré-saison NBA 2026-27 · PR #249 · MERGÉE · validation production scheduler restante
 - merge · #249 · squash `969e8c8` · déploiement Cloudflare + build final verts
 - objectif · découvrir les matchs ESPN classés date US veille alors que Paris est déjà au lendemain
@@ -36,7 +45,7 @@
 - PR #244 · échelle B2B backend ±0.6 vs frontend ±1 en shadow · `drives_decision=false`
 - PR #245 · Data Quality pondérée appliquée au gate/confidence en shadow · seuil prod 0.55 inchangé · `drives_decision=false`
 - historique shadow persisté KV/CSV · migrations D1 0005→0008 prêtes
-- D1 `MANI_HISTORY_DB` reste optionnel et non déclaré dans `wrangler.jsonc` tant que DB réelle non provisionnée
+- D1 `MANI_HISTORY_DB` · DB EU créée le 02/11/2026 et migrations appliquées · binding proposé via PR dédiée (pas encore en main)
 
 ## Validation post-Fix#4 (à faire · prochain nightly ~10-11h UTC)
 - vérifier que les matchs playoffs manquants réapparaissent en `missed_by_cron` dans `/bot/logs`
@@ -121,7 +130,7 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
 ## TODO prioritaire
 - [x] P1 · preuve pré-merge #249 · ESPN réel + horloge simulée H1 Miami–Toronto · 15 assertions · 0 fail
 - [ ] P1 · post-merge 03/10 22:00 UTC · confirmer Cron Cloudflare production · heartbeat + fetch_dates + H1 réel
-- [ ] P1 · provisionner D1 `MANI_HISTORY_DB` séparément seulement avec UUID Cloudflare réel · appliquer migrations 0001→0008 · valider KV↔D1 sur pré-saison
+- [ ] P1 · merger après GO créateur la PR binding D1 · valider KV↔D1 sur prochaine analyse et settlement · migration 0001→0008 déjà appliquée
 - [ ] P1 · DECISION-003 MLB v6.94 · audit empirique 421 logs · validation créateur (proposed)
 - [ ] P1 · validation prod endpoints catchup PR #205 · 4 curl tests documentés `docs/monitoring/CATCHUP_SETTLE.md`
 - [ ] P1 · debug OKC vs SAS 18/05/2026 via `/bot/recover-missed?sport=NBA&date=20260518` (post-Option A · grep CF `NBA_PLAYOFF_GATE_BLOCKED`)
