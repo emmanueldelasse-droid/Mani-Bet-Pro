@@ -1,294 +1,235 @@
 /**
- * ManiBetProMax · shadow v0.1 · Cloudflare Worker autonome.
- * Lit les routes du moteur historique via service binding Cloudflare (sans boucle workers.dev).
- * Aucune écriture dans le KV/DB, aucun changement des décisions de ManiBetPro.
- * IA désactivée par défaut : nécessite MAX_AI_ENABLED=1, OPENAI_API_KEY,
- * MAX_OPENAI_MODEL et un plafond MAX_AI_DAILY_LIMIT.
+ * ManiBetProMax standalone · NBA collection and analysis.
+ * Aucune dépendance réseau, donnée, secret ou moteur vers ManiBetPro.
+ * Sources directes ESPN ; une source non disponible reste INCONCLUSIVE.
  */
-const MAX_APP_HTML = '';
-const VERSION = 'max-shadow-0.1.0';
-const DEFAULT_SOURCE = 'https://manibetpro.emmanueldelasse.workers.dev';
-const KEY_LATEST = 'max:slate:latest';
-const KEY_EVENTS = 'max:events:latest';
-const KEY_HEALTH = 'max:health:last';
-const ONE_DAY = 86400000;
-const ACTIVE_STATUSES = new Set(['STATUS_SCHEDULED', 'STATUS_PRE', 'STATUS_HALFTIME']);
-const STOP_STATUSES = new Set(['STATUS_FINAL', 'STATUS_FINAL_OT', 'STATUS_POSTPONED', 'STATUS_CANCELED', 'STATUS_CANCELLED']);
-const HEADERS = {
-  'Content-Type':'application/json; charset=utf-8',
-  'Cache-Control':'no-store',
-  'X-Content-Type-Options':'nosniff',
-  'Referrer-Policy':'no-referrer'
-};
+import {ENGINE_VERSION,parseESPNScoreboards,parseESPNInjuries,analyzeNBA} from './engine.mjs';
 
-function json(value, status=200) {
-  return new Response(JSON.stringify(value), {status,headers:HEADERS});
+const MAX_APP_HTML='';
+const MAX_ANALYST_PROMPT='';
+const VERSION='max-independent-0.2.0';
+const ESPN='https://site.api.espn.com/apis/site/v2/sports/basketball/nba';
+const KEY_HEALTH='max:health:last';
+const KEY_SLATE='max:slate:latest';
+const KEY_EVENTS='max:events:latest';
+const DAY_MS=86400000;
+const HISTORY_DAYS=45;
+const HISTORY_PER_CYCLE=4;
+const GAME_CACHE_TTL=86400*90;
+const JSON_HEADERS={'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',
+ 'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'};
+function json(data,status=200){return new Response(JSON.stringify(data),{status,headers:JSON_HEADERS});}
+function dateKey(now,days=0){return new Date(now.getTime()+days*DAY_MS).toISOString().slice(0,10).replace(/-/g,'');}
+export function slateDates(now){return [-1,0,1].map(i=>dateKey(now,i));}
+function validGame(game){return game&&game.id&&game.start&&game.home?.id&&game.away?.id;}
+function injurySignature(rows){return Array.isArray(rows)?rows.map(i=>[i.player,i.status,i.detail].join(':')).join('|'):'SOURCE_UNCONFIRMED';}
+export function detectChange(old,current){
+ if(!old)return null;
+ const changes=[];
+ if(old.status!==current.status)changes.push('STATUT_MATCH');
+ if(injurySignature(old.injuries?.home)!==injurySignature(current.injuries?.home)
+  ||injurySignature(old.injuries?.away)!==injurySignature(current.injuries?.away))
+  changes.push('RAPPORT_BLESSURES');
+ return changes.length?changes:null;
 }
-function safeISO(date) {
-  const n = new Date(date).getTime();
-  return Number.isFinite(n) ? new Date(n).toISOString() : null;
+async function read(kv,key){try{return await kv.get(key,{type:'json'});}catch{return null;}}
+async function put(kv,key,obj,ttl=GAME_CACHE_TTL){
+ await kv.put(key,JSON.stringify(obj),{expirationTtl:ttl});
 }
-function compactDate(date) {
-  return date.toISOString().slice(0,10).replace(/-/g,'');
+async function sourceJSON(fetcher,path,timeout=12500){
+ const url=ESPN+path;
+ const r=await fetcher(url,{headers:{Accept:'application/json'},signal:AbortSignal.timeout(timeout)});
+ if(!r.ok)throw new Error('PROVIDER_HTTP_'+r.status);
+ const v=await r.json();
+ if(!v||typeof v!=='object')throw new Error('PROVIDER_INVALID_JSON');
+ v._fetched_at=new Date().toISOString();
+ return v;
 }
-export function slateDates(now) {
-  return [-1,0,1].map(delta=>compactDate(new Date(now.getTime()+delta*ONE_DAY)));
+function recoverInjury(report,previous,nowMS) {
+ if(report)return {value:report,age_min:0,state:'OK'};
+ const oldMS=Date.parse(previous?.captured_at??'');
+ const age=Number.isFinite(oldMS)?Math.floor((nowMS-oldMS)/60000):null;
+ return {value:age!==null&&age>=0&&age<=90?previous?.report:null,
+  age_min:age,state:'ERROR'};
 }
-function saneText(value, max=160) {
-  return typeof value === 'string' ? value.trim().slice(0,max) : '';
+function currentCheckpoint(game,nowMs){
+ const hours=(Date.parse(game.start)-nowMs)/3600000;
+ if(hours<=0||hours>26||String(game.status).includes('FINAL'))return null;
+ return hours<=1.25?'H1':hours<=3.25?'H3':hours<=6.25?'H6':hours<=24.25?'H24':null;
 }
-function normalizeTeam(team) {
-  return {
-    name:saneText(team?.name),
-    abbreviation:saneText(team?.abbreviation,10),
-    record:saneText(team?.record,30)
-  };
+function sanitizeText(x,max=400){return typeof x==='string'?x.slice(0,max):'';}
+function forAI(game){
+ return {snapshot_time:game.checked_at,match_id:game.id,
+  start:game.start,teams:{home:game.home,away:game.away},
+  injuries:game.injuries,
+  statistical_analysis:game.independent_analysis,
+  context_status:game.coverage,
+  verified_sources:game.sources};
 }
-export function normalizeGames(responses) {
-  const byId=new Map();
-  for(const response of responses) {
-    if(!Array.isArray(response?.matches))continue;
-    for(const match of response.matches) {
-      const id=String(match?.id??match?.espn_id??'').trim();
-      const start=safeISO(match?.datetime);
-      const home=normalizeTeam(match?.home_team);
-      const away=normalizeTeam(match?.away_team);
-      if(!id||!start||!home.name||!away.name)continue;
-      const normalized={
-        id,start,
-        home,away,
-        status:saneText(match.status,50),
-        event_type:saneText(match.event_type,25),
-        season_id:saneText(match.season_id,20),
-        home_season_stats:match.home_season_stats??null,
-        away_season_stats:match.away_season_stats??null,
-        source:'ManiBetPro / ESPN'
-      };
-      byId.set(id,normalized);
+async function runAI(game,env,fetcher){
+ if(env.MAX_AI_ENABLED!=='1'||!env.OPENAI_API_KEY||!env.MAX_OPENAI_MODEL)return null;
+ const schema={type:'object',additionalProperties:false,
+  required:['summary','key_risks','recheck','status','sources'],
+  properties:{summary:{type:'string'},key_risks:{type:'array',items:{type:'string'}},
+   recheck:{type:'array',items:{type:'string'}},
+   status:{type:'string',enum:['INCONCLUSIVE','OBSERVATION']},
+   sources:{type:'array',items:{type:'string'}}}};
+ const payload={model:env.MAX_OPENAI_MODEL,
+  instructions:MAX_ANALYST_PROMPT||'Tu es un analyste NBA critique, aucune donnée inventée, aucun pari ou pourcentage non calculé.',
+  input:JSON.stringify(forAI(game)),max_output_tokens:1600,
+  text:{format:{type:'json_schema',name:'max_independent_nba_analysis',strict:true,schema}}};
+ if(env.MAX_AI_WEB_ENABLED==='1')payload.tools=[{type:'web_search'}];
+ const res=await fetcher('https://api.openai.com/v1/responses',{
+  method:'POST',headers:{Authorization:'Bearer '+env.OPENAI_API_KEY,'Content-Type':'application/json'},
+  body:JSON.stringify(payload),signal:AbortSignal.timeout(35000)});
+ if(!res.ok)throw new Error('AI_HTTP_'+res.status);
+ const data=await res.json();
+ const text=data.output_text??data.output?.flatMap(x=>x.content??[]).find(x=>x.type==='output_text')?.text;
+ if(typeof text!=='string')throw new Error('AI_NO_RESPONSE');
+ const parsed=JSON.parse(text);
+ if(!['INCONCLUSIVE','OBSERVATION'].includes(parsed.status)
+  ||typeof parsed.summary!=='string'||!Array.isArray(parsed.key_risks)||!Array.isArray(parsed.recheck)||!Array.isArray(parsed.sources))
+  throw new Error('AI_INVALID_SCHEMA');
+ return {status:parsed.status,summary:sanitizeText(parsed.summary,900),
+  key_risks:parsed.key_risks.slice(0,6).map(x=>sanitizeText(x,220)),
+  recheck:parsed.recheck.slice(0,8).map(x=>sanitizeText(x,220)),
+  sources:parsed.sources.slice(0,10).map(x=>sanitizeText(x,300)),
+  generated_at:new Date().toISOString(),model:env.MAX_OPENAI_MODEL,
+  web_search_enabled:env.MAX_AI_WEB_ENABLED==='1',drives_decision:false};
+}
+export async function collect(env,fetcher=fetch,now=new Date()){
+ if(!env?.MAX_STATE)throw new Error('MAX_STATE_MISSING');
+ const kv=env.MAX_STATE,nowMs=now.getTime(),nowISO=now.toISOString();
+ const dates=slateDates(now);
+ const responses=await Promise.allSettled([
+  ...dates.map(d=>sourceJSON(fetcher,'/scoreboard?dates='+d+'&limit=25')),
+  sourceJSON(fetcher,'/injuries',13000)
+ ]);
+ const slateData=responses.slice(0,3).filter(x=>x.status==='fulfilled'&&Array.isArray(x.value.events))
+  .map(x=>x.value);
+ const injuryRaw=responses[3].status==='fulfilled'?responses[3].value:null;
+ const report=parseESPNInjuries(injuryRaw);
+ const sources={scoreboard:{state:slateData.length?'OK':'ERROR',success:slateData.length,expected:3,
+    base:'ESPN direct'},
+   injuries:{state:report?'OK':'ERROR',source:'ESPN direct',checked_at:report?nowISO:null},
+   historic:{state:'PENDING',days_loaded:0,target:HISTORY_DAYS}};
+ const errors=responses.map((x,i)=>x.status==='rejected'?'SOURCE_'+i+':'+String(x.reason?.message??'FETCH_FAILED').slice(0,75):null).filter(Boolean);
+ const previousHealth=await read(kv,KEY_HEALTH);
+ const health={version:VERSION,engine_version:ENGINE_VERSION,last_attempt:nowISO,
+  last_success:previousHealth?.last_success??null,sources,errors,game_count:previousHealth?.game_count??0};
+ if(!slateData.length){
+  await put(kv,KEY_HEALTH,health,86400*7);
+  return {...health,updated:false};
+ }
+ const cachedInjury=await read(kv,'max:injuries:cached');
+ const injury=recoverInjury(report,cachedInjury,nowMs);
+ if(report){
+  const unchanged=JSON.stringify(report.by_team)===JSON.stringify(cachedInjury?.report?.by_team);
+  if(!unchanged||nowMs-Date.parse(cachedInjury?.captured_at??'')>=30*60000)
+   await put(kv,'max:injuries:cached',{captured_at:nowISO,report},86400*3);
+ }
+ const coreGames=parseESPNScoreboards(slateData).filter(validGame);
+ const historyRaw=[];
+ const fetchDates=[];
+ for(let d=2;d<=HISTORY_DAYS+1;d++){
+  const day=dateKey(now,-d);
+  const snapshot=await read(kv,'max:scoreboard:'+day);
+  if(snapshot?.date===day&&Array.isArray(snapshot.games)){
+   historyRaw.push(...snapshot.games);
+  }else if(fetchDates.length<HISTORY_PER_CYCLE){
+   fetchDates.push(day);
+  }
+ }
+ const fetched=await Promise.allSettled(fetchDates.map(async d=>{
+  const raw=await sourceJSON(fetcher,'/scoreboard?dates='+d+'&limit=25');
+  if(!Array.isArray(raw.events))throw new Error('BAD_SCOREBOARD_SHAPE');
+  const games=parseESPNScoreboards([raw]);
+  await put(kv,'max:scoreboard:'+d,{date:d,games,saved_at:nowISO},86400*90);
+  return {date:d,games};
+ }));
+ for(const x of fetched)if(x.status==='fulfilled')historyRaw.push(...x.value.games);
+ for(const x of fetched)if(x.status==='rejected')errors.push('HISTORY:'+String(x.reason?.message??'ERROR').slice(0,65));
+ const loaded=HISTORY_DAYS-fetchDates.length+fetched.filter(x=>x.status==='fulfilled').length;
+ sources.historic={state:loaded>=HISTORY_DAYS?'OK':loaded>=10?'PARTIAL':'WARMING',
+  days_loaded:loaded,target:HISTORY_DAYS,source:'ESPN direct'};
+ const combined=new Map();
+ for(const x of [...historyRaw,...coreGames])if(validGame(x))combined.set(x.id,x);
+ const historical=[...combined.values()];
+ const previousEvents=await read(kv,KEY_EVENTS);
+ const events=Array.isArray(previousEvents)?previousEvents.slice(0,50):[];
+ const games=[];let changed=0,aiCalls=0;
+ const maxAI=Math.max(0,Math.min(2,Number(env.MAX_AI_CALLS_PER_CYCLE??1)));
+ const maxDaily=Math.max(0,Math.min(20,Number(env.MAX_AI_DAILY_LIMIT??6)));
+ const dayCounter='max:ai:daily:'+nowISO.slice(0,10);
+ let count=Number(await kv.get(dayCounter))||0;
+ for(const sourceGame of coreGames.slice(0,40)){
+  const prior=await read(kv,'max:game:'+sourceGame.id);
+  const statistical=analyzeNBA(sourceGame,historical,injury.value,nowISO);
+  const g={...sourceGame,checked_at:nowISO,
+   injuries:{...statistical.injuries,source:'ESPN direct',
+    source_status:injury.state,cache_age_minutes:injury.age_min},
+   independent_analysis:statistical,
+   coverage:{status:statistical.status,missing:statistical.missing},
+   sources:{matches:'ESPN direct',injuries:'ESPN direct',stats:'ESPN direct / rolling 45 days'},
+   ai_review:prior?.ai_review??null};
+  const changes=detectChange(prior,g);
+  if(changes){
+   changed++;
+   events.unshift({id:g.id,match:g.away.name+' @ '+g.home.name,changes,at:nowISO});
+   await put(kv,'max:history:'+g.id+':'+nowMs,{at:nowISO,changes,game:g},86400*30);
+  }
+  const isPregame=statistical.pregame;
+  // Aucune analyse IA sur un match déjà commencé.
+  if(env.MAX_AI_ENABLED==='1'&&isPregame&&Date.parse(g.start)-nowMs<36*3600000
+   &&(!prior?.ai_review||changes?.includes('RAPPORT_BLESSURES'))
+   &&count<maxDaily&&aiCalls<maxAI){
+   try{
+    const review=await runAI(g,env,fetcher);
+    if(review){
+     g.ai_review=review;count++;aiCalls++;
+     await kv.put(dayCounter,String(count),{expirationTtl:86400*3});
     }
+   }catch(e){errors.push('AI_REVIEW_FAILED:'+String(e.message).slice(0,70));}
   }
-  return [...byId.values()].sort((a,b)=>a.start.localeCompare(b.start)).slice(0,40);
-}
-function teamKey(name) {
-  return String(name??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
-}
-export function teamInjuries(report,team) {
-  if(!report||report.available===false)return null;
-  const byTeam=report.by_team;
-  if(!byTeam||typeof byTeam!=='object'||Array.isArray(byTeam))return null;
-  const key=teamKey(team?.name);
-  const abbreviation=teamKey(team?.abbreviation);
-  let rows=null;
-  for(const [k,entries] of Object.entries(byTeam)) {
-    if((teamKey(k)===key||teamKey(k)===abbreviation)&&Array.isArray(entries)) {
-      rows=entries; break;
-    }
+  const cp=isPregame?currentCheckpoint(g,nowMs):null;
+  if(cp){
+   const key='max:pre:'+g.id+':'+cp;
+   if(!(await read(kv,key)))await put(kv,key,{
+    at:nowISO,checkpoint:cp,game_id:g.id,model:statistical.elo,
+    context_status:statistical.status,injuries:statistical.injuries,
+    analysis_schema:statistical.schema_version,drives_bet:false},86400*90);
   }
-  if(rows===null)rows=[];
-  return rows.map(entry=>({
-    player:saneText(entry.player??entry.name??entry.athlete?.displayName,90),
-    status:saneText(entry.status??entry.designation??entry.availability,40),
-    detail:saneText(entry.detail??entry.reason??entry.description,140)
-  })).filter(x=>x.player).sort((a,b)=>a.player.localeCompare(b.player));
+  if(!prior||changes||!prior.ai_review&&g.ai_review)await put(kv,'max:game:'+g.id,g);
+  games.push(g);
+ }
+ const slate={schema_version:VERSION,engine_version:ENGINE_VERSION,
+  updated_at:nowISO,mode:'INDEPENDENT_SHADOW',
+  games,sources,errors:errors.slice(0,20),
+  ai_status:env.MAX_AI_ENABLED==='1'&&env.OPENAI_API_KEY&&env.MAX_OPENAI_MODEL?'ENABLED':'NOT_CONFIGURED',
+  disclaimer:'Analyse indépendante expérimentale ; aucune preuve de calibration ni recommandation de pari.'};
+ await put(kv,KEY_SLATE,slate,86400*3);
+ if(changed)await put(kv,KEY_EVENTS,events.slice(0,50),86400*30);
+ health.last_success=nowISO;health.game_count=games.length;
+ await put(kv,KEY_HEALTH,health,86400*7);
+ return {...health,updated:true,events_new:changed,ai_calls:aiCalls,history_fetched:fetched.filter(x=>x.status==='fulfilled').length};
 }
-function injurySignature(arr) {
-  if(!Array.isArray(arr))return 'INCONNU';
-  return arr.map(x=>[x.player,x.status,x.detail].join(':')).join('|');
-}
-export function fingerprint(game) {
-  return JSON.stringify({
-    status:game.status,
-    home:injurySignature(game.injuries?.home),
-    away:injurySignature(game.injuries?.away)
-  });
-}
-export function detectChange(previous,current) {
-  if(!previous)return null;
-  const changes=[];
-  if(previous.status!==current.status) changes.push('STATUT_MATCH');
-  if(injurySignature(previous.injuries?.home)!==injurySignature(current.injuries?.home)
-     ||injurySignature(previous.injuries?.away)!==injurySignature(current.injuries?.away)) {
-    changes.push('RAPPORT_BLESSURES');
-  }
-  return changes.length?changes:null;
-}
-function deriveCoverage(game,reportFresh) {
-  const reasons=[];
-  if(!game.home?.name||!game.away?.name)reasons.push('EQUIPES_MANQUANTES');
-  if(!game.start)reasons.push('HORAIRE_INVALIDE');
-  if(!reportFresh||game.injuries?.home===null||game.injuries?.away===null)reasons.push('BLESSURES_NON_VERIFIEES');
-  if(!game.home_season_stats||!game.away_season_stats)reasons.push('STATS_EQUIPE_INCOMPLETES');
-  const verifiedAdvanced=[game.home_season_stats?.net_rating,game.away_season_stats?.net_rating,
-    game.home_season_stats?.pace,game.away_season_stats?.pace];
-  if(!verifiedAdvanced.every(v=>typeof v==='number'&&Number.isFinite(v)))reasons.push('STATS_AVANCEES_NON_DISPONIBLES');
-  return {status:reasons.length?'INCONCLUSIVE':'OBSERVATION',missing:reasons};
-}
-async function remoteJSON(fetcher,base,path,timeout=12000) {
-  const url=base+path;
-  const response=await fetcher(url,{method:'GET',headers:{Accept:'application/json'},signal:AbortSignal.timeout(timeout)});
-  if(!response.ok)throw new Error('HTTP_'+response.status);
-  const data=await response.json();
-  if(!data||typeof data!=='object')throw new Error('INVALID_JSON');
-  return data;
-}
-function isPregame(game,nowMs) {
-  const t=new Date(game.start).getTime();
-  return Number.isFinite(t)&&t>nowMs&&!STOP_STATUSES.has(game.status)&&!String(game.status).includes('IN_PROGRESS');
-}
-function forAI(game) {
-  return {match_id:game.id,start:game.start,
-    home:game.home.name,away:game.away.name,
-    home_season_stats:game.home_season_stats,
-    away_season_stats:game.away_season_stats,
-    injuries:game.injuries,source_coverage:game.coverage};
-}
-async function runAI(game,env,fetcher) {
-  if(env.MAX_AI_ENABLED!=='1'||!env.OPENAI_API_KEY||!env.MAX_OPENAI_MODEL)return null;
-  const schema={type:'object',additionalProperties:false,required:['summary','key_risks','recheck','status'],properties:{
-    summary:{type:'string'},key_risks:{type:'array',items:{type:'string'}},
-    recheck:{type:'array',items:{type:'string'}},
-    status:{type:'string',enum:['INCONCLUSIVE','OBSERVATION']}
-  }};
-  const instructions='Tu es MacFly, analyste quantitatif NBA critique. Audite dans cet ordre : 1) provenance, fraîcheur, intégrité des données, 2) force offensive et défensive ajustée par possession, net rating, pace, eFG, TS, pertes de balle, rebonds, lancers et tirs à 3 points, 3) cinq majeur et rotations, minutes, usage, absences et remplaçants, 4) matchup tactique attaque-défense, 5) repos, back-to-back et déplacements, 6) changements depuis la précédente analyse, 7) incertitudes et trois scénarios contradictoires. Les informations non présentes dans le JSON fourni doivent uniquement apparaître dans recheck et ne doivent jamais être inventées. Distingue fait, hypothèse et question ouverte. Aucune probabilité, aucun score numérique, aucune recommandation de pari ou certitude sans modèle calculé externe. Les blessures inconnues ne valent pas zéro. Si données critiques manquent, status INCONCLUSIVE. Tu es une couche d’audit non décisionnelle, pas le moteur de statistiques. Réponds uniquement avec le JSON conforme au schéma en français.';
-  const body={model:env.MAX_OPENAI_MODEL,instructions,input:JSON.stringify(forAI(game)),max_output_tokens:650,
-    text:{format:{type:'json_schema',name:'max_nba_review',strict:true,schema}}};
-  const r=await fetcher('https://api.openai.com/v1/responses',{
-    method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+env.OPENAI_API_KEY},
-    body:JSON.stringify(body),signal:AbortSignal.timeout(18000)
-  });
-  if(!r.ok)throw new Error('AI_HTTP_'+r.status);
-  const result=await r.json();
-  const candidate=result.output_text??result.output?.flatMap(x=>x.content??[]).find(x=>x.type==='output_text')?.text;
-  if(typeof candidate!=='string')throw new Error('AI_EMPTY');
-  const parsed=JSON.parse(candidate);
-  if(typeof parsed.summary!=='string'||!Array.isArray(parsed.key_risks)||!Array.isArray(parsed.recheck)
-    ||!['INCONCLUSIVE','OBSERVATION'].includes(parsed.status))throw new Error('AI_BAD_FORMAT');
-  return {summary:parsed.summary.slice(0,600),key_risks:parsed.key_risks.slice(0,5).map(x=>String(x).slice(0,200)),
-    recheck:parsed.recheck.slice(0,5).map(x=>String(x).slice(0,200)),
-    status:parsed.status,model:env.MAX_OPENAI_MODEL,observed_at:new Date().toISOString(),
-    drives_decision:false};
-}
-async function readJSON(kv,key) {
-  try {return await kv.get(key,{type:'json'});}catch{return null;}
-}
-async function putJSON(kv,key,value,ttl=86400*30) {
-  await kv.put(key,JSON.stringify(value),{expirationTtl:ttl});
-}
-export async function collect(env,fetcher=fetch,now=new Date()) {
-  if(!env?.MAX_STATE)throw new Error('MAX_STATE_NON_CONFIGURE');
-  const nowISO=now.toISOString(),nowMs=now.getTime(),base=env.LEGACY_BASE||DEFAULT_SOURCE;
-  if(!/^https:\/\//.test(base))throw new Error('LEGACY_BASE_INVALIDE');
-  const dates=slateDates(now);
-  const sourceFetcher=env.LEGACY_SERVICE?.fetch
-    ? (url,options)=>env.LEGACY_SERVICE.fetch(new Request(url,options))
-    : fetcher;
-  const requests=await Promise.allSettled([
-    ...dates.map(d=>remoteJSON(sourceFetcher,base,'/nba/matches?date='+d,12000)),
-    remoteJSON(sourceFetcher,base,'/nba/injuries/espn',15000)
-  ]);
-  const matchResults=requests.slice(0,3).filter(x=>x.status==='fulfilled').map(x=>x.value);
-  const injuriesResult=requests[3].status==='fulfilled'?requests[3].value:null;
-  const sources={
-    matches:{state:matchResults.length?'OK':'ERROR',success:matchResults.length,attempted:dates.length},
-    injuries:{state:injuriesResult?.available===true&&injuriesResult?.by_team?'OK':'ERROR',source:'ManiBetPro / ESPN',
-      checked_at:injuriesResult?.available===true&&injuriesResult?.by_team?nowISO:null}
-  };
-  const errors=requests.map((x,i)=>x.status==='rejected'?'SOURCE_'+i+':'+String(x.reason?.message??'ERROR').slice(0,80):null).filter(Boolean);
-  const health={version:VERSION,last_attempt:nowISO,sources,errors,last_success:null,game_count:0};
-  const previousHealth=await readJSON(env.MAX_STATE,KEY_HEALTH);
-  if(!matchResults.length){
-    health.last_success=previousHealth?.last_success??null;
-    health.game_count=previousHealth?.game_count??0;
-    await putJSON(env.MAX_STATE,KEY_HEALTH,health);
-    return {...health,updated:false};
-  }
-  let injuryReport=injuriesResult;
-  let injuryAgeMinutes=0;
-  if(injuriesResult?.available!==true||!injuriesResult?.by_team){
-    const oldReport=await readJSON(env.MAX_STATE,'max:injuries:last');
-    injuryAgeMinutes=oldReport?.captured_at?Math.floor((nowMs-new Date(oldReport.captured_at).getTime())/60000):null;
-    if(injuryAgeMinutes!==null&&injuryAgeMinutes>=0&&injuryAgeMinutes<=120)injuryReport=oldReport.payload;
-  } else {
-    const storedReport=await readJSON(env.MAX_STATE,'max:injuries:last');
-    const different=JSON.stringify(storedReport?.payload?.by_team??null)!==JSON.stringify(injuriesResult.by_team);
-    const lastSaved=new Date(storedReport?.captured_at??0).getTime();
-    if(different||!Number.isFinite(lastSaved)||nowMs-lastSaved>=30*60000){
-      await putJSON(env.MAX_STATE,'max:injuries:last',{captured_at:nowISO,payload:injuriesResult},86400);
-    }
-  }
-  const injuriesFresh=Boolean(injuryReport?.available===true&&injuryReport?.by_team&&injuryAgeMinutes!==null&&injuryAgeMinutes<=120);
-  const raw=normalizeGames(matchResults);
-  const previousEvents=await readJSON(env.MAX_STATE,KEY_EVENTS);
-  const events=Array.isArray(previousEvents)?previousEvents.slice(0,50):[];
-  const today=[];
-  let changesDetected=0;
-  let aiCalls=0;
-  const maxAICalls=Math.max(0,Math.min(2,Number(env.MAX_AI_CALLS_PER_CYCLE??1)));
-  const dayKey='max:ai:daily:'+nowISO.slice(0,10);
-  let dayCount=Number(await env.MAX_STATE.get(dayKey))||0;
-  const limit=Math.max(0,Math.min(20,Number(env.MAX_AI_DAILY_LIMIT??6)));
-  for(const item of raw) {
-    const previous=await readJSON(env.MAX_STATE,'max:game:'+item.id);
-    const game={...item,
-      injuries:{home:injuriesFresh?teamInjuries(injuryReport,item.home):null,
-        away:injuriesFresh?teamInjuries(injuryReport,item.away):null,
-        source:'ManiBetPro / ESPN',verified_at:injuriesResult?.available===true&&injuriesResult?.by_team?nowISO:null,
-        cached_age_minutes:injuryAgeMinutes},
-      analysis:null,analyzed_at:nowISO,source_coverage:null,
-      historical_model_reference:null};
-    game.coverage=deriveCoverage(game,injuriesFresh);
-    const changes=detectChange(previous,game);
-    // IA totalement séparée de la probabilité et des recommandations canoniques.
-    if(previous?.analysis)game.analysis=previous.analysis;
-    if(env.MAX_AI_ENABLED==='1'&&isPregame(game,nowMs)&&game.start
-       &&new Date(game.start).getTime()-nowMs<36*3600000
-       &&game.coverage.status==='OBSERVATION'
-       &&(!previous?.analysis||changes?.includes('RAPPORT_BLESSURES'))
-       &&aiCalls<maxAICalls&&dayCount<limit) {
-      try{
-        const analysis=await runAI(game,env,fetcher);
-        if(analysis){game.analysis=analysis;aiCalls++;dayCount++;
-          await env.MAX_STATE.put(dayKey,String(dayCount),{expirationTtl:86400*3});
-        }
-      }catch(err){console.warn('[MAX_AI]',String(err.message).slice(0,80));}
-    }
-    if(changes) {
-      changesDetected++;
-      events.unshift({id:item.id,at:nowISO,changes,match:item.away.name+' @ '+item.home.name});
-      await putJSON(env.MAX_STATE,'max:history:'+item.id+':'+nowMs,
-        {schema_version:VERSION,at:nowISO,game},86400*30);
-    }
-    if(!previous||changes||(game.analysis&&!previous?.analysis)){
-      await putJSON(env.MAX_STATE,'max:game:'+item.id,game,86400*90);
-    }
-    today.push(game);
-  }
-  const slate={schema_version:VERSION,updated_at:nowISO,games:today,sources,
-    mode:'SHADOW',ai_status:env.MAX_AI_ENABLED==='1'&&env.OPENAI_API_KEY&&env.MAX_OPENAI_MODEL?'ENABLED':'NOT_CONFIGURED',
-    disclaimer:'Collecte automatique, pas de pronostics ManiBetProMax validés.'};
-  await putJSON(env.MAX_STATE,KEY_LATEST,slate,86400*3);
-  if(changesDetected)await putJSON(env.MAX_STATE,KEY_EVENTS,events.slice(0,50),86400*30);
-  health.last_success=nowISO;health.game_count=today.length;
-  await putJSON(env.MAX_STATE,KEY_HEALTH,health);
-  return {...health,updated:true,events_new:changesDetected,ai_calls:aiCalls};
-}
-export default {
-  async fetch(request,env) {
-    const url=new URL(request.url);
-    if(request.method!=='GET')return json({error:'METHOD_NOT_ALLOWED'},405);
-    if(url.pathname==='/')return new Response(MAX_APP_HTML||'ManiBetProMax · interface non empaquetée',{
-      status:200,headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store',
-        'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY'}
-    });
-    if(!env?.MAX_STATE)return json({error:'STORAGE_NOT_CONFIGURED'},503);
-    if(url.pathname==='/api/health')return json((await readJSON(env.MAX_STATE,KEY_HEALTH))??{state:'NO_DATA'});
-    if(url.pathname==='/api/slate')return json((await readJSON(env.MAX_STATE,KEY_LATEST))??{
-      schema_version:VERSION,updated_at:null,games:[],mode:'SHADOW',ai_status:'NOT_CONFIGURED'});
-    if(url.pathname==='/api/events')return json({events:(await readJSON(env.MAX_STATE,KEY_EVENTS))??[]});
-    return json({error:'NOT_FOUND'},404);
-  },
-  async scheduled(controller,env,ctx) {
-    const result=await collect(env,fetch,new Date(controller.scheduledTime??Date.now()));
-    console.log('[MAX_COLLECT]',JSON.stringify(result));
-  }
+export default{
+ async fetch(request,env){
+  const path=new URL(request.url).pathname;
+  if(request.method!=='GET')return json({error:'METHOD_NOT_ALLOWED'},405);
+  if(path==='/')return new Response(MAX_APP_HTML||'ManiBetProMax',{
+   status:200,headers:{'Content-Type':'text/html;charset=utf-8','Cache-Control':'no-store',
+    'X-Frame-Options':'DENY','X-Content-Type-Options':'nosniff'}});
+  if(!env?.MAX_STATE)return json({error:'STORAGE_NOT_CONFIGURED'},503);
+  if(path==='/api/health')return json(await read(env.MAX_STATE,KEY_HEALTH)??{state:'NO_DATA'});
+  if(path==='/api/slate')return json(await read(env.MAX_STATE,KEY_SLATE)??{
+   schema_version:VERSION,updated_at:null,games:[],mode:'INDEPENDENT_SHADOW',
+   ai_status:'NOT_CONFIGURED'});
+  if(path==='/api/events')return json({events:await read(env.MAX_STATE,KEY_EVENTS)??[]});
+  return json({error:'NOT_FOUND'},404);
+ },
+ async scheduled(controller,env){
+  try{console.log('[MAX_INDEPENDENT]',JSON.stringify(await collect(env,fetch,new Date(controller.scheduledTime??Date.now()))));}
+  catch(err){console.error('[MAX_INDEPENDENT_FAILURE]',String(err?.message??'ERROR').slice(0,180));}
+ }
 };
