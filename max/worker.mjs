@@ -118,6 +118,9 @@ function deriveCoverage(game,reportFresh) {
   if(!game.start)reasons.push('HORAIRE_INVALIDE');
   if(!reportFresh||game.injuries?.home===null||game.injuries?.away===null)reasons.push('BLESSURES_NON_VERIFIEES');
   if(!game.home_season_stats||!game.away_season_stats)reasons.push('STATS_EQUIPE_INCOMPLETES');
+  const verifiedAdvanced=[game.home_season_stats?.net_rating,game.away_season_stats?.net_rating,
+    game.home_season_stats?.pace,game.away_season_stats?.pace];
+  if(!verifiedAdvanced.every(v=>typeof v==='number'&&Number.isFinite(v)))reasons.push('STATS_AVANCEES_NON_DISPONIBLES');
   return {status:reasons.length?'INCONCLUSIVE':'OBSERVATION',missing:reasons};
 }
 async function remoteJSON(fetcher,base,path,timeout=12000) {
