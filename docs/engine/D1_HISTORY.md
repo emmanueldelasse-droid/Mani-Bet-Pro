@@ -49,6 +49,8 @@ The outcome row is mutable by upsert so official corrections / force-settle can 
 
 ## Provisioning
 
+Statut 02/11/2026 · `manibetpro-history` créée sur Cloudflare · juridiction `eu` · identifiant réel `cf8e609e-e1d2-4a0d-b879-32b79349a47a` · migrations 0001→0008 appliquées et suivies dans `d1_migrations` · binding proposé par PR séparée. Les commandes de création ci-dessous restent le runbook pour un nouvel environnement ; ne pas recréer la base existante. KV demeure canonique jusqu'à validation runtime.
+
 Do not commit a fake D1 UUID to `wrangler.jsonc`.
 
 Create the production database first, preferably in the EU jurisdiction:

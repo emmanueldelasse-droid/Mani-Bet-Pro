@@ -19,6 +19,14 @@
       "id": "17eb7ddc41a949dd99bd840142832cfd"
     }
   ],
+  "d1_databases": [
+    {
+      "binding": "MANI_HISTORY_DB",
+      "database_name": "manibetpro-history",
+      "database_id": "cf8e609e-e1d2-4a0d-b879-32b79349a47a",
+      "migrations_dir": "migrations"
+    }
+  ],
   "compatibility_flags": [
     "nodejs_compat"
   ],

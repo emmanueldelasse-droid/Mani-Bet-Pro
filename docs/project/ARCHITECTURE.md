@@ -61,7 +61,7 @@ index.html + src/ui/*.js (GitHub Pages front)
 - `observability.enabled: true`
 - KV binding `PAPER_TRADING` · id `17eb7ddc41a949dd99bd840142832cfd`
 - Crons · `0 * * * *` pipeline principal · `*/15 * * * *` snapshots de cotes uniquement
-- D1 `MANI_HISTORY_DB` · optionnel · absent de `wrangler.jsonc` tant qu'une DB Cloudflare réelle n'est pas provisionnée
+- D1 `MANI_HISTORY_DB` · base EU provisionnée 02/11/2026 · binding ajouté via PR dédiée · actif uniquement après merge/deploy et validation runtime
 
 ## Stockage
 - KV `PAPER_TRADING` · chemin canonique compatibilité/runtime · logs latest snapshot · paper state · caches · checkpoints
