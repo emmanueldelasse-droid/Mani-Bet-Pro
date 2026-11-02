@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {slateDates,detectChange,collect} from '../worker.mjs';
+import {slateDates,detectChange,collect,validateResearch} from '../worker.mjs';
 import {parseESPNScoreboards,parseESPNInjuries,injuriesForTeam,verifiedFinalGames,teamProfile,estimateElo,analyzeNBA} from '../engine.mjs';
 let n=0;const eq=(a,b,m)=>{assert.deepEqual(a,b,m);n++};
 const ok=(x,m)=>{assert.ok(x,m);n++};
@@ -102,4 +102,30 @@ const priorSlate=kv.state.get('max:slate:latest');
 after=await collect({MAX_STATE:kv},sourceFetch,new Date(now.getTime()+60*60000));
 eq(after.updated,false,'source dates indisponible => fail closed');
 eq(kv.state.get('max:slate:latest'),priorSlate,'dernier état conservé');
+const verificationAt='2026-11-02T21:55:00.000Z';
+const validResearch={schema_version:'max-research-v1',match_id:contest.id,
+ generated_at:'2026-11-02T21:50:00.000Z',
+ summary:'Données ESPN confirmées. Les projections restent exploratoires ; prudence sur les blessures.',
+ key_risks:['Cinq majeur non confirmé'],recheck:['Rapport NBA officiel avant match'],
+ sources:[{url:'https://official.nba.com/nba-injury-report-2026-27-season/',title:'NBA Injury Report',
+ checked_at:'2026-11-02T21:45:00.000Z',kind:'OFFICIAL'}],
+ sections:Array.from({length:16},(_,i)=>({section_id:i+1,title:'Rubrique '+(i+1),
+ status:'UNAVAILABLE',findings:[],missing:['Données non disponibles gratuitement']}))};
+const parsedResearch=validateResearch(validResearch,g,verificationAt);
+ok(parsedResearch,'rapport sourcé valide');
+eq(parsedResearch.coverage_sections,16,'16 sections présentes');
+eq(parsedResearch.status,'RESEARCH_PARTIAL','16 sections ne signifient pas analyse complète');
+eq(validateResearch({...validResearch,match_id:'OTHER'},g,verificationAt),null,'mauvais match rejeté');
+eq(validateResearch({...validResearch,sources:[]},g,verificationAt),null,'rapport sans source rejeté');
+eq(validateResearch({...validResearch,generated_at:'2026-11-03T02:00:00Z'},g,'2026-11-03T02:20:00Z'),null,'publication après coup d’envoi rejetée');
+eq(validateResearch({...validResearch,sources:[{url:'javascript:alert(1)',title:'invalid',checked_at:'2026-11-02T21:45:00Z'}]},g,verificationAt),null,'URL non https rejetée');
+allDown=false;injuryDown=false;
+await kv.put('max:research:'+contest.id,JSON.stringify(validResearch));
+const enriched=await collect({MAX_STATE:kv},sourceFetch,new Date('2026-11-02T22:10:00Z'));
+ok(enriched.updated,'collecte avec recherche MacFly valide');
+const matched=JSON.parse(kv.state.get('max:slate:latest')).games.find(x=>x.id===contest.id);
+eq(matched.research.coverage_sections,16,'recherche présente dans le dashboard');
+eq(matched.ai_review.model,'MacFly · ChatGPT','source MacFly explicite');
+ok(JSON.parse(kv.state.get('max:events:latest')).some(e=>e.changes.includes('RECHERCHE_MACFLY')),'nouvelle recherche historisée');
+ok(!calls.some(u=>u.includes('api.openai.com')||u.includes('rapidapi.com')||u.includes('the-odds-api.com')),'aucune API payante appelée');
 console.log('ManiBetProMax independent:',n,'assertions OK');
