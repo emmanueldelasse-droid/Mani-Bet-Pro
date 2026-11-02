@@ -13,9 +13,9 @@ function report(status='Out'){
  return {available:true,by_team:{'Denver Nuggets':[{player:'Joueur Alpha',status,detail:'Cheville'}],'Los Angeles Lakers':[]}};
 }
 function kv(){
- const state=new Map();
- return {state,async get(k,options){let v=state.get(k);return options?.type==='json'&&v!==undefined?JSON.parse(v):v??null;},
- async put(k,v){state.set(k,v);}};
+ const state=new Map(),writes=[];
+ return {state,writes,async get(k,options){let v=state.get(k);return options?.type==='json'&&v!==undefined?JSON.parse(v):v??null;},
+ async put(k,v){writes.push(k);state.set(k,v);}};
 }
 const dates=slateDates(ts);
 eq(dates,['20261101','20261102','20261103'],'dates UTC voisines');
@@ -63,6 +63,8 @@ eq(events[0].changes,['RAPPORT_BLESSURES'],'type événement');
 check([...mock.state.keys()].some(x=>x.startsWith('max:history:GAME-1:')),'snapshot historique');
 result=await collect({MAX_STATE:mock},fetcher,new Date(ts.getTime()+30*60000));
 eq(JSON.parse(mock.state.get('max:events:latest')).length,1,'anti-doublon à information inchangée');
+eq(mock.writes.filter(k=>k==='max:game:GAME-1').length,2,'pas de KV write game sans changement');
+eq(mock.writes.filter(k=>k==='max:events:latest').length,1,'pas de KV write events sans changement');
 injuryFailure=true;
 result=await collect({MAX_STATE:mock},fetcher,new Date(ts.getTime()+45*60000));
 eq(result.sources.injuries.state,'ERROR','dégradation source affichée');
