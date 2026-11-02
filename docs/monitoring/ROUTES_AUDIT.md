@@ -191,3 +191,9 @@ Fallback 404 · `worker.js:434` · puis `env.ASSETS.fetch` si binding présent.
 - GET /api/health · sources, dernier cron, erreurs · public · MAX_STATE indépendant
 - scheduled */15 * * * * · collecte ESPN via Worker historique · pas de mutation ManiBetPro
 - Source, contrat, tests, rollback : max/README.md · ADR DECISION-007
+
+## ManiBetProMax indépendant · MAJ API
+- GET /api/methodology · prompt de référence 16 sections (lecture seule).
+- GET /api/slate · analyses ESPN direct + rapport MacFly validé (lecture seule).
+- GET /api/health, /api/events, / (interface) ; aucun endpoint mutation exposé.
+- Rapport MacFly via KV Max uniquement, pas d'API GPT payante ni de service binding historique.
