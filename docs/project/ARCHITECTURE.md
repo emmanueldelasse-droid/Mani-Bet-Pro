@@ -181,3 +181,10 @@ Voir `docs/monitoring/KNOWN_ISSUES.md` section "Écarts MBP-A.1" · incohérence
 - Nouveau Worker manibetpromax-shadow · propre KV MANIBETPROMAX_SHADOW · lecture seule endpoints ManiBetPro /nba/matches et /nba/injuries/espn
 - Trois dates UTC adjacentes · cron 15 min · UI responsive servie par Worker Max
 - AI API opt-in · non décisionnelle · aucun lien de mutation KV/D1 historique · aucun changement moteur principal
+
+## Rectification ManiBetProMax · indépendance confirmée en conception
+- Remplace section shadow précédente : plus de service binding manibetpro, plus d'API GPT payante ; séparé à 100% des providers et données de ManiBetPro.
+- max/engine.mjs : ESPN direct, statistiques forme et Elo exploratoire.
+- MacFly Automations horaire : recherche web publique gratuite + rapport par match écrit dans KV Max (max:research:<id>), jamais source canonique de probabilité.
+- max/worker.mjs : validation pré-match et provenance, collecte structurée 15 minutes, journal événements.
+- Limites d'accès statistiques officielles respectées, métriques propriétaires non promises.
