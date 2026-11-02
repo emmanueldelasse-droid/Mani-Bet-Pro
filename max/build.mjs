@@ -1,13 +1,18 @@
 import {readFile,mkdir,writeFile} from 'node:fs/promises';
 const dir=new URL('.',import.meta.url);
-const [source,html]=await Promise.all([
-  readFile(new URL('./worker.mjs',dir),'utf8'),
-  readFile(new URL('./dashboard.html',dir),'utf8')
+const [worker,engine,html,prompt]=await Promise.all([
+ readFile(new URL('./worker.mjs',dir),'utf8'),
+ readFile(new URL('./engine.mjs',dir),'utf8'),
+ readFile(new URL('./dashboard.html',dir),'utf8'),
+ readFile(new URL('./analyst-prompt.md',dir),'utf8')
 ]);
-const marker="const MAX_APP_HTML = '';";
-if(!source.includes(marker))throw new Error('Point d’injection dashboard introuvable');
-const bundle=source.replace(marker,'const MAX_APP_HTML = '+JSON.stringify(html)+';');
-const out=new URL('./dist/worker.mjs',dir);
+if(!worker.includes("const MAX_APP_HTML='';")||!worker.includes("const MAX_ANALYST_PROMPT='';"))
+ throw new Error('Placeholders dashboard/analyst introuvables');
+const bundle=worker.replace("const MAX_APP_HTML='';",'const MAX_APP_HTML='+JSON.stringify(html)+';')
+ .replace("const MAX_ANALYST_PROMPT='';",'const MAX_ANALYST_PROMPT='+JSON.stringify(prompt)+';');
 await mkdir(new URL('./dist/',dir),{recursive:true});
-await writeFile(out,bundle,'utf8');
-console.log('ManiBetProMax bundle prêt · '+bundle.length+' caractères');
+await Promise.all([
+ writeFile(new URL('./dist/worker.mjs',dir),bundle,'utf8'),
+ writeFile(new URL('./dist/engine.mjs',dir),engine,'utf8')
+]);
+console.log('ManiBetProMax independent build: worker',bundle.length,'/ engine',engine.length);
