@@ -16,11 +16,5 @@
     "crons": [
       "*/15 * * * *"
     ]
-  },
-  "services": [
-    {
-      "binding": "LEGACY_SERVICE",
-      "service": "manibetpro"
-    }
-  ]
+  }
 }
