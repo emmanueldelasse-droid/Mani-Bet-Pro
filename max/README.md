@@ -41,3 +41,10 @@
 - ADR : docs/decisions/DECISION-007-MANIBETPROMAX-SHADOW.md.
 - SESSION.md / ARCHITECTURE.md / ROUTES_AUDIT.md mis à jour sur la branche de fonctionnalité uniquement.
 - Aucun secret dans GitHub ; aucune source de prédiction post-tip présentée comme pre-tip.
+
+## Raccordement et précision des données (2026-11-02)
+- `LEGACY_SERVICE` : liaison interne Cloudflare vers Worker `manibetpro` ; évite appels Worker-to-Worker via workers.dev.
+- Rapport ESPN HTTP 200 avec `available=false` traité comme panne de données, jamais comme absence de blessé.
+- Stats ESPN scoreboard : `net_rating` et `pace` non disponibles actuellement ; couverture `INCONCLUSIVE`, même si quelques scores d'équipe sont présents.
+- Limiter les écritures : une carte match est enregistrée seulement si créée/modifiée ; source blessures max toutes 30 min si inchangée ; journal événements seulement en cas de changement ; état dernier succès actualisé à chaque run.
+- Tests simulés : 37 assertions sans échec ; preuve de collecte réelle Cloudflare encore à établir.
