@@ -52,3 +52,11 @@
 - Source ESPN `available=false` = état dégradé.
 - Manque pace/net_rating explicite → `INCONCLUSIVE`; pas de pronostic par LLM non calculé.
 - Écritures KV limitées pour les quotas ; consulter heartbeat pour confirmer le Cron réel.
+
+## Révision 2026-11-02 · zéro abonnement / indépendance stricte
+- Supersede la décision de lire les routes du Worker manibetpro : Legacy service binding SUPPRIMÉ du nouveau runtime et de wrangler.
+- Sources ESPN direct + recherche publique gratuite MacFly par Automations ChatGPT ; aucune API IA facturée ; pas de fournisseur données payant.
+- Les 16 sections sont un contrat de recherche et non une preuve d'accès aux données ; sources payantes indisponibles explicitement.
+- MacFly écrit seulement max:research:<id> dans KV dédié, avec URLs HTTPS et timestamps pré-match ; relecture/validation par Worker Max.
+- Les rapports MacFly ne modifient pas le moteur quantitatif ; Elo exploratoire non calibré, paris automatiques interdits.
+- API ChatGPT limitée à un cycle horaire ; Worker collecte des flux structurés toutes les 15 min.
