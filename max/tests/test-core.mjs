@@ -74,4 +74,13 @@ result=await collect({MAX_STATE:mock},fetcher,new Date(ts.getTime()+60*60000));
 check(result.updated===false,'indisponibilité matches fail closed');
 eq(mock.state.get('max:slate:latest'),preserved,'dernier snapshot non écrasé si provider down');
 check(![...mock.state.keys()].some(k=>k.includes('betting_recommendations')||k.includes('motor_prob')),'aucune écriture sur moteur historique');
+// Le raccordement interne vers le Worker historique doit primer sur fetch public.
+scheduleFailure=false;injuryFailure=false;
+const serviceKV=kv();let boundCalls=0;
+const legacyService={fetch:async request=>{boundCalls++;return fetcher(request.url);}};
+const bound=await collect({MAX_STATE:serviceKV,LEGACY_SERVICE:legacyService},
+  async()=>{throw new Error('fetch public interdit')},ts);
+check(bound.updated===true,'service binding fonctionne');
+eq(boundCalls,4,'les 4 lectures passent par service binding');
+eq(JSON.parse(serviceKV.state.get('max:slate:latest')).games.length,1,'slate via liaison interne');
 console.log('ManiBetProMax tests:',checks,'assertions · 0 échec');
