@@ -164,3 +164,10 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
 - IA/API GPT désactivée par défaut · budget explicite préalable · pas de pourcentage inventé
 - Validation de release requise : tests + upload Worker Max + smoke + observation cron + revue/merge
 - PR #251 D1 historique reste distincte ; ne pas mélanger avec ce chantier
+
+## MAJ · ManiBetProMax indépendant / sans abonnement
+- Choix du créateur : NE PAS utiliser manibetpro comme source/provider ni souscrire à des fournisseurs payants.
+- Branche claude/manibetpromax-shadow-v1 : moteur ESPN indépendant, fichier contrat 16 sections, recherche MacFly horaire, sans OpenAI API.
+- Cron 15 min Worker Max ; KV EU dédié ; PR #254 draft ; tests modèles/rapport/abstention.
+- Une source non disponible reste INCONCLUSIVE ; probabilités Elo non calibrées sans recommandation.
+- Avant GO merge : déploiement module engine+worker, contrôle KV last_success, UI, no legacy binding, source directe réelle, mémoire et tests complets.
