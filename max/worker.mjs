@@ -1,6 +1,6 @@
 /**
  * ManiBetProMax · shadow v0.1 · Cloudflare Worker autonome.
- * Lit uniquement les routes publiques du moteur historique.
+ * Lit les routes du moteur historique via service binding Cloudflare (sans boucle workers.dev).
  * Aucune écriture dans le KV/DB, aucun changement des décisions de ManiBetPro.
  * IA désactivée par défaut : nécessite MAX_AI_ENABLED=1, OPENAI_API_KEY,
  * MAX_OPENAI_MODEL et un plafond MAX_AI_DAILY_LIMIT.
@@ -176,9 +176,12 @@ export async function collect(env,fetcher=fetch,now=new Date()) {
   const nowISO=now.toISOString(),nowMs=now.getTime(),base=env.LEGACY_BASE||DEFAULT_SOURCE;
   if(!/^https:\/\//.test(base))throw new Error('LEGACY_BASE_INVALIDE');
   const dates=slateDates(now);
+  const sourceFetcher=env.LEGACY_SERVICE?.fetch
+    ? (url,options)=>env.LEGACY_SERVICE.fetch(new Request(url,options))
+    : fetcher;
   const requests=await Promise.allSettled([
-    ...dates.map(d=>remoteJSON(fetcher,base,'/nba/matches?date='+d,12000)),
-    remoteJSON(fetcher,base,'/nba/injuries/espn',15000)
+    ...dates.map(d=>remoteJSON(sourceFetcher,base,'/nba/matches?date='+d,12000)),
+    remoteJSON(sourceFetcher,base,'/nba/injuries/espn',15000)
   ]);
   const matchResults=requests.slice(0,3).filter(x=>x.status==='fulfilled').map(x=>x.value);
   const injuriesResult=requests[3].status==='fulfilled'?requests[3].value:null;
