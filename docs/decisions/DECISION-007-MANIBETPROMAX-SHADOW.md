@@ -46,3 +46,9 @@
 - Désactiver Cron et revenir au Worker manibetpromax-shadow précédent.
 - Ne rien supprimer dans PAPER_TRADING ni dans manibetpro-history.
 - Branche max indépendante ; suppression UI Max n'affecte pas ManiBetPro.
+
+## Ajustement de sûreté du prototype
+- Worker Max → Worker historique par Cloudflare service binding (pas d'appel workers.dev depuis Worker).
+- Source ESPN `available=false` = état dégradé.
+- Manque pace/net_rating explicite → `INCONCLUSIVE`; pas de pronostic par LLM non calculé.
+- Écritures KV limitées pour les quotas ; consulter heartbeat pour confirmer le Cron réel.
