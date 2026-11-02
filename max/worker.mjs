@@ -6,7 +6,7 @@
 import {ENGINE_VERSION,parseESPNScoreboards,parseESPNInjuries,analyzeNBA} from './engine.mjs';
 
 const MAX_APP_HTML='';
-const MAX_ANALYST_PROMPT='';
+const MAX_ANALYST_PROMPT=''; // méthode publique, lue par MacFly depuis GitHub.
 const VERSION='max-independent-0.2.0';
 const ESPN='https://site.api.espn.com/apis/site/v2/sports/basketball/nba';
 const KEY_HEALTH='max:health:last';
@@ -66,36 +66,46 @@ function forAI(game){
   context_status:game.coverage,
   verified_sources:game.sources};
 }
-async function runAI(game,env,fetcher){
- if(env.MAX_AI_ENABLED!=='1'||!env.OPENAI_API_KEY||!env.MAX_OPENAI_MODEL)return null;
- const schema={type:'object',additionalProperties:false,
-  required:['summary','key_risks','recheck','status','sources'],
-  properties:{summary:{type:'string'},key_risks:{type:'array',items:{type:'string'}},
-   recheck:{type:'array',items:{type:'string'}},
-   status:{type:'string',enum:['INCONCLUSIVE','OBSERVATION']},
-   sources:{type:'array',items:{type:'string'}}}};
- const payload={model:env.MAX_OPENAI_MODEL,
-  instructions:MAX_ANALYST_PROMPT||'Tu es un analyste NBA critique, aucune donnée inventée, aucun pari ou pourcentage non calculé.',
-  input:JSON.stringify(forAI(game)),max_output_tokens:1600,
-  text:{format:{type:'json_schema',name:'max_independent_nba_analysis',strict:true,schema}}};
- if(env.MAX_AI_WEB_ENABLED==='1')payload.tools=[{type:'web_search'}];
- const res=await fetcher('https://api.openai.com/v1/responses',{
-  method:'POST',headers:{Authorization:'Bearer '+env.OPENAI_API_KEY,'Content-Type':'application/json'},
-  body:JSON.stringify(payload),signal:AbortSignal.timeout(35000)});
- if(!res.ok)throw new Error('AI_HTTP_'+res.status);
- const data=await res.json();
- const text=data.output_text??data.output?.flatMap(x=>x.content??[]).find(x=>x.type==='output_text')?.text;
- if(typeof text!=='string')throw new Error('AI_NO_RESPONSE');
- const parsed=JSON.parse(text);
- if(!['INCONCLUSIVE','OBSERVATION'].includes(parsed.status)
-  ||typeof parsed.summary!=='string'||!Array.isArray(parsed.key_risks)||!Array.isArray(parsed.recheck)||!Array.isArray(parsed.sources))
-  throw new Error('AI_INVALID_SCHEMA');
- return {status:parsed.status,summary:sanitizeText(parsed.summary,900),
-  key_risks:parsed.key_risks.slice(0,6).map(x=>sanitizeText(x,220)),
-  recheck:parsed.recheck.slice(0,8).map(x=>sanitizeText(x,220)),
-  sources:parsed.sources.slice(0,10).map(x=>sanitizeText(x,300)),
-  generated_at:new Date().toISOString(),model:env.MAX_OPENAI_MODEL,
-  web_search_enabled:env.MAX_AI_WEB_ENABLED==='1',drives_decision:false};
+/**
+ * MacFly se lance dans ChatGPT (automation séparée), pas dans un appel API facturé.
+ * Les recherches sont écrites dans le KV Max par l'automatisation autorisée.
+ * On n'accepte que les rapports sourcés, récents et émis avant tip-off.
+ */
+export function validateResearch(record,game,nowISO) {
+ if(!record||typeof record!=='object'||record.schema_version!=='max-research-v1')return null;
+ if(String(record.match_id)!==String(game.id))return null;
+ const published=Date.parse(record.generated_at),now=Date.parse(nowISO),tip=Date.parse(game.start);
+ if(!Number.isFinite(published)||published>now||now-published>12*3600000)return null;
+ if(Number.isFinite(tip)&&published>=tip)return null; // pas de rétroprediction
+ if(!Array.isArray(record.sources)||!record.sources.length)return null;
+ const sources=record.sources.filter(s=>
+  s&&typeof s.url==='string'&&/^https:\/\/[a-z0-9.-]+(?:\/|$)/i.test(s.url)
+  &&typeof s.title==='string'&&typeof s.checked_at==='string'
+  &&Number.isFinite(Date.parse(s.checked_at))
+  &&Date.parse(s.checked_at)<=now
+  &&Date.parse(s.checked_at)<=published+5*60000
+ ).slice(0,16).map(s=>({url:s.url.slice(0,400),title:s.title.slice(0,150),
+   checked_at:s.checked_at,kind:String(s.kind??'PUBLIC').slice(0,40)}));
+ if(!sources.length)return null;
+ const summary=sanitizeText(record.summary,2000);
+ if(!summary)return null;
+ const rows=Array.isArray(record.sections)?record.sections:[];
+ const sections=rows.slice(0,16).map(s=>({
+  section_id:Number(s?.section_id)||0,
+  title:sanitizeText(s?.title,100),
+  status:['VERIFIED','PARTIAL','UNAVAILABLE','CONFLICT'].includes(s?.status)?s.status:'UNAVAILABLE',
+  findings:Array.isArray(s?.findings)?s.findings.slice(0,8).map(v=>sanitizeText(v,300)):[],
+  missing:Array.isArray(s?.missing)?s.missing.slice(0,8).map(v=>sanitizeText(v,150)):[]
+ })).filter(s=>s.section_id>=1&&s.section_id<=16);
+ const unique=new Set(sections.map(s=>s.section_id));
+ const full=unique.size===16;
+ return {schema_version:record.schema_version,match_id:String(record.match_id),
+  generated_at:new Date(published).toISOString(),sources,summary,
+  key_risks:Array.isArray(record.key_risks)?record.key_risks.slice(0,6).map(s=>sanitizeText(s,250)):[],
+  recheck:Array.isArray(record.recheck)?record.recheck.slice(0,8).map(s=>sanitizeText(s,250)):[],
+  sections,coverage_sections:unique.size,
+  status:full&&sections.every(s=>s.status==='VERIFIED')?'RESEARCH_COMPLETE':'RESEARCH_PARTIAL',
+  drives_decision:false,web_sources_checked:sources.length};
 }
 export async function collect(env,fetcher=fetch,now=new Date()){
  if(!env?.MAX_STATE)throw new Error('MAX_STATE_MISSING');
@@ -131,10 +141,12 @@ export async function collect(env,fetcher=fetch,now=new Date()){
  const coreGames=parseESPNScoreboards(slateData).filter(validGame);
  const historyRaw=[];
  const fetchDates=[];
+ let cachedHistoryDays=0;
  for(let d=2;d<=HISTORY_DAYS+1;d++){
   const day=dateKey(now,-d);
   const snapshot=await read(kv,'max:scoreboard:'+day);
   if(snapshot?.date===day&&Array.isArray(snapshot.games)){
+   cachedHistoryDays++;
    historyRaw.push(...snapshot.games);
   }else if(fetchDates.length<HISTORY_PER_CYCLE){
    fetchDates.push(day);
@@ -149,7 +161,7 @@ export async function collect(env,fetcher=fetch,now=new Date()){
  }));
  for(const x of fetched)if(x.status==='fulfilled')historyRaw.push(...x.value.games);
  for(const x of fetched)if(x.status==='rejected')errors.push('HISTORY:'+String(x.reason?.message??'ERROR').slice(0,65));
- const loaded=HISTORY_DAYS-fetchDates.length+fetched.filter(x=>x.status==='fulfilled').length;
+ const loaded=cachedHistoryDays+fetched.filter(x=>x.status==='fulfilled').length;
  sources.historic={state:loaded>=HISTORY_DAYS?'OK':loaded>=10?'PARTIAL':'WARMING',
   days_loaded:loaded,target:HISTORY_DAYS,source:'ESPN direct'};
  const combined=new Map();
@@ -157,40 +169,32 @@ export async function collect(env,fetcher=fetch,now=new Date()){
  const historical=[...combined.values()];
  const previousEvents=await read(kv,KEY_EVENTS);
  const events=Array.isArray(previousEvents)?previousEvents.slice(0,50):[];
- const games=[];let changed=0,aiCalls=0;
- const maxAI=Math.max(0,Math.min(2,Number(env.MAX_AI_CALLS_PER_CYCLE??1)));
- const maxDaily=Math.max(0,Math.min(20,Number(env.MAX_AI_DAILY_LIMIT??6)));
- const dayCounter='max:ai:daily:'+nowISO.slice(0,10);
- let count=Number(await kv.get(dayCounter))||0;
+ const games=[];let changed=0,researchCount=0;
  for(const sourceGame of coreGames.slice(0,40)){
   const prior=await read(kv,'max:game:'+sourceGame.id);
   const statistical=analyzeNBA(sourceGame,historical,injury.value,nowISO);
+  const rawResearch=await read(kv,'max:research:'+sourceGame.id);
+  const verifiedResearch=validateResearch(rawResearch,sourceGame,nowISO);
+  if(verifiedResearch)researchCount++;
   const g={...sourceGame,checked_at:nowISO,
    injuries:{...statistical.injuries,source:'ESPN direct',
     source_status:injury.state,cache_age_minutes:injury.age_min},
    independent_analysis:statistical,
    coverage:{status:statistical.status,missing:statistical.missing},
-   sources:{matches:'ESPN direct',injuries:'ESPN direct',stats:'ESPN direct / rolling 45 days'},
-   ai_review:prior?.ai_review??null};
-  const changes=detectChange(prior,g);
-  if(changes){
+   sources:{matches:'ESPN direct',injuries:'ESPN direct',
+     stats:'ESPN direct / rolling 45 days',research:'MacFly / sources publiques tracées'},
+   research:verifiedResearch,
+   research_fingerprint:verifiedResearch?.generated_at??null,
+   ai_review:verifiedResearch?{...verifiedResearch,
+     model:'MacFly · ChatGPT',web_search_enabled:true}:null};
+  const changes=detectChange(prior,g)??[];
+  if(prior&&prior.research_fingerprint!==g.research_fingerprint)changes.push('RECHERCHE_MACFLY');
+  if(changes.length){
    changed++;
    events.unshift({id:g.id,match:g.away.name+' @ '+g.home.name,changes,at:nowISO});
    await put(kv,'max:history:'+g.id+':'+nowMs,{at:nowISO,changes,game:g},86400*30);
   }
   const isPregame=statistical.pregame;
-  // Aucune analyse IA sur un match déjà commencé.
-  if(env.MAX_AI_ENABLED==='1'&&isPregame&&Date.parse(g.start)-nowMs<36*3600000
-   &&(!prior?.ai_review||changes?.includes('RAPPORT_BLESSURES'))
-   &&count<maxDaily&&aiCalls<maxAI){
-   try{
-    const review=await runAI(g,env,fetcher);
-    if(review){
-     g.ai_review=review;count++;aiCalls++;
-     await kv.put(dayCounter,String(count),{expirationTtl:86400*3});
-    }
-   }catch(e){errors.push('AI_REVIEW_FAILED:'+String(e.message).slice(0,70));}
-  }
   const cp=isPregame?currentCheckpoint(g,nowMs):null;
   if(cp){
    const key='max:pre:'+g.id+':'+cp;
@@ -199,19 +203,19 @@ export async function collect(env,fetcher=fetch,now=new Date()){
     context_status:statistical.status,injuries:statistical.injuries,
     analysis_schema:statistical.schema_version,drives_bet:false},86400*90);
   }
-  if(!prior||changes||!prior.ai_review&&g.ai_review)await put(kv,'max:game:'+g.id,g);
+  if(!prior||changes.length)await put(kv,'max:game:'+g.id,g);
   games.push(g);
  }
  const slate={schema_version:VERSION,engine_version:ENGINE_VERSION,
   updated_at:nowISO,mode:'INDEPENDENT_SHADOW',
   games,sources,errors:errors.slice(0,20),
-  ai_status:env.MAX_AI_ENABLED==='1'&&env.OPENAI_API_KEY&&env.MAX_OPENAI_MODEL?'ENABLED':'NOT_CONFIGURED',
+  ai_status:'MACFLY_CHATGPT_HOURLY',research_count:researchCount,external_paid_api:false,
   disclaimer:'Analyse indépendante expérimentale ; aucune preuve de calibration ni recommandation de pari.'};
  await put(kv,KEY_SLATE,slate,86400*3);
  if(changed)await put(kv,KEY_EVENTS,events.slice(0,50),86400*30);
  health.last_success=nowISO;health.game_count=games.length;
  await put(kv,KEY_HEALTH,health,86400*7);
- return {...health,updated:true,events_new:changed,ai_calls:aiCalls,history_fetched:fetched.filter(x=>x.status==='fulfilled').length};
+ return {...health,updated:true,events_new:changed,research_reports:researchCount,external_paid_api:false,history_fetched:fetched.filter(x=>x.status==='fulfilled').length};
 }
 export default{
  async fetch(request,env){
@@ -226,6 +230,7 @@ export default{
    schema_version:VERSION,updated_at:null,games:[],mode:'INDEPENDENT_SHADOW',
    ai_status:'NOT_CONFIGURED'});
   if(path==='/api/events')return json({events:await read(env.MAX_STATE,KEY_EVENTS)??[]});
+  if(path==='/api/methodology')return new Response(MAX_ANALYST_PROMPT,{headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}});
   return json({error:'NOT_FOUND'},404);
  },
  async scheduled(controller,env){
