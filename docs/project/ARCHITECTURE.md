@@ -175,3 +175,9 @@ index.html + src/ui/*.js (GitHub Pages front)
 ## Audit MBP-A.1
 Voir `docs/monitoring/ROUTES_AUDIT.md` · routes + auth + provider + cache par ligne.
 Voir `docs/monitoring/KNOWN_ISSUES.md` section "Écarts MBP-A.1" · incohérences critiques.
+
+## ManiBetProMax shadow · prototype indépendant
+- Voir docs/decisions/DECISION-007-MANIBETPROMAX-SHADOW.md et max/README.md
+- Nouveau Worker manibetpromax-shadow · propre KV MANIBETPROMAX_SHADOW · lecture seule endpoints ManiBetPro /nba/matches et /nba/injuries/espn
+- Trois dates UTC adjacentes · cron 15 min · UI responsive servie par Worker Max
+- AI API opt-in · non décisionnelle · aucun lien de mutation KV/D1 historique · aucun changement moteur principal
