@@ -1,50 +1,42 @@
-# ManiBetProMax · shadow 0.1
+# ManiBetProMax · NBA independent, zéro abonnement fournisseur
 
-## État
-- Nouveau Worker de pré-production indépendant : manibetpromax-shadow.
-- Backend : max/worker.mjs · interface responsive : max/dashboard.html.
-- Stockage autonome KV MANIBETPROMAX_SHADOW (EU), sans écriture vers PAPER_TRADING ni D1 historique.
-- Données lues uniquement sur le Worker historique : /nba/matches pour trois dates UTC et /nba/injuries/espn.
-- Collecte via Cron Cloudflare toutes les 15 minutes ; aucun accès supplémentaire à un fournisseur payant.
-- Changements de statut et de blessures : événements datés, anti-doublons et snapshots sur 30 jours.
-- Si la source tombe : dernier état conservé, erreur affichée, aucune recommandation fabriquée.
-- IA OpenAI désactivée par défaut : MAX_AI_ENABLED=1, OPENAI_API_KEY et MAX_OPENAI_MODEL obligatoires.
-- Limites IA quand activée : MAX_AI_CALLS_PER_CYCLE (défaut 1) et MAX_AI_DAILY_LIMIT (défaut 6), sans décision ni probabilités arbitraires.
-- Aucun pari réel, aucun changement du moteur/calibration/logs de ManiBetPro.
+## Architecture
+- Worker Cloudflare manibetpromax-shadow autonome, KV EU MANIBETPROMAX_SHADOW séparé.
+- Collecte directe ESPN scoreboard/injuries ; aucun service binding ni API du projet ManiBetPro historique.
+- Moteur indépendant max/engine.mjs : historique 5/10/20, repos, domicile/extérieur, Elo exploratoire non calibré.
+- Référentiel intégral des 16 domaines dans max/analyst-prompt.md.
+- MacFly ChatGPT : enquête publique et gratuite horaire, puis écriture de rapports sourcés max:research:<match_id> dans le KV Max.
+- Le Cron Cloudflare 15 min lit les rapports MacFly, valide sources HTTPS, dates, cohérence des IDs et pre-tip puis les expose dans la nouvelle interface.
+- AUCUN appel OpenAI API / Anthropic / RapidAPI payant / TheOddsAPI payant par Max ; aucune souscription supplémentaire commandée.
 
-## Tests et déploiement
-- node max/tests/test-core.mjs
-- node max/build.mjs
-- npx wrangler deploy --config max/wrangler.jsonc
-- Routes : GET / ; GET /api/slate ; GET /api/events ; GET /api/health.
-- Monitoring : heartbeat, dernier succès, statut sources, anomalies.
-- Rollback : désactiver seulement le cron Max, puis revenir à la version Worker Max précédente ; production ManiBetPro reste inchangée.
+## Hiérarchie des données
+- 1 : rapport blessures NBA et annonces officielles des franchises.
+- 2 : NBA.com/stats en consultation publique ; pas de contournement des restrictions de téléchargement.
+- 3 : ESPN public (données structurées non contractuelles).
+- 4 : PBP Stats / GameFlowPBP accessibles gratuitement sous réserve de leurs conditions de réutilisation.
+- 5 : médias sérieux corroborés par sources officielles ; hypothèses IA séparées des faits.
+- Métriques propriétaires EPM/DPM/tracking sous licence : non disponibles sans accès autorisé.
 
-## Limites
-- Max n'est pas encore un modèle de probabilité validé. Observation IA != pronostic.
-- Le rapport ESPN peut être incomplet ; les blessures inconnues ne deviennent jamais zéro blessé confirmé.
-- Pas de couverture complète des lineups officiels, tracking, minutes prévues, arbitres, matchups et tous les marchés.
-- Pas de données sous licence sans approbation. Pas de double facturation providers via Max.
-- Cloudflare KV n'est pas transactionnel ni archivage de référence définitif ; historique D1 dédié ultérieurement.
-- OpenAI API est un service distinct de ChatGPT/MacFly ; clé, quota et budget doivent être configurés séparément.
-- Le moteur ManiBetPro demeure le benchmark et continue ses activités sans modification.
+## Méthode
+- Collecte toutes les 15 minutes par Cloudflare. Analyse journalistique MacFly une fois par heure via Automations ChatGPT existantes.
+- Sections 1 à 16, sources exactes, heures, données manquantes, statut VERIFIED/PARTIAL/UNAVAILABLE/CONFLICT.
+- Aucune prédiction rétrospective ; chiffres projetés uniquement depuis un vrai moteur calculé et validé.
+- Elo exploratoire : calibrated=false, drives_bet=false ; pas de conseil de pari.
+- Réponses JSON des rapports MacFly validées avec validateResearch ; sources HTTPS et match_id obligatoires.
+- Interdiction de promettre toutes les statistiques indisponibles ou payantes.
 
-## Phases ultérieures en PR séparées
-1. Preuve de collecte réelle 48h et audit du coût.
-2. Historique de version D1 append-only.
-3. Données lineups/joueurs/blessures/statistiques avancées sourcées, avec gestion de l'incertitude.
-4. GPT analyste via API configurable, déclenchement aux changements significatifs ; tests anti-hallucination.
-5. Modèle probabiliste Max, backtest chronologique, comparaison Brier, Log Loss, ROI et CLV.
-6. Migration progressive de l'interface principale seulement après validation du produit.
+## Routes & tests
+- GET /, /api/slate, /api/events, /api/health et /api/methodology.
+- node max/tests/test-core.mjs ; node max/build.mjs.
+- npx wrangler deploy --config max/wrangler.jsonc ; IMPORTANT : ne jamais déployer sur le Worker manibetpro.
+- Vérifier les sources effectives du Cron, absence de LEGACY_SERVICE, mode INDEPENDENT_SHADOW.
+- Aucune source ou abonnement payant activé. Cloudflare et ChatGPT restent soumis aux limites du compte existant.
+- Rollback : désactiver seulement le Cron/Worker Max. Historique ManiBetPro intact.
 
-## Fichiers de mémoire
-- ADR : docs/decisions/DECISION-007-MANIBETPROMAX-SHADOW.md.
-- SESSION.md / ARCHITECTURE.md / ROUTES_AUDIT.md mis à jour sur la branche de fonctionnalité uniquement.
-- Aucun secret dans GitHub ; aucune source de prédiction post-tip présentée comme pre-tip.
+## Lacunes explicites
+- Les 16 sections sont exigées par le prompt, mais toutes ne peuvent pas être calculées à partir de sources publiques.
+- Aucune simulation Monte-Carlo vérifiée, aucune calibration EV/CLV et aucune validation hors échantillon encore achevée.
+- Historique KV temporaire, D1 indépendante future pour audit append-only.
 
-## Raccordement et précision des données (2026-11-02)
-- `LEGACY_SERVICE` : liaison interne Cloudflare vers Worker `manibetpro` ; évite appels Worker-to-Worker via workers.dev.
-- Rapport ESPN HTTP 200 avec `available=false` traité comme panne de données, jamais comme absence de blessé.
-- Stats ESPN scoreboard : `net_rating` et `pace` non disponibles actuellement ; couverture `INCONCLUSIVE`, même si quelques scores d'équipe sont présents.
-- Limiter les écritures : une carte match est enregistrée seulement si créée/modifiée ; source blessures max toutes 30 min si inchangée ; journal événements seulement en cas de changement ; état dernier succès actualisé à chaque run.
-- Tests simulés : 37 assertions sans échec ; preuve de collecte réelle Cloudflare encore à établir.
+## MEMORY FILES UPDATED
+- max/README.md, docs/decisions/DECISION-007-MANIBETPROMAX-SHADOW.md, SESSION.md et docs/project/ARCHITECTURE.md sur branche feature uniquement.
