@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {slateDates,detectChange,collect,validateResearch} from '../worker.mjs';
+import {slateDates,detectChange,collect,validateResearch,changesForGame} from '../worker.mjs';
 import {parseESPNScoreboards,parseESPNInjuries,injuriesForTeam,verifiedFinalGames,teamProfile,estimateElo,analyzeNBA} from '../engine.mjs';
 let n=0;const eq=(a,b,m)=>{assert.deepEqual(a,b,m);n++};
 const ok=(x,m)=>{assert.ok(x,m);n++};
@@ -128,4 +128,14 @@ eq(matched.research.coverage_sections,16,'recherche présente dans le dashboard'
 eq(matched.ai_review.model,'MacFly · ChatGPT','source MacFly explicite');
 ok(JSON.parse(kv.state.get('max:events:latest')).some(e=>e.changes.includes('RECHERCHE_MACFLY')),'nouvelle recherche historisée');
 ok(!calls.some(u=>u.includes('api.openai.com')||u.includes('rapidapi.com')||u.includes('the-odds-api.com')),'aucune API payante appelée');
+// Anciens snapshots 0.1 : ne déclenchent jamais de fausses alertes 0.2.
+const simulatedLegacy={id:contest.id,status:'STATUS_SCHEDULED',injuries:{home:[],away:[]}};
+const simulatedIndependent={id:contest.id,status:'STATUS_SCHEDULED',injuries:{home:[],away:[]},
+ independent_analysis:{schema_version:'max-analysis-v1'},research_fingerprint:null};
+eq(changesForGame(simulatedLegacy,simulatedIndependent),[],'migration schéma sans faux changement');
+eq(changesForGame({...simulatedIndependent},simulatedIndependent),[],'inchangé sans rapport');
+eq(changesForGame({...simulatedIndependent,research_fingerprint:null},
+ {...simulatedIndependent,research_fingerprint:'2026-11-02T21:15:00Z'}),['RECHERCHE_MACFLY'],'première recherche réelle détectée');
+eq(changesForGame({...simulatedIndependent,research_fingerprint:'2026-11-02T20:00:00Z'},
+ {...simulatedIndependent,research_fingerprint:null}),['RECHERCHE_MACFLY'],'rapport retiré détecté');
 console.log('ManiBetProMax independent:',n,'assertions OK');
