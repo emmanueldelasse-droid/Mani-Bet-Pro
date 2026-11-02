@@ -183,3 +183,11 @@ Fallback 404 · `worker.js:434` · puis `env.ASSETS.fetch` si binding présent.
 - `OPTIONS` route comportement si origin = "*"
 - TTL `tennis_csv_stats_v12_*` `tennis_odds_cache_v2_*` `mlb_team_recent_*` non trouvés par grep direct
 - CORS null origin · vérifier uniquement lors d'un audit sécurité dédié si comportement navigateur évolue
+
+## ManiBetProMax · Worker shadow séparé (ne fait pas partie des 54 routes historiques)
+- GET / · interface Max · public · lecture seule
+- GET /api/slate · snapshots rencontres · public · MAX_STATE indépendant
+- GET /api/events · journal changements blessures/statut · public · MAX_STATE indépendant
+- GET /api/health · sources, dernier cron, erreurs · public · MAX_STATE indépendant
+- scheduled */15 * * * * · collecte ESPN via Worker historique · pas de mutation ManiBetPro
+- Source, contrat, tests, rollback : max/README.md · ADR DECISION-007
