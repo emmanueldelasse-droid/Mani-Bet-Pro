@@ -88,7 +88,7 @@ export function teamInjuries(report,team) {
   return rows.map(entry=>({
     player:saneText(entry.player??entry.name??entry.athlete?.displayName,90),
     status:saneText(entry.status??entry.designation??entry.availability,40),
-    detail:saneText(entry.detail??entry.description??entry.reason,140)
+    detail:saneText(entry.detail??entry.reason??entry.description,140)
   })).filter(x=>x.player).sort((a,b)=>a.player.localeCompare(b.player));
 }
 function injurySignature(arr) {
@@ -187,8 +187,8 @@ export async function collect(env,fetcher=fetch,now=new Date()) {
   const injuriesResult=requests[3].status==='fulfilled'?requests[3].value:null;
   const sources={
     matches:{state:matchResults.length?'OK':'ERROR',success:matchResults.length,attempted:dates.length},
-    injuries:{state:injuriesResult?.by_team?'OK':'ERROR',source:'ManiBetPro / ESPN',
-      checked_at:injuriesResult?.by_team?nowISO:null}
+    injuries:{state:injuriesResult?.available===true&&injuriesResult?.by_team?'OK':'ERROR',source:'ManiBetPro / ESPN',
+      checked_at:injuriesResult?.available===true&&injuriesResult?.by_team?nowISO:null}
   };
   const errors=requests.map((x,i)=>x.status==='rejected'?'SOURCE_'+i+':'+String(x.reason?.message??'ERROR').slice(0,80):null).filter(Boolean);
   const health={version:VERSION,last_attempt:nowISO,sources,errors,last_success:null,game_count:0};
@@ -201,7 +201,7 @@ export async function collect(env,fetcher=fetch,now=new Date()) {
   }
   let injuryReport=injuriesResult;
   let injuryAgeMinutes=0;
-  if(!injuriesResult?.by_team){
+  if(injuriesResult?.available!==true||!injuriesResult?.by_team){
     const oldReport=await readJSON(env.MAX_STATE,'max:injuries:last');
     injuryAgeMinutes=oldReport?.captured_at?Math.floor((nowMs-new Date(oldReport.captured_at).getTime())/60000):null;
     if(injuryAgeMinutes!==null&&injuryAgeMinutes>=0&&injuryAgeMinutes<=120)injuryReport=oldReport.payload;
@@ -213,7 +213,7 @@ export async function collect(env,fetcher=fetch,now=new Date()) {
       await putJSON(env.MAX_STATE,'max:injuries:last',{captured_at:nowISO,payload:injuriesResult},86400);
     }
   }
-  const injuriesFresh=Boolean(injuryReport?.by_team&&injuryAgeMinutes!==null&&injuryAgeMinutes<=120);
+  const injuriesFresh=Boolean(injuryReport?.available===true&&injuryReport?.by_team&&injuryAgeMinutes!==null&&injuryAgeMinutes<=120);
   const raw=normalizeGames(matchResults);
   const previousEvents=await readJSON(env.MAX_STATE,KEY_EVENTS);
   const events=Array.isArray(previousEvents)?previousEvents.slice(0,50):[];
@@ -229,7 +229,7 @@ export async function collect(env,fetcher=fetch,now=new Date()) {
     const game={...item,
       injuries:{home:injuriesFresh?teamInjuries(injuryReport,item.home):null,
         away:injuriesFresh?teamInjuries(injuryReport,item.away):null,
-        source:'ManiBetPro / ESPN',verified_at:injuriesResult?.by_team?nowISO:null,
+        source:'ManiBetPro / ESPN',verified_at:injuriesResult?.available===true&&injuriesResult?.by_team?nowISO:null,
         cached_age_minutes:injuryAgeMinutes},
       analysis:null,analyzed_at:nowISO,source_coverage:null,
       historical_model_reference:null};
