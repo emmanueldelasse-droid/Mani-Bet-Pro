@@ -83,7 +83,9 @@ export function canReuseForecast(prior,signature,game,nowISO){
 }
 export function agendaFromGames(games,nowISO){
  const plans=(games??[]).filter(x=>checkpointPhase(x,nowISO)!==null)
-  .map(x=>({...researchPriority(x,x.research,nowISO,x.source_changes??[]),
+  // Le Worker peut avoir validé un rapport plus ancien que les 12 h
+  // requises pour l'affichage courant : réutiliser son plan de phase conservé.
+  .map(x=>({...(x.research_priority??researchPriority(x,x.research,nowISO,x.source_changes??[])),
    match:x.away?.name+' @ '+x.home?.name,start:x.start}));
  plans.sort((a,b)=>(a.due?0:1)-(b.due?0:1)||
   (a.priority??99)-(b.priority??99)||a.start.localeCompare(b.start));
