@@ -288,29 +288,37 @@ export async function collect(env,fetcher=fetch,now=new Date()){
   Promise.all(activeGames.map(x=>read(kv,'max:research:'+x.id)))
  ]);
  const gameWrites=[];
- const oldMetrics=await read(kv,KEY_METRICS);
+ const [oldMetrics,oldPlayerMetrics]=await Promise.all([read(kv,KEY_METRICS),read(kv,KEY_PLAYER_METRICS)]);
  const metricsRows=Array.isArray(oldMetrics?.records)?oldMetrics.records.slice(-120):[];
- let newEvaluations=0;
+ const playerRows=Array.isArray(oldPlayerMetrics?.records)?oldPlayerMetrics.records.slice(-60):[];
+ let newEvaluations=0,newPlayerEvaluations=0;
  for(let gameIndex=0;gameIndex<activeGames.length;gameIndex++){
   const sourceGame=activeGames[gameIndex],prior=priors[gameIndex];
   const statistical=analyzeNBA(sourceGame,historical,injury.value,nowISO);
   const forecast=forecastGame(sourceGame,historical,boxes,nowISO);
-  const rotations=statistical.pregame?{
-   home:rotationAnalysis(sourceGame.home.id,boxes,statistical.injuries.home,sourceGame.start),
-   away:rotationAnalysis(sourceGame.away.id,boxes,statistical.injuries.away,sourceGame.start)
-  }:null;
-  const advanced={version:ADVANCED_VERSION,forecast,rotations,
-   source_games:historical.length,boxscore_games:boxes.length,calibrated:false};
   const rawResearch=researches[gameIndex];
   const verifiedResearch=validateResearch(rawResearch,sourceGame,nowISO);
   if(verifiedResearch)researchCount++;
+  const official=verifiedResearch?.verified_injuries??[];
+  const perTeam=id=>official.filter(x=>x.team_id===String(id)).map(x=>({player:x.player,status:x.status}));
+  const rotations=statistical.pregame?{
+   home:rotationAnalysis(sourceGame.home.id,boxes,perTeam(sourceGame.home.id),sourceGame.start),
+   away:rotationAnalysis(sourceGame.away.id,boxes,perTeam(sourceGame.away.id),sourceGame.start)
+  }:null;
+  const playerPoints=projectPlayerPoints(sourceGame,boxes,statistical.injuries,
+   official,forecast,nowISO);
+  const advanced={version:ADVANCED_VERSION,player_points_version:POINTS_VERSION,
+   forecast,player_points:playerPoints,rotations,
+   official_injuries_count:official.length,
+   source_games:historical.length,boxscore_games:boxes.length,calibrated:false};
   const g={...sourceGame,checked_at:nowISO,
    injuries:{...statistical.injuries,source:'ESPN direct',
     source_status:injury.state,cache_age_minutes:injury.age_min},
    independent_analysis:{...statistical,advanced},
-   quantitative_version:ADVANCED_VERSION,
+   quantitative_version:POINTS_VERSION,
    coverage:{status:statistical.status,missing:statistical.missing,
-    forecast_status:forecast.status,boxes_available:boxes.length},
+    forecast_status:forecast.status,player_points_status:playerPoints.status,
+    boxes_available:boxes.length,official_injuries_count:official.length},
    sources:{matches:'ESPN direct',injuries:'ESPN direct',
      stats:'ESPN scoreboard 45 days + verified ESPN player boxes',research:'MacFly / sources publiques tracées'},
    research:verifiedResearch,
@@ -334,6 +342,15 @@ export async function collect(env,fetcher=fetch,now=new Date()){
      context_status:statistical.status,injuries:statistical.injuries,
      analysis_schema:statistical.schema_version,drives_bet:false},86400*120);
    }
+   // Prévisions joueurs figées, sans écraser les anciens relevés existants.
+   for(const checkpoint of ['PLAYER_V1',...(cp?['PLAYER_'+cp]:[])]){
+    const key='max:pre:'+g.id+':'+checkpoint;
+    if(!(await read(kv,key)))await put(kv,key,{
+     at:nowISO,checkpoint,game_id:g.id,forecast:{...forecast,engine_version:ADVANCED_VERSION},
+     player_points:playerPoints,context_status:statistical.status,
+     official_injuries:official,analysis_schema:'max-player-points-v1',drives_bet:false
+    },86400*120);
+   }
   }
   if(String(g.status).includes('FINAL')&&Number.isFinite(g.home.score)&&Number.isFinite(g.away.score)){
    const existing=await read(kv,'max:eval:'+g.id);
@@ -349,7 +366,21 @@ export async function collect(env,fetcher=fetch,now=new Date()){
     }
    }
   }
-  if(!prior||!prior.independent_analysis||changes.length||prior.quantitative_version!==ADVANCED_VERSION)
+  if(String(g.status).includes('FINAL')&&Number.isFinite(g.home.score)&&Number.isFinite(g.away.score)){
+   const exists=await read(kv,'max:eval:players:'+g.id);
+   const finalBox=boxes.find(b=>b.game_id===g.id);
+   if(!exists&&finalBox){
+    for(const checkpoint of ['PLAYER_H1','PLAYER_H3','PLAYER_H6','PLAYER_H24','PLAYER_V1']){
+     const snap=await read(kv,'max:pre:'+g.id+':'+checkpoint);
+     const ev=evaluatePlayerPoints(g,finalBox,snap);
+     if(ev){
+      await put(kv,'max:eval:players:'+g.id,ev,86400*180);
+      playerRows.push(ev);newPlayerEvaluations++;break;
+     }
+    }
+   }
+  }
+  if(!prior||!prior.independent_analysis||changes.length||prior.quantitative_version!==POINTS_VERSION)
    gameWrites.push(put(kv,'max:game:'+g.id,g));
   games.push(g);
  }
@@ -359,11 +390,23 @@ export async function collect(env,fetcher=fetch,now=new Date()){
    .sort((a,b)=>a.tip.localeCompare(b.tip)).slice(-120);
   await put(kv,KEY_METRICS,{...summarizeEvaluations(distinct),updated_at:nowISO},86400*180);
  }
- const metrics=await read(kv,KEY_METRICS)??summarizeEvaluations([]);
+ if(newPlayerEvaluations){
+  const unique=[...new Map(playerRows.map(x=>[x.game_id,x])).values()]
+   .sort((a,b)=>a.tip.localeCompare(b.tip)).slice(-60);
+  await put(kv,KEY_PLAYER_METRICS,{
+   ...summarizePlayerPointsEvaluations(unique),updated_at:nowISO},86400*180);
+ }
+ const [metrics,playerMetrics]=await Promise.all([
+  read(kv,KEY_METRICS),read(kv,KEY_PLAYER_METRICS)
+ ]);
  const slate={schema_version:VERSION,engine_version:ENGINE_VERSION,
-  advanced_version:ADVANCED_VERSION,
-  metrics_summary:{games_evaluated:metrics.games_evaluated,
-   brier:metrics.brier,log_loss:metrics.log_loss,calibrated:false},
+  advanced_version:ADVANCED_VERSION,points_version:POINTS_VERSION,
+  metrics_summary:{games_evaluated:metrics?.games_evaluated??0,
+   brier:metrics?.brier??null,log_loss:metrics?.log_loss??null,
+   player_games:playerMetrics?.games_evaluated??0,
+   player_predictions:playerMetrics?.players_evaluated??0,
+   player_mae:playerMetrics?.mae??null,player_rmse:playerMetrics?.rmse??null,
+   calibrated:false},
   updated_at:nowISO,mode:'INDEPENDENT_SHADOW',
   games,sources,errors:errors.slice(0,20),
   ai_status:'MACFLY_CHATGPT_HOURLY',research_count:researchCount,boxscore_count:boxes.length,archive_progress:archive,external_paid_api:false,
@@ -372,7 +415,7 @@ export async function collect(env,fetcher=fetch,now=new Date()){
  if(changed)await put(kv,KEY_EVENTS,events.slice(0,50),86400*30);
  health.last_success=nowISO;health.game_count=games.length;
  await put(kv,KEY_HEALTH,health,86400*7);
- return {...health,updated:true,events_new:changed,research_reports:researchCount,boxes_cached:boxes.length,boxes_new:newBoxes,new_evaluations:newEvaluations,external_paid_api:false,history_fetched:fetched.filter(x=>x.status==='fulfilled').length};
+ return {...health,updated:true,events_new:changed,research_reports:researchCount,boxes_cached:boxes.length,boxes_new:newBoxes,new_evaluations:newEvaluations,new_player_evaluations:newPlayerEvaluations,external_paid_api:false,history_fetched:fetched.filter(x=>x.status==='fulfilled').length};
 }
 export default{
  async fetch(request,env){
@@ -389,23 +432,26 @@ export default{
    const slate=await read(env.MAX_STATE,KEY_SLATE);
    const game=slate?.games?.find(g=>String(g.id)===id);
    if(!game)return json({error:'GAME_NOT_FOUND'},404);
-   const checkpoints=['EARLIEST','H24','H6','H3','H1'];
-   const [snapshots,evaluation]=await Promise.all([
+   const checkpoints=['EARLIEST','H24','H6','H3','H1','PLAYER_V1','PLAYER_H24','PLAYER_H6','PLAYER_H3','PLAYER_H1'];
+   const [snapshots,evaluation,playerEvaluation]=await Promise.all([
     Promise.all(checkpoints.map(cp=>read(env.MAX_STATE,'max:pre:'+id+':'+cp))),
-    read(env.MAX_STATE,'max:eval:'+id)
+    read(env.MAX_STATE,'max:eval:'+id),
+    read(env.MAX_STATE,'max:eval:players:'+id)
    ]);
    const timeline=snapshots.filter(p=>p&&p.game_id===id&&
     Number.isFinite(Date.parse(p.at))&&Date.parse(p.at)<Date.parse(game.start))
     .sort((a,b)=>a.at.localeCompare(b.at))
     .map(p=>({checkpoint:p.checkpoint,at:p.at,model:p.model,
-     forecast:p.forecast??null,context_status:p.context_status??'UNKNOWN',
+     forecast:p.forecast??null,player_points:p.player_points??null,
+     context_status:p.context_status??'UNKNOWN',
      injury_counts:{
       home:Array.isArray(p.injuries?.home)?p.injuries.home.length:null,
       away:Array.isArray(p.injuries?.away)?p.injuries.away.length:null
      }}));
    return json({match_id:id,start:game.start,teams:{home:game.home.name,away:game.away.name},
     timeline,evaluation:evaluation?.pregame_at&&Date.parse(evaluation.pregame_at)<Date.parse(game.start)?
-     evaluation:null,source:'Max immutable pre-tip snapshots',
+     evaluation:null,player_evaluation:playerEvaluation?.pregame_at&&Date.parse(playerEvaluation.pregame_at)<Date.parse(game.start)?playerEvaluation:null,
+     source:'Max immutable pre-tip snapshots',
     warning:'Snapshots réellement enregistrés avant coup d’envoi uniquement ; pas de reconstruction rétroactive.'});
   }
   if(path==='/api/slate')return json(await read(env.MAX_STATE,KEY_SLATE)??{
@@ -413,6 +459,7 @@ export default{
    ai_status:'NOT_CONFIGURED'});
   if(path==='/api/events')return json({events:await read(env.MAX_STATE,KEY_EVENTS)??[]});
   if(path==='/api/metrics')return json(await read(env.MAX_STATE,KEY_METRICS)??summarizeEvaluations([]));
+  if(path==='/api/player-metrics')return json(await read(env.MAX_STATE,KEY_PLAYER_METRICS)??summarizePlayerPointsEvaluations([]));
   if(path==='/api/archive')return json({progress:await read(env.MAX_STATE,KEY_ARCHIVE)??{
    season_index:0,saved_days:0,saved_games:0,next_date:ARCHIVE_SEASONS[0].start},
    seasons:ARCHIVE_SEASONS,target_days:archiveTarget(),live_predictions_include_archive:false});
