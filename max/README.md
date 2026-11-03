@@ -18,6 +18,15 @@
 - 5 : médias sérieux corroborés par sources officielles ; hypothèses IA séparées des faits.
 - Métriques propriétaires EPM/DPM/tracking sous licence : non disponibles sans accès autorisé.
 
+
+## Projections de points équipe et joueur
+- Projection d'équipe et TOTAL du match via max/advanced.mjs (50 000 tirages réellement exécutés, intervalles 80 %, hypothèses non calibrées). Aucune statistique inventée si l'échantillon de matchs est insuffisant.
+- max/points.mjs : estimations des points de chaque joueur **conditionnelles à sa participation** calculées avec les 3/5/10 dernières apparitions ESPN vérifiées, les minutes, les points par minute, la projection offensive d'équipe et un ajustement plafonné ; intervalle de dispersion non calibré et éventuels scénarios présent / limité / absent.
+- Un texte ESPN indiquant « Out lundi » ne suffit pas pour conclure qu'un joueur est absent mercredi. Sans contrôle NBA officiel spécifique au match, le statut reste NON CONFIRMÉ. MacFly ajoute facultativement `verified_injuries` avec match_id, event_start, team_id, player, status, source_url et checked_at ; le Worker ne les utilise qu'après vérification stricte des correspondances et du domaine officiel.
+- Ordre de priorité des nouveaux boxscores : franchises jouant dans 48 h, couverture joueurs insuffisante, fraîcheur. Deux nouvelles feuilles ESPN maximum par collecte pour préserver les limites gratuites KV.
+- Les prévisions des joueurs sont figées avant le tip (`max:pre:<game_id>:PLAYER_V1/PLAYER_H24/PLAYER_H6/PLAYER_H3/PLAYER_H1`) puis confrontées aux véritables points marqués en fin de match (`max:eval:players:<game_id>`), en calculant MAE/RMSE uniquement sur les joueurs ayant effectivement joué. Absences/non-participations enregistrées séparément.
+- Interface à trois niveaux : liste compacte (équipes / score prévisionnel / TOTAL), fiche match (résumé, projections de TOUS les joueurs, analyse), puis rapport expert MacFly 16 sections et historique. Les projections individuelles ne s'additionnent pas automatiquement au total d'équipe.
+
 ## Méthode
 - Collecte toutes les 15 minutes par Cloudflare. Analyse journalistique MacFly une fois par heure via Automations ChatGPT existantes.
 - Sections 1 à 16, sources exactes, heures, données manquantes, statut VERIFIED/PARTIAL/UNAVAILABLE/CONFLICT. Les domaines non observés restent indisponibles.
@@ -30,7 +39,7 @@
 
 ## Routes & tests
 - GET `/`, `/api/slate`, `/api/events`, `/api/health`, `/api/metrics`, `/api/archive`, `/api/game?id=<id ESPN>` (timeline figée pré-match et métrique après match) et `/api/methodology`.
-- `node max/tests/test-core.mjs` ; `node max/tests/test-advanced.mjs` (27 assertions) ; `node max/tests/test-archive.mjs` (17 assertions) ; `node max/tests/test-history-route.mjs` (11 assertions) ; `node max/tests/test-no-paid-sources.mjs` ; `node max/build.mjs`.
+- `node max/tests/test-core.mjs` ; `node max/tests/test-advanced.mjs` (27 assertions) ; `node max/tests/test-archive.mjs` (17 assertions) ; `node max/tests/test-points.mjs` (21 assertions) ; `node max/tests/test-history-route.mjs` (11 assertions) ; `node max/tests/test-no-paid-sources.mjs` ; `node max/build.mjs`.
 - npx wrangler deploy --config max/wrangler.jsonc ; IMPORTANT : ne jamais déployer sur le Worker manibetpro.
 - Vérifier les sources effectives du Cron, absence de LEGACY_SERVICE, mode INDEPENDENT_SHADOW.
 - Aucune source ou abonnement payant activé. Cloudflare et ChatGPT restent soumis aux limites du compte existant.
@@ -39,7 +48,7 @@
 ## Lacunes explicites
 - Les 16 sections sont exigées par le prompt, mais toutes ne peuvent pas être calculées à partir de sources publiques.
 - Les simulations 50 000 tirages sont implémentées et exercées par les tests, mais leur calibration, leur performance hors échantillon et la fiabilité des scores restent À DÉMONTRER. Les métadonnées Brier/Log Loss ne commenceront qu'après le résultat de matchs futurs ayant réellement un snapshot pré-tip.
-- Collecte structurée ESPN final boxscore progressive; ne fournit pas encore EPM/DPM propriétaires, véritable tracking spatial, toutes les possessions ni une estimation causale d'absence.
+- Collecte structurée ESPN boxscore progressive; les prévisions points joueurs restent limitées tant que moins de 3 apparitions vérifiées existent. Le moteur ne fournit pas encore EPM/DPM propriétaires, véritable tracking spatial, toutes les possessions ni une estimation causale d'absence.
 - Pas de diffusion de cotes artificielles, EV/CLV/ROI : champs volontairement null. La collecte de cotes gratuites n'est pas active.
 - Historique initial 45 jours complet, archivage progressif de deux saisons précédentes ajouté au Cron mais à laisser se remplir. Pas encore de validation hors échantillon par saison. MacFly conserve une cadence horaire ; ne peut pas garantir une veille manuelle instantanée.
 - Historique KV temporaire, D1 indépendante future pour audit append-only.
