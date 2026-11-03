@@ -3,11 +3,14 @@
  * Aucune dépendance réseau, donnée, secret ou moteur vers ManiBetPro.
  * Sources directes ESPN ; une source non disponible reste INCONCLUSIVE.
  */
-import {ENGINE_VERSION,parseESPNScoreboards,parseESPNInjuries,analyzeNBA} from './engine.mjs';
+import {ENGINE_VERSION,parseESPNScoreboards,parseESPNInjuries,analyzeNBA,verifiedFinalGames} from './engine.mjs';
+import {ADVANCED_VERSION,parseBoxscore,rotationAnalysis,forecastGame,evaluatePregame,summarizeEvaluations} from './advanced.mjs';
 
 const MAX_APP_HTML='';
 const MAX_ANALYST_PROMPT=''; // méthode publique, lue par MacFly depuis GitHub.
-const VERSION='max-independent-0.2.0';
+const VERSION='max-independent-0.3.0';
+const BOXES_PER_CYCLE=2;
+const KEY_METRICS='max:metrics:predictions';
 const ESPN='https://site.api.espn.com/apis/site/v2/sports/basketball/nba';
 const KEY_HEALTH='max:health:last';
 const KEY_SLATE='max:slate:latest';
@@ -175,22 +178,60 @@ export async function collect(env,fetcher=fetch,now=new Date()){
  const combined=new Map();
  for(const x of [...historyRaw,...coreGames])if(validGame(x))combined.set(x.id,x);
  const historical=[...combined.values()];
+ // Enrichissement des statistiques avec deux vrais boxscores par collecte,
+ // contrôles de cohérence et cache indépendant des autres Workers.
+ const candidates=verifiedFinalGames(historical,nowISO)
+  .sort((a,b)=>b.start.localeCompare(a.start)).slice(0,150);
+ const boxes=[],pending=[];
+ for(const x of candidates){
+  const cached=await read(kv,'max:box:'+x.id);
+  if(cached?.schema_version==='max-box-v1'&&cached.game_id===x.id)boxes.push(cached);
+  else if(pending.length<BOXES_PER_CYCLE&&!await read(kv,'max:box:failed:'+x.id))pending.push(x);
+ }
+ let newBoxes=0;
+ for(const x of pending){
+  try{
+   const raw=await sourceJSON(fetcher,'/summary?event='+x.id,12000);
+   const box=parseBoxscore(raw,x);
+   if(!box)throw new Error('BOXSCORE_INVALID_OR_INCOMPLETE');
+   await put(kv,'max:box:'+x.id,box,86400*120);
+   boxes.push(box);newBoxes++;
+  }catch(err){
+   errors.push('BOX:'+x.id+':'+String(err?.message??'FAILED').slice(0,60));
+   await put(kv,'max:box:failed:'+x.id,{at:nowISO,reason:String(err?.message??'FAILED').slice(0,80)},86400);
+  }
+ }
+ sources.player_boxes={state:boxes.length?'PARTIAL':'WARMING',
+  cached:boxes.length,possible:candidates.length,fetched:newBoxes,
+  source:'ESPN game summary',checked_at:nowISO};
  const previousEvents=await read(kv,KEY_EVENTS);
  const events=Array.isArray(previousEvents)?previousEvents.slice(0,50):[];
  const games=[];let changed=0,researchCount=0;
+ const oldMetrics=await read(kv,KEY_METRICS);
+ const metricsRows=Array.isArray(oldMetrics?.records)?oldMetrics.records.slice(-120):[];
+ let newEvaluations=0;
  for(const sourceGame of coreGames.slice(0,40)){
   const prior=await read(kv,'max:game:'+sourceGame.id);
   const statistical=analyzeNBA(sourceGame,historical,injury.value,nowISO);
+  const forecast=forecastGame(sourceGame,historical,boxes,nowISO);
+  const rotations=statistical.pregame?{
+   home:rotationAnalysis(sourceGame.home.id,boxes,statistical.injuries.home,sourceGame.start),
+   away:rotationAnalysis(sourceGame.away.id,boxes,statistical.injuries.away,sourceGame.start)
+  }:null;
+  const advanced={version:ADVANCED_VERSION,forecast,rotations,
+   source_games:historical.length,boxscore_games:boxes.length,calibrated:false};
   const rawResearch=await read(kv,'max:research:'+sourceGame.id);
   const verifiedResearch=validateResearch(rawResearch,sourceGame,nowISO);
   if(verifiedResearch)researchCount++;
   const g={...sourceGame,checked_at:nowISO,
    injuries:{...statistical.injuries,source:'ESPN direct',
     source_status:injury.state,cache_age_minutes:injury.age_min},
-   independent_analysis:statistical,
-   coverage:{status:statistical.status,missing:statistical.missing},
+   independent_analysis:{...statistical,advanced},
+   quantitative_version:ADVANCED_VERSION,
+   coverage:{status:statistical.status,missing:statistical.missing,
+    forecast_status:forecast.status,boxes_available:boxes.length},
    sources:{matches:'ESPN direct',injuries:'ESPN direct',
-     stats:'ESPN direct / rolling 45 days',research:'MacFly / sources publiques tracées'},
+     stats:'ESPN scoreboard 45 days + verified ESPN player boxes',research:'MacFly / sources publiques tracées'},
    research:verifiedResearch,
    research_fingerprint:verifiedResearch?.generated_at??null,
    ai_review:verifiedResearch?{...verifiedResearch,
@@ -203,26 +244,53 @@ export async function collect(env,fetcher=fetch,now=new Date()){
   }
   const isPregame=statistical.pregame;
   const cp=isPregame?currentCheckpoint(g,nowMs):null;
-  if(cp){
-   const key='max:pre:'+g.id+':'+cp;
-   if(!(await read(kv,key)))await put(kv,key,{
-    at:nowISO,checkpoint:cp,game_id:g.id,model:statistical.elo,
-    context_status:statistical.status,injuries:statistical.injuries,
-    analysis_schema:statistical.schema_version,drives_bet:false},86400*90);
+  if(isPregame){
+   for(const checkpoint of ['EARLIEST',...(cp?[cp]:[])]){
+    const key='max:pre:'+g.id+':'+checkpoint;
+    if(!(await read(kv,key)))await put(kv,key,{
+     at:nowISO,checkpoint,game_id:g.id,model:statistical.elo,
+     forecast:{...forecast,engine_version:ADVANCED_VERSION},
+     context_status:statistical.status,injuries:statistical.injuries,
+     analysis_schema:statistical.schema_version,drives_bet:false},86400*120);
+   }
   }
-  if(!prior||!prior.independent_analysis||changes.length)await put(kv,'max:game:'+g.id,g);
+  if(String(g.status).includes('FINAL')&&Number.isFinite(g.home.score)&&Number.isFinite(g.away.score)){
+   const existing=await read(kv,'max:eval:'+g.id);
+   if(!existing){
+    for(const checkpoint of ['H1','H3','H6','H24','EARLIEST']){
+     const snap=await read(kv,'max:pre:'+g.id+':'+checkpoint);
+     const evaluation=evaluatePregame(g,snap);
+     if(evaluation){
+      await put(kv,'max:eval:'+g.id,evaluation,86400*180);
+      metricsRows.push(evaluation);newEvaluations++;
+      break;
+     }
+    }
+   }
+  }
+  if(!prior||!prior.independent_analysis||changes.length||prior.quantitative_version!==ADVANCED_VERSION)
+   await put(kv,'max:game:'+g.id,g);
   games.push(g);
  }
+ if(newEvaluations){
+  const distinct=[...new Map(metricsRows.map(x=>[x.match_id,x])).values()]
+   .sort((a,b)=>a.tip.localeCompare(b.tip)).slice(-120);
+  await put(kv,KEY_METRICS,{...summarizeEvaluations(distinct),updated_at:nowISO},86400*180);
+ }
+ const metrics=await read(kv,KEY_METRICS)??summarizeEvaluations([]);
  const slate={schema_version:VERSION,engine_version:ENGINE_VERSION,
+  advanced_version:ADVANCED_VERSION,
+  metrics_summary:{games_evaluated:metrics.games_evaluated,
+   brier:metrics.brier,log_loss:metrics.log_loss,calibrated:false},
   updated_at:nowISO,mode:'INDEPENDENT_SHADOW',
   games,sources,errors:errors.slice(0,20),
-  ai_status:'MACFLY_CHATGPT_HOURLY',research_count:researchCount,external_paid_api:false,
+  ai_status:'MACFLY_CHATGPT_HOURLY',research_count:researchCount,boxscore_count:boxes.length,external_paid_api:false,
   disclaimer:'Analyse indépendante expérimentale ; aucune preuve de calibration ni recommandation de pari.'};
  await put(kv,KEY_SLATE,slate,86400*3);
  if(changed)await put(kv,KEY_EVENTS,events.slice(0,50),86400*30);
  health.last_success=nowISO;health.game_count=games.length;
  await put(kv,KEY_HEALTH,health,86400*7);
- return {...health,updated:true,events_new:changed,research_reports:researchCount,external_paid_api:false,history_fetched:fetched.filter(x=>x.status==='fulfilled').length};
+ return {...health,updated:true,events_new:changed,research_reports:researchCount,boxes_cached:boxes.length,boxes_new:newBoxes,new_evaluations:newEvaluations,external_paid_api:false,history_fetched:fetched.filter(x=>x.status==='fulfilled').length};
 }
 export default{
  async fetch(request,env){
@@ -237,6 +305,7 @@ export default{
    schema_version:VERSION,updated_at:null,games:[],mode:'INDEPENDENT_SHADOW',
    ai_status:'NOT_CONFIGURED'});
   if(path==='/api/events')return json({events:await read(env.MAX_STATE,KEY_EVENTS)??[]});
+  if(path==='/api/metrics')return json(await read(env.MAX_STATE,KEY_METRICS)??summarizeEvaluations([]));
   if(path==='/api/methodology')return new Response(MAX_ANALYST_PROMPT,{headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}});
   return json({error:'NOT_FOUND'},404);
  },
