@@ -24,13 +24,13 @@
 - Aucune prédiction rétrospective ; chiffres projetés uniquement depuis un vrai moteur calculé et validé.
 - Elo et Monte-Carlo exploratoires : calibrated=false, aucun edge prétendu. Monte-Carlo uniquement si au moins 5 rencontres par équipe et 30 de ligue, régression vers moyenne observée, hypothèses documentées. Le score prévu et les probabilités restent non calibrés.
 - Les rapports blessures sont croisés avec les minutes historiques ; un proxy de remplacement est explicitement NON causal et n'ajuste jamais automatiquement les probabilités.
-- Snapshots immuables pré-tip `max:pre:<game_id>:EARLIEST/H24/H6/H3/H1`. Après un score final ESPN, évaluer uniquement un snapshot antérieur au tip, une fois par rencontre : `max:eval:<id>`. Brier/Log Loss et total des observations dans `max:metrics:predictions`. Pas de backtest fabriqué.
+- Snapshots immuables pré-tip `max:pre:<game_id>:EARLIEST/H24/H6/H3/H1`. Après un score final ESPN, évaluer uniquement un snapshot antérieur au tip, une fois par rencontre : `max:eval:<id>`. Brier/Log Loss et total des observations dans `max:metrics:predictions`. Le dashboard charge à la demande les checkpoints historiques via `/api/game` et rejette strictement les snapshots générés après le coup d'envoi. Pas de backtest fabriqué.
 - Réponses JSON des rapports MacFly validées avec validateResearch ; sources HTTPS et match_id obligatoires.
 - Interdiction de promettre toutes les statistiques indisponibles ou payantes.
 
 ## Routes & tests
-- GET `/`, `/api/slate`, `/api/events`, `/api/health`, `/api/metrics`, `/api/archive` et `/api/methodology`.
-- `node max/tests/test-core.mjs` ; `node max/tests/test-advanced.mjs` (27 assertions) ; `node max/tests/test-archive.mjs` (17 assertions) ; `node max/tests/test-no-paid-sources.mjs` ; `node max/build.mjs`.
+- GET `/`, `/api/slate`, `/api/events`, `/api/health`, `/api/metrics`, `/api/archive`, `/api/game?id=<id ESPN>` (timeline figée pré-match et métrique après match) et `/api/methodology`.
+- `node max/tests/test-core.mjs` ; `node max/tests/test-advanced.mjs` (27 assertions) ; `node max/tests/test-archive.mjs` (17 assertions) ; `node max/tests/test-history-route.mjs` (11 assertions) ; `node max/tests/test-no-paid-sources.mjs` ; `node max/build.mjs`.
 - npx wrangler deploy --config max/wrangler.jsonc ; IMPORTANT : ne jamais déployer sur le Worker manibetpro.
 - Vérifier les sources effectives du Cron, absence de LEGACY_SERVICE, mode INDEPENDENT_SHADOW.
 - Aucune source ou abonnement payant activé. Cloudflare et ChatGPT restent soumis aux limites du compte existant.
