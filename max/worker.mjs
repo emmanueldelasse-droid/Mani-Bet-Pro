@@ -10,7 +10,7 @@ import {SCHEDULER_VERSION,forecastInputSignature,canReuseForecast,researchPriori
 
 const MAX_APP_HTML='';
 const MAX_ANALYST_PROMPT=''; // méthode publique, lue par MacFly depuis GitHub.
-const VERSION='max-independent-0.6.0';
+const VERSION='max-independent-0.6.1';
 const BOXES_PER_CYCLE=2;
 const KEY_METRICS='max:metrics:predictions';
 const KEY_PLAYER_METRICS='max:metrics:player-points';
@@ -385,6 +385,10 @@ export async function collect(env,fetcher=fetch,now=new Date()){
      model:'MacFly · ChatGPT',web_search_enabled:true}:null};
   const changes=changesForGame(prior,g);
   g.source_changes=changes;
+  // Une alerte entrée entre deux passages MacFly reste "à revérifier"
+  // jusqu'à ce qu'un rapport PLUS récent soit réellement écrit.
+  const hadSourceSignal=changes.includes('STATUT_MATCH')||changes.includes('RAPPORT_BLESSURES');
+  g.source_signal_at=hadSourceSignal?nowISO:prior?.source_signal_at??null;
   const rawAgendaRecord=rawResearch?.schema_version==='max-research-v1'&&
    String(rawResearch?.match_id)===String(g.id)&&
    Number.isFinite(Date.parse(rawResearch.generated_at))&&
@@ -392,7 +396,12 @@ export async function collect(env,fetcher=fetch,now=new Date()){
    Date.parse(rawResearch.generated_at)<=nowMs&&
    Array.isArray(rawResearch.sources)&&rawResearch.sources.some(x=>/^https:\/\//.test(x?.url??''))?
     {match_id:g.id,generated_at:rawResearch.generated_at}:verifiedResearch;
-  g.research_priority=researchPriority(g,rawAgendaRecord,nowISO,changes);
+  const sourceSignal=Date.parse(g.source_signal_at??'');
+  const researched=Date.parse(rawAgendaRecord?.generated_at??'');
+  const unresolvedSignal=Number.isFinite(sourceSignal)&&
+   (!Number.isFinite(researched)||sourceSignal>researched);
+  g.research_priority=researchPriority(g,rawAgendaRecord,nowISO,
+   unresolvedSignal?['RAPPORT_BLESSURES']:[]);
   if(changes.length){
    changed++;
    events.unshift({id:g.id,match:g.away.name+' @ '+g.home.name,changes,at:nowISO});
