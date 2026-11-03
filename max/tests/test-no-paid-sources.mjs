@@ -29,6 +29,8 @@ test(!worker.includes('runAI('),'Aucun client de modèle payant appelé');
 test(worker.includes('validateResearch'),'Rapports MacFly sourcés validés');
 test(worker.includes("api/methodology"),'Prompt documenté publiquement');
 test(worker.includes("api/metrics"),'Évaluation prospective exposée');
+test(worker.includes("api/archive"),'Archives en lecture seule exposées');
+test(worker.includes("max:archive:progress"),'Curseur archives isolé Max');
 test(advanced.includes("simulated_runs"),'Monte Carlo réellement calculé');
 test(advanced.includes("evaluatePregame"),'Aucune évaluation avant résultat');
 test(advanced.includes("parseBoxscore"),'Feuilles joueurs indépendantes');
