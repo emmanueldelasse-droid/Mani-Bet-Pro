@@ -108,7 +108,7 @@ function playerCard(x){
  const info=out?'Absent confirmé':uncertain?'Si joue (incertain)':'Si joue';
  return '<article class="player"><div class="playerHead"><div><strong>'+esc(x.name)+'</strong><small>'+esc(info)+'</small></div><div style="text-align:right"><b>'+esc(v)+'</b><small>points '+(out?'attendus':'si joue')+'</small></div></div>'+
  '<div class="playerDetails">Moyenne '+esc(x.historical_points_per_game??'—')+' pts · '+esc(x.projected_minutes_if_active??'—')+' min estimées · '+esc(x.recent_games)+' matchs</div>'+
- '<div class="playerDetails">Intervalle 80 % si joue : '+esc(rng)+' points · projection exacte : '+points+'</div>'+
+ (out?'':('<div class="playerDetails">Intervalle 80 % si joue : '+esc(rng)+' points · projection exacte : '+points+'</div>'))+
  (x.scenarios?'<div class="playerDetails">Scénarios : normal '+esc(x.scenarios.available.points)+' · limité '+esc(x.scenarios.limited.points)+' · absent 0 pts</div>':'')+
  '<div class="playerFoot">'+esc(cond)+'</div></article>';
 }
@@ -123,7 +123,8 @@ function playerGroup(grp,label){
 }
 function renderPlayers(g){
  const p=playerPoints(g);
- if(!p||p.status==='NO_PREMATCH')return '<div class="panel"><div class="scarce">Les projections individuelles ne sont calculées qu’avant le match ; pas de reconstruction après coup d’envoi.</div></div>';
+ if(!p)return '<div class="panel"><div class="scarce">Le module de points des joueurs n’a pas encore terminé sa première collecte pour cette rencontre.</div></div>';
+ if(p.status==='NO_PREMATCH')return '<div class="panel"><div class="scarce">Les nouvelles projections individuelles ne sont calculées qu’avant le match. Les prévisions figées avant le coup d’envoi restent consultables dans le rapport expert.</div></div>';
  return '<div class="panel"><div class="note">Les données ESPN « Out » sont des signaux à revérifier : seule une confirmation officielle reliée à ce match peut établir une absence. Les scénarios restent des estimations.</div></div>'+
  playerGroup(p.away,g.away.name)+playerGroup(p.home,g.home.name)+
  '<div class="panel"><p class="tiny">Méthode : points par minute récents × minutes estimées, ajustement modéré sur la projection de points de l’équipe, intervalle de dispersion empirique. Projections non calibrées ; ne pas additionner les points des joueurs pour obtenir un total d’équipe.</p></div>';
