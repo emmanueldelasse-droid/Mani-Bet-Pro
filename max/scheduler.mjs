@@ -82,7 +82,7 @@ export function canReuseForecast(prior,signature,game,nowISO){
   String(game.status).startsWith('STATUS_SCHEDULED'));
 }
 export function agendaFromGames(games,nowISO){
- const plans=(games??[]).filter(x=>Date.parse(x.start)>Date.parse(nowISO))
+ const plans=(games??[]).filter(x=>checkpointPhase(x,nowISO)!==null)
   .map(x=>({...researchPriority(x,x.research,nowISO,x.source_changes??[]),
    match:x.away?.name+' @ '+x.home?.name,start:x.start}));
  plans.sort((a,b)=>(a.due?0:1)-(b.due?0:1)||
