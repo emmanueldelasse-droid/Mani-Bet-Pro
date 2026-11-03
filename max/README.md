@@ -3,7 +3,7 @@
 ## Architecture
 - Worker Cloudflare manibetpromax-shadow autonome, KV EU MANIBETPROMAX_SHADOW séparé.
 - Collecte ESPN scoreboard/injuries + ESPN `summary?event=id` (feuilles finales vérifiées, 2 nouvelles maximum par Cron) ; aucun service binding ni API du projet ManiBetPro historique.
-- Archivage asynchrone par Cron des saisons 2024-25 (22 octobre 2024–30 juin 2025) et 2025-26 (21 octobre 2025–30 juin 2026) : **505 journées calendaires**, jusqu'à deux nouvelles journées par cycle, curseur permanent `max:archive:progress`, snapshots `max:archive:scoreboard:YYYYMMDD`. Aucune date archivée n'est injectée dans le modèle live sans évaluation chronologique adéquate ; les saisons archivées ne servent pas encore à recalibrer les probabilités.
+- Archivage asynchrone par Cron des saisons 2024-25 (22 octobre 2024–30 juin 2025) et 2025-26 (21 octobre 2025–30 juin 2026) : **505 journées calendaires**, jusqu'à deux nouvelles journées toutes les 30 minutes pour préserver le quota KV gratuit, curseur permanent `max:archive:progress`, snapshots `max:archive:scoreboard:YYYYMMDD`. Aucune date archivée n'est injectée dans le modèle live sans évaluation chronologique adéquate ; les saisons archivées ne servent pas encore à recalibrer les probabilités.
 - Deux moteurs indépendants : max/engine.mjs (formes 5/10/20, repos, Elo exploratoire) et max/advanced.mjs (minutes/statistiques des joueurs ESPN, quatre facteurs, possessions/ratings, simulations de 50 000 tirages effectifs, évaluation post-match Brier/Log Loss).
 - Référentiel intégral des 16 domaines dans max/analyst-prompt.md.
 - MacFly ChatGPT : enquête publique et gratuite horaire, puis écriture de rapports sourcés max:research:<match_id> dans le KV Max.
@@ -23,7 +23,7 @@
 - Projection d'équipe et TOTAL du match via max/advanced.mjs (50 000 tirages réellement exécutés, intervalles 80 %, hypothèses non calibrées). Aucune statistique inventée si l'échantillon de matchs est insuffisant.
 - max/points.mjs : estimations des points de chaque joueur **conditionnelles à sa participation** calculées avec les 3/5/10 dernières apparitions ESPN vérifiées, les minutes, les points par minute, la projection offensive d'équipe et un ajustement plafonné ; intervalle de dispersion non calibré et éventuels scénarios présent / limité / absent.
 - Un texte ESPN indiquant « Out lundi » ne suffit pas pour conclure qu'un joueur est absent mercredi. Sans contrôle NBA officiel spécifique au match, le statut reste NON CONFIRMÉ. MacFly ajoute facultativement `verified_injuries` avec match_id, event_start, team_id, player, status, source_url et checked_at ; le Worker ne les utilise qu'après vérification stricte des correspondances et du domaine officiel.
-- Ordre de priorité des nouveaux boxscores : franchises jouant dans 48 h, couverture joueurs insuffisante, fraîcheur. Deux nouvelles feuilles ESPN maximum par collecte pour préserver les limites gratuites KV.
+- Ordre de priorité des nouveaux boxscores : franchises jouant dans 48 h, couverture joueurs insuffisante, fraîcheur. Deux nouvelles feuilles ESPN maximum par collecte de 15 minutes pour préserver les limites gratuites KV. Archives historiques : deux journées toutes les 30 minutes, moins prioritaires que les matchs imminents.
 - Les prévisions des joueurs sont figées avant le tip (`max:pre:<game_id>:PLAYER_V1/PLAYER_H24/PLAYER_H6/PLAYER_H3/PLAYER_H1`) puis confrontées aux véritables points marqués en fin de match (`max:eval:players:<game_id>`), en calculant MAE/RMSE uniquement sur les joueurs ayant effectivement joué. Absences/non-participations enregistrées séparément.
 - Interface à trois niveaux : liste compacte (équipes / score prévisionnel / TOTAL), fiche match (résumé, projections de TOUS les joueurs, analyse), puis rapport expert MacFly 16 sections et historique. Les projections individuelles ne s'additionnent pas automatiquement au total d'équipe.
 
@@ -39,7 +39,7 @@
 
 ## Routes & tests
 - GET `/`, `/api/slate`, `/api/events`, `/api/health`, `/api/metrics`, `/api/archive`, `/api/game?id=<id ESPN>` (timeline figée pré-match et métrique après match) et `/api/methodology`.
-- `node max/tests/test-core.mjs` ; `node max/tests/test-advanced.mjs` (27 assertions) ; `node max/tests/test-archive.mjs` (17 assertions) ; `node max/tests/test-points.mjs` (21 assertions) ; `node max/tests/test-history-route.mjs` (11 assertions) ; `node max/tests/test-no-paid-sources.mjs` ; `node max/build.mjs`.
+- `node max/tests/test-core.mjs` ; `node max/tests/test-advanced.mjs` (27 assertions) ; `node max/tests/test-archive.mjs` (17 assertions) ; `node max/tests/test-points.mjs` (21 assertions) ; `node max/tests/test-points-integration.mjs` (15 vérifications) ; `node max/tests/test-history-route.mjs` (11 assertions) ; `node max/tests/test-no-paid-sources.mjs` ; `node max/build.mjs`.
 - npx wrangler deploy --config max/wrangler.jsonc ; IMPORTANT : ne jamais déployer sur le Worker manibetpro.
 - Vérifier les sources effectives du Cron, absence de LEGACY_SERVICE, mode INDEPENDENT_SHADOW.
 - Aucune source ou abonnement payant activé. Cloudflare et ChatGPT restent soumis aux limites du compte existant.
