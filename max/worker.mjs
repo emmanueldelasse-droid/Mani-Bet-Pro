@@ -5,12 +5,14 @@
  */
 import {ENGINE_VERSION,parseESPNScoreboards,parseESPNInjuries,analyzeNBA,verifiedFinalGames} from './engine.mjs';
 import {ADVANCED_VERSION,parseBoxscore,rotationAnalysis,forecastGame,evaluatePregame,summarizeEvaluations} from './advanced.mjs';
+import {POINTS_VERSION,projectPlayerPoints,evaluatePlayerPoints,summarizePlayerPointsEvaluations} from './points.mjs';
 
 const MAX_APP_HTML='';
 const MAX_ANALYST_PROMPT=''; // méthode publique, lue par MacFly depuis GitHub.
-const VERSION='max-independent-0.4.1';
+const VERSION='max-independent-0.5.0';
 const BOXES_PER_CYCLE=2;
 const KEY_METRICS='max:metrics:predictions';
+const KEY_PLAYER_METRICS='max:metrics:player-points';
 const KEY_ARCHIVE='max:archive:progress';
 // Archives isolées de la prédiction live : pas de fuite des résultats futurs.
 const ARCHIVE_SEASONS=[
@@ -162,8 +164,27 @@ export function validateResearch(record,game,nowISO) {
  })).filter(s=>s.section_id>=1&&s.section_id<=16);
  const unique=new Set(sections.map(s=>s.section_id));
  const full=unique.size===16;
+ // Le flux ESPN générique n'est pas une confirmation pour CE match.
+ // Accepter les statuts officiels structurés par MacFly uniquement si
+ // match, équipes, heure et PDF NBA officiel correspondent.
+ const allowed=new Set(['OUT','QUESTIONABLE','DOUBTFUL','AVAILABLE','PROBABLE','LIMITED']);
+ const verified_injuries=Array.isArray(record.verified_injuries)?
+  record.verified_injuries.slice(0,30).filter(item=>{
+   if(!item||typeof item.player!=='string'||item.player.length<2||
+    String(item.match_id)!==String(game.id)||item.event_start!==game.start||
+    ![String(game.home.id),String(game.away.id)].includes(String(item.team_id))||
+    !allowed.has(item.status)||typeof item.source_url!=='string')return false;
+   const matching=sources.find(x=>x.url===item.source_url&&x.kind==='OFFICIAL');
+   if(!matching||!(/^https:\/\/ak-static\.cms\.nba\.com\/referee\/injury\//.test(matching.url)||
+     /^https:\/\/official\.nba\.com\/nba-injury-report-/.test(matching.url)))return false;
+   const checked=Date.parse(item.checked_at);
+   return Number.isFinite(checked)&&checked<=published+300000&&checked<=now&&checked<tip;
+  }).map(item=>({match_id:String(game.id),team_id:String(item.team_id),
+   player:sanitizeText(item.player,100),status:item.status,event_start:game.start,
+   source_url:item.source_url,checked_at:item.checked_at,note:sanitizeText(item.note,200)})):[];
  return {schema_version:record.schema_version,match_id:String(record.match_id),
   generated_at:new Date(published).toISOString(),sources,summary,
+  verified_injuries,
   key_risks:Array.isArray(record.key_risks)?record.key_risks.slice(0,6).map(s=>sanitizeText(s,250)):[],
   recheck:Array.isArray(record.recheck)?record.recheck.slice(0,8).map(s=>sanitizeText(s,250)):[],
   sections,coverage_sections:unique.size,
