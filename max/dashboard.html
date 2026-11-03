@@ -20,6 +20,7 @@
 details{margin-top:13px;border-top:1px solid var(--edge);padding-top:11px}summary{font-weight:700;color:#a4c8ff;cursor:pointer}details h4{margin:14px 0 5px;font-size:12px;color:var(--cyan);letter-spacing:.5px}details p,.notes{font-size:12px;line-height:1.6;color:#cbd8ea}.notes{border-left:2px solid #608bce;padding-left:9px;margin-top:8px}.empty{padding:24px;border:1px dashed var(--edge);border-radius:16px;color:var(--muted);background:#131f3155}
 .timeline{margin-top:30px}.events{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.event{padding:13px;border-radius:12px;background:#121e31;border:1px solid var(--edge);font-size:13px}.event strong{display:block}.event span{font-size:11px;color:var(--muted)}footer{margin-top:35px;padding-top:18px;border-top:1px solid var(--edge);color:var(--muted);font-size:12px}
 .forecast{padding:14px;margin:12px 0;border:1px solid #3e587a;background:#102642;border-radius:14px}.prob-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.prob-grid b{display:block;font-size:20px}.prob-grid small{font-size:11px;color:var(--muted)}.forecast .bar{height:9px;border-radius:20px;background:#51607b;overflow:hidden;margin:10px 0}.forecast .bar span{height:100%;display:block;background:linear-gradient(90deg,#69dbcf,#659aff)}.forecast .extra{font-size:12px;color:#d0dcf2;line-height:1.7}.caveat{color:var(--amber);font-size:11px;margin-top:8px}.metrics-strip{padding:15px;background:#15213a;border:1px solid var(--edge);border-radius:15px;margin-bottom:20px;color:var(--muted);font-size:12px}.metrics-strip b{color:var(--text)}.rotations{display:grid;grid-template-columns:1fr 1fr;gap:12px}.player-row{display:flex;align-items:center;justify-content:space-between;gap:5px;font-size:11px;border-bottom:1px solid var(--edge);padding:4px 0}.player-row span{overflow-wrap:anywhere}
+.history-data{padding:12px;background:#0f2137;border-radius:12px;border:1px solid #27405e;margin-top:8px}.history-item{padding:9px 0;border-bottom:1px solid #34465d;font-size:12px}.history-item:last-child{border-bottom:0}.history-item b{color:var(--cyan)}.history-meta{font-size:11px;color:var(--muted)}.history-result{background:#172b3e;border-radius:10px;padding:10px;font-size:12px;margin-top:10px}
 @media(max-width:720px){.shell{padding:18px 12px 55px}.hero,.games,.events{grid-template-columns:1fr}.hero{gap:10px}.intro,.health-panel{padding:20px}.stats{grid-template-columns:repeat(2,1fr)}.top{margin-bottom:22px}.game{padding:16px}.brand strong{font-size:18px}.sectionhead h2{font-size:19px}.team{font-size:16px}.rotations{grid-template-columns:1fr}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 </style>
@@ -85,7 +86,7 @@ function card(g){
  (a.sections||[]).map(s=>'<details><summary>'+escapeHtml(s.section_id)+'. '+escapeHtml(s.title)+' · '+escapeHtml(s.status)+'</summary><div class="notes">'+(s.findings||[]).map(escapeHtml).join('<br>')+'</div><p>Manques : '+(s.missing||[]).map(escapeHtml).join(' · ')+'</p></details>').join('')+
  '<h4>Sources vérifiées</h4>'+(a.sources||[]).map(t=>'<div class="notes"><a target="_blank" rel="noopener noreferrer" href="'+escapeHtml(t.url)+'">'+escapeHtml(t.title)+'</a> · '+escapeHtml(local(t.checked_at))+'</div>').join('')
  :'<p>Pas encore de rapport MacFly vérifié pour ce match. Le moteur quantitatif reste indépendant.</p>')+
- (g.coverage?.missing?.length?'<h4>À vérifier</h4><p>'+g.coverage.missing.map(escapeHtml).join(' · ')+'</p>':'')+'</details></article>';
+ (g.coverage?.missing?.length?'<h4>À vérifier</h4><p>'+g.coverage.missing.map(escapeHtml).join(' · ')+'</p>':'')+'</details><details class="history-view" data-match="'+escapeHtml(g.id)+'"><summary>Évolution des prévisions enregistrées</summary><div class="history-data">Lecture des relevés pré-match lors de l’ouverture.</div></details></article>';
 }
 function render(){
  const games=state.games||[],current=$('filter').value;
@@ -110,6 +111,48 @@ function render(){
  $('updated').textContent=down?'Source matchs indisponible · dernier état conservé':stale?'Données anciennes · collecte à vérifier':'Collecte confirmée '+local(state.health?.last_success)+' · Paris';
  $('events').innerHTML=state.events?.length?state.events.slice(0,12).map(e=>'<div class="event"><strong>'+escapeHtml(e.match)+'</strong>'+escapeHtml(e.changes.join(' · '))+'<br><span>'+escapeHtml(local(e.at))+'</span></div>').join(''):'<div class="empty">Aucun changement détecté pour le moment.</div>';
 }
+function showHistory(d){
+ const lines=(d.timeline||[]).filter(t=>t?.at).map(t=>{
+  const f=t.forecast,valid=f?.status==='SIMULATED_UNCALIBRATED'&&
+   Number.isFinite(Number(f.probability_home));
+  const pct=valid?(Number(f.probability_home)*100).toFixed(1)+' %':'Indisponible';
+  return '<div class="history-item"><b>'+escapeHtml(t.checkpoint||'Pré-match')+
+   ' · '+escapeHtml(local(t.at))+'</b>'+
+   '<div>Victoire domicile estimée : '+escapeHtml(pct)+'</div>'+
+   '<div class="history-meta">Statut : '+escapeHtml(f?.status||'Ancien modèle')+
+   ' · Blessures recensées (dom./ext.) : '+
+   escapeHtml(t.injury_counts?.home??'inconnu')+' / '+escapeHtml(t.injury_counts?.away??'inconnu')+'</div></div>';
+ }).join('');
+ const known=(d.timeline||[]).filter(t=>Number.isFinite(t.forecast?.probability_home));
+ const delta=known.length>=2?((known.at(-1).forecast.probability_home-
+  known[0].forecast.probability_home)*100).toFixed(1):null;
+ const comparison=delta!==null?'<p class="caveat">Évolution entre premier et dernier relevé : '+
+  escapeHtml(Number(delta)>0?'+':'')+escapeHtml(delta)+' points de pourcentage en faveur du domicile.</p>':'';
+ const ev=d.evaluation;
+ const result=ev?'<div class="history-result"><b>Résultat vérifié après match</b>'+
+  '<div>Score : '+escapeHtml(ev.final_score?.home)+' – '+escapeHtml(ev.final_score?.away)+
+  ' · Brier : '+escapeHtml(ev.brier)+' · Log Loss : '+escapeHtml(ev.log_loss)+'</div>'+
+  '<div class="history-meta">Comparaison uniquement avec la probabilité enregistrée AVANT le match.</div></div>':'';
+ return (lines||'<p>Aucune prévision enregistrée avant le coup d’envoi pour cette rencontre.</p>')+
+  comparison+result+'<p class="caveat">'+escapeHtml(d.warning||'Historique Max indépendant')+'</p>';
+}
+document.addEventListener('toggle',async event=>{
+ const item=event.target;
+ if(!item?.matches?.('details.history-view')||!item.open||item.dataset.loaded==='1')return;
+ const id=item.dataset.match,target=item.querySelector('.history-data');
+ if(!/^\d{5,15}$/.test(id)||!target)return;
+ item.dataset.loaded='1';
+ target.textContent='Chargement des prévisions réellement enregistrées…';
+ try{
+  const r=await fetch('/api/game?id='+encodeURIComponent(id),{cache:'no-store'});
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  const data=await r.json();
+  if(item.isConnected)target.innerHTML=showHistory(data);
+ }catch(err){
+  if(item.isConnected){target.textContent='Historique indisponible : '+err.message+
+   '. Refermez puis rouvrez cette section pour réessayer.';delete item.dataset.loaded;}
+ }
+},true);
 async function load(){
  $('refresh').disabled=true;
  try{
