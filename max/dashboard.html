@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#091321"><meta name="robots" content="noindex,nofollow">
+<title>ManiBetProMax — NBA Intelligence</title>
+<style>
+:root{color-scheme:dark;--bg:#091321;--panel:#111f32;--raised:#1a2b43;--line:#304359;--txt:#f1f6ff;--muted:#9cb0ca;--accent:#76b4ff;--cyan:#8ce5db;--warning:#ffd08a}
+*{box-sizing:border-box}body{font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--txt);background:radial-gradient(circle at 70% -15%,#1c3a5c,#091321 55%);min-height:100dvh;margin:0}button{font:inherit;cursor:pointer}button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}button[disabled]{opacity:.45;cursor:wait}a{color:var(--accent)}
+.shell{max-width:1120px;margin:auto;padding:20px 18px 72px}.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 23px}.brand{display:flex;align-items:center;gap:10px}.mark{width:42px;height:42px;background:linear-gradient(135deg,#3a7de2,#75d9df);color:#081321;border-radius:13px;display:grid;place-items:center;font-weight:900;font-size:24px}.brand b{display:block;font-size:19px;letter-spacing:-.5px}.brand small{font-size:10px;letter-spacing:1.6px;color:var(--muted);font-weight:700}.btn{background:#223954;border:1px solid #3c5672;color:var(--txt);border-radius:11px;padding:9px 13px;font-weight:700}.btn:hover{background:#2e4a6a}
+.headline{background:linear-gradient(125deg,#162d4a,#111f32);border:1px solid var(--line);padding:24px;border-radius:20px;margin-bottom:22px}.eyebrow{font-size:11px;font-weight:800;letter-spacing:1.4px;color:var(--cyan);text-transform:uppercase}.headline h1{font-size:clamp(26px,4.5vw,38px);letter-spacing:-1.3px;line-height:1.15;margin:8px 0}.subtitle{color:var(--muted);max-width:680px}.quick{display:flex;gap:9px;flex-wrap:wrap;margin-top:14px}.quick span{background:#1c3852;border-radius:8px;padding:7px 10px;color:#cbdcf3;font-size:12px}
+.sectionhead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:13px}.sectionhead h2{font-size:21px;margin:0;letter-spacing:-.5px}.tiny{color:var(--muted);font-size:12px}.filters{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}.filter{border:1px solid var(--line);background:#17263a;border-radius:999px;color:var(--muted);padding:7px 11px}.filter.active{background:#234d7c;border-color:#5688bd;color:#fff}
+.games{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.game{border:1px solid var(--line);background:var(--panel);border-radius:16px;padding:17px;min-width:0}.gameTop{display:flex;justify-content:space-between;align-items:center;gap:9px;color:var(--muted);font-size:12px;margin-bottom:14px}.chip{border:1px solid #3b587b;color:#bcd6f8;background:#1c334e;border-radius:999px;font-size:10px;font-weight:800;padding:4px 8px}.chip.alert{background:#48351f;color:#fbdca2;border-color:#816040}.teams{display:flex;justify-content:space-between;gap:6px;align-items:center}.teams strong{font-size:16px;line-height:1.15;overflow-wrap:anywhere}.teams .versus{color:var(--muted);font-size:11px}.teamSide{flex:1;min-width:0}.teamSide.right{text-align:right}.teamSide small{display:block;font-size:11px;color:var(--muted);margin-top:5px}.forecastLine{border-top:1px solid var(--line);margin-top:14px;padding-top:12px}.projected{display:flex;align-items:baseline;justify-content:space-between;gap:8px}.projected b{font-size:20px}.projected span{font-size:12px;color:var(--muted)}.probbar{height:8px;border-radius:20px;background:#485976;overflow:hidden;margin:9px 0}.probbar span{display:block;height:100%;background:linear-gradient(90deg,#81ddcf,#5ca1ff)}.gameBottom{display:flex;justify-content:space-between;align-items:center;margin-top:14px;gap:8px}.gameBottom .tiny{min-width:0}.go{border:0;background:#347bd2;color:white;border-radius:10px;padding:9px 12px;font-weight:800;white-space:nowrap}.go:hover{background:#438add}
+.panel{border:1px solid var(--line);background:var(--panel);border-radius:17px;padding:18px;margin:14px 0}.muted{color:var(--muted)}.back{background:none;border:0;color:var(--accent);font-weight:800;padding:8px 0;margin:0 0 8px}.detailHeading{font-size:25px;line-height:1.2;letter-spacing:-.8px;margin:6px 0}.detailHero{padding:22px;background:linear-gradient(120deg,#152f4e,#142238);border-radius:20px;border:1px solid #3b5270}.matchMeta{display:flex;justify-content:space-between;align-items:center;gap:10px}.bigGrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:17px}.numberTile{background:#14243c;border:1px solid var(--line);border-radius:14px;padding:15px;text-align:center}.numberTile b{display:block;font-size:clamp(27px,5vw,42px);letter-spacing:-1.2px;line-height:1.18}.numberTile small{font-size:12px;color:var(--muted)}.totalTile{text-align:center;border:1px solid #3c6084;border-radius:13px;background:#143453;padding:13px;margin-top:12px}.totalTile b{font-size:26px;letter-spacing:-.6px}.totalTile small{display:block;color:var(--muted)}
+.note{border-left:3px solid #e2af67;padding:9px 12px;background:#352b2252;border-radius:0 9px 9px 0;color:#eed4af;font-size:12px;margin:12px 0 0}.tabs{display:flex;gap:5px;overflow-x:auto;margin:16px 0 0;padding-bottom:5px}.tab{flex:1;min-width:88px;border:1px solid var(--line);border-radius:10px;background:#15263d;color:var(--muted);padding:10px 8px;font-weight:800}.tab.active{color:#fefefe;background:#285481;border-color:#5087c0}.tabContent{margin-top:10px}.sectionTitle{font-size:17px;margin:0 0 10px}.summaryText{line-height:1.65;color:#dbe5f2}.risk{padding:9px 12px;background:#1b3048;border-radius:9px;margin:6px 0;font-size:13px;color:#dce7f7}.metricGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metricTile{background:#1a2c42;border-radius:12px;padding:13px;border:1px solid #30465c}.metricTile small{display:block;color:var(--muted);font-size:11px}.metricTile b{display:block;font-size:22px}.metricTile em{font-style:normal;color:var(--muted);font-size:11px}
+.playerTeam{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:15px 0 10px}.playerTeam h3{font-size:17px;margin:0}.playerList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.player{border:1px solid var(--line);border-radius:12px;padding:12px;background:#16263d}.playerHead{display:flex;align-items:flex-start;justify-content:space-between;gap:9px}.playerHead strong{font-size:14px;line-height:1.15}.playerHead b{font-size:23px;line-height:1.0;white-space:nowrap}.playerHead small{display:block;color:var(--muted);font-weight:500;font-size:11px;margin-top:5px}.playerDetails{font-size:11px;color:#b5c7db;margin-top:9px}.playerFoot{font-size:11px;color:var(--warning);margin-top:6px}.scarce{border:1px dashed #50627a;color:var(--muted);padding:14px;border-radius:12px;font-size:13px}.rowInfo{display:flex;justify-content:space-between;border-bottom:1px solid #2b4056;padding:8px 0;gap:12px}.rowInfo span{color:var(--muted)}.rowInfo b{text-align:right}.expert details{border-top:1px solid var(--line);padding:10px 0}.expert summary{cursor:pointer;font-weight:750;color:#bed8fa}.expert p{line-height:1.5;font-size:12px;color:#cbd8e9;margin-top:8px}.sources a{display:block;overflow-wrap:anywhere;font-size:12px;margin:8px 0}.empty{padding:22px;border-radius:14px;border:1px dashed #415571;background:#122033;color:var(--muted)}.metricsDetails{margin:28px 0;border:1px solid var(--line);padding:13px 16px;background:#112137;border-radius:12px}.metricsDetails summary{font-weight:800;cursor:pointer}.metricsDetails p{margin:9px 0;font-size:12px;color:var(--muted)}.footer{margin-top:25px;padding-top:15px;border-top:1px solid var(--line);color:var(--muted);font-size:11px}
+[hidden]{display:none!important}
+@media(max-width:720px){.shell{padding:14px 12px 60px}.top{margin-bottom:16px}.brand b{font-size:16px}.brand small{font-size:9px}.mark{height:37px;width:37px}.headline{padding:19px}.games,.playerList{grid-template-columns:1fr}.game{padding:15px}.detailHero{padding:16px}.numberTile{padding:13px 8px}.bigGrid{gap:8px}.tabs{gap:4px}.tab{min-width:76px;padding:10px 5px;font-size:12px}.metricGrid{gap:8px}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+</style></head>
+<body><div class="shell">
+<header class="top"><div class="brand"><div class="mark">M</div><div><b>ManiBetProMax</b><small>NBA INTELLIGENCE</small></div></div><button class="btn" id="refresh">Actualiser</button></header>
+<section id="overview">
+ <div class="headline"><div class="eyebrow">MacFly + moteur statistique indépendant</div><h1>Les matchs. Les points. Les joueurs.</h1><p class="subtitle">Une projection lisible par rencontre, puis les statistiques détaillées seulement quand tu en as besoin.</p><div class="quick"><span id="lastCollect">Collecte : —</span><span id="coverage">Données joueurs : —</span><span id="research">MacFly : —</span></div></div>
+ <div class="sectionhead"><div><h2>Matchs NBA</h2><div class="tiny" id="gameCount">Chargement…</div></div></div>
+ <div class="filters" role="group" aria-label="Filtrer les matchs"><button class="filter" data-filter="upcoming">À venir</button><button class="filter" data-filter="today">Aujourd’hui</button><button class="filter" data-filter="tomorrow">Demain</button><button class="filter" data-filter="all">Tous</button></div>
+ <main id="games" class="games" aria-live="polite"><div class="empty">Chargement des rencontres NBA…</div></main>
+</section>
+<section id="detail" hidden><button class="back" id="back">← Tous les matchs</button><div id="matchView"></div></section>
+<details class="metricsDetails" id="metricsWrap"><summary>Fiabilité des prévisions et état des données</summary><div id="metrics" class="tiny">Chargement des contrôles…</div></details>
+<footer class="footer">Analyse NBA expérimentale. Les prévisions ne sont pas des certitudes. Sources horodatées, aucune API payante, aucun lien de données avec ManiBetPro.</footer>
+</div>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const esc=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','"':'&quot;',"'":'&#39;'}[c]));
+const local=t=>t?new Date(t).toLocaleString('fr-FR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',timeZone:'Europe/Paris'}):'—';
+const parisDay=t=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Paris',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(t));
+const percent=v=>Number.isFinite(v)?(100*v).toFixed(1)+' %':'—';
+const score=v=>Number.isFinite(v)?Math.round(v).toLocaleString('fr-FR'):'—';
+const statStatus=g=>{const s=String(g.status||'');return s.includes('FINAL')?'Terminé':s.includes('IN_PROGRESS')||s.includes('HALFTIME')?'En direct':s.includes('POSTPONED')?'Reporté':'À venir'};
+const forecast=g=>g.independent_analysis?.advanced?.forecast??null;
+const playerPoints=g=>g.independent_analysis?.advanced?.player_points??null;
+const usable=f=>f?.status==='SIMULATED_UNCALIBRATED'&&Number.isFinite(f.projected_score?.home)&&Number.isFinite(f.projected_score?.away);
+const total=f=>usable(f)?f.projected_score.home+f.projected_score.away:null;
+let state={games:[],health:null,metrics:null,playerMetrics:null,research_count:0,updated_at:null,filter:'upcoming',tab:'resume',historyCache:{}};
+function matchId(){const h=location.hash||'';const m=h.match(/^#match-(\d{5,15})$/);return m?m[1]:null}
+function gameCard(g){
+ const f=forecast(g),valid=usable(f),finished=statStatus(g)==='Terminé';
+ const n=playerPoints(g);
+ const count=(n?.home?.projectable_players??0)+(n?.away?.projectable_players??0);
+ const h=valid?f.probability_home:null;
+ const teams='<div class="teams"><div class="teamSide"><strong>'+esc(g.away.name)+'</strong><small>Visiteur</small></div><span class="versus">VS</span><div class="teamSide right"><strong>'+esc(g.home.name)+'</strong><small>Domicile</small></div></div>';
+ const next=valid?'<div class="projected"><div><span>Points prévus (visiteur / domicile)</span><br><b>'+score(f.projected_score.away)+' – '+score(f.projected_score.home)+'</b></div><div style="text-align:right"><span>Total du match</span><br><b>'+score(total(f))+'</b></div></div><div class="probbar" role="img" aria-label="Probabilité domicile estimée '+percent(h)+'"><span style="width:'+Math.min(100,Math.max(0,Math.round(h*100)))+'%"></span></div><div class="tiny">Victoire domicile '+percent(h)+' · estimation non calibrée</div>':
+ '<div class="tiny">Projection des points indisponible ou échantillon insuffisant.</div>';
+ const result=finished?'<div class="tiny" style="margin:8px 0">Résultat : '+score(g.away.score)+' – '+score(g.home.score)+'</div>':null;
+ return '<article class="game"><div class="gameTop"><time>'+esc(local(g.start))+'</time><span class="chip '+(valid?'':'alert')+'">'+esc(statStatus(g))+'</span></div>'+teams+
+ '<div class="forecastLine">'+(result||next)+'</div><div class="gameBottom"><span class="tiny">'+esc(count)+' joueurs avec projection'+(g.research?' · MacFly disponible':' · MacFly à compléter')+'</span><button class="go" data-game="'+esc(g.id)+'">Analyser</button></div></article>';
+}
+function renderOverview(){
+ const now=new Date(),today=parisDay(now),tomorrow=parisDay(new Date(Date.now()+86400000));
+ const valid=state.games.filter(g=>state.filter==='all'||(state.filter==='upcoming'&&Date.parse(g.start)>Date.now())||(state.filter==='today'&&parisDay(g.start)===today)||(state.filter==='tomorrow'&&parisDay(g.start)===tomorrow));
+ valid.sort((a,b)=>Date.parse(a.start)-Date.parse(b.start));
+ $('games').innerHTML=valid.length?valid.map(gameCard).join(''):'<div class="empty">Aucune rencontre pour cette période. Sélectionne « Tous » pour consulter les autres matchs.</div>';
+ $('gameCount').textContent=valid.length+' rencontre(s) affichée(s) · '+state.games.length+' suivie(s)';
+ document.querySelectorAll('[data-filter]').forEach(b=>b.classList.toggle('active',b.dataset.filter===state.filter));
+}
+function hero(g){
+ const f=forecast(g),valid=usable(f),finished=statStatus(g)==='Terminé';
+ const team1=esc(g.away.name),team2=esc(g.home.name);
+ const split='<div class="bigGrid"><div class="numberTile"><small>'+team1+' · visiteur</small><b>'+score(valid?f.projected_score.away:null)+'</b><small>points projetés</small></div><div class="numberTile"><small>'+team2+' · domicile</small><b>'+score(valid?f.projected_score.home:null)+'</b><small>points projetés</small></div></div>';
+ const sum='<div class="totalTile"><small>Total de points prévu pour le match</small><b>'+score(total(f))+'</b></div>';
+ const actual=finished?'<div class="risk">Score final : '+score(g.away.score)+' – '+score(g.home.score)+'. Les prévisions affichées après un match ne constituent pas des prédictions rétrospectives.</div>':'';
+ return '<div class="detailHero"><div class="matchMeta"><span class="eyebrow">NBA · '+esc(local(g.start))+'</span><span class="chip">'+esc(statStatus(g))+'</span></div>'+
+ '<h1 class="detailHeading">'+team1+' <span class="muted">vs</span> '+team2+'</h1>'+
+ (valid?split+sum+'<div class="note">Chiffres issus d’une simulation statistique, sans preuve de calibration. Les absences non confirmées peuvent modifier cette projection.</div>':
+ '<div class="scarce">Projection insuffisamment documentée pour afficher des points chiffrés.</div>')+actual+'</div>';
+}
+const heading=(t,p)=>'<div class="sectionhead"><div><h2>'+esc(t)+'</h2>'+(p?'<p class="tiny">'+esc(p)+'</p>':'')+'</div></div>';
+function macfly(g,short){
+ const m=g.ai_review??g.research;
+ if(!m)return '<p class="summaryText muted">MacFly n’a pas encore publié de rapport sourcé utilisable pour cette rencontre.</p>';
+ const risks=(m.key_risks||[]).slice(0,short?3:6).map(x=>'<div class="risk">'+esc(x)+'</div>').join('');
+ return '<p class="summaryText">'+esc(m.summary)+'</p>'+risks+
+ '<p class="tiny" style="margin-top:9px">Recherche du '+esc(local(m.generated_at))+' · '+esc(m.coverage_sections??0)+'/16 sections · '+esc(m.status||'PARTIEL')+'</p>';
+}
+function renderSummary(g){
+ const f=forecast(g),p=playerPoints(g);
+ const valid=usable(f);
+ const metrics='<div class="metricGrid">'+
+ '<div class="metricTile"><small>Probabilité domicile (modèle)</small><b>'+percent(valid?f.probability_home:null)+'</b><em>Non calibrée</em></div>'+
+ '<div class="metricTile"><small>Probabilité visiteur (modèle)</small><b>'+percent(valid?f.probability_away:null)+'</b><em>Non calibrée</em></div>'+
+ '<div class="metricTile"><small>Fourchette 80 % du total</small><b>'+esc(valid?(f.interval_80?.total||[]).map(score).join('–'):'—')+'</b><em>Hypothèse de distribution</em></div>'+
+ '<div class="metricTile"><small>Projections individuelles</small><b>'+esc((p?.home?.projectable_players??0)+(p?.away?.projectable_players??0))+'</b><em>Conditionnelles à la participation</em></div></div>';
+ const topPlayers=['away','home'].flatMap(side=>(p?.[side]?.players||[]).filter(x=>Number.isFinite(x.predicted_points_if_active)&&x.availability!=='OFFICIAL_OUT').map(x=>({...x,side})))
+ .sort((a,b)=>b.predicted_points_if_active-a.predicted_points_if_active).slice(0,5);
+ const rows=topPlayers.map((x,i)=>'<div class="rowInfo"><span>'+esc(x.name)+' · '+esc(g[x.side]?.abbreviation||'')+'</span><b>'+score(x.predicted_points_if_active)+' pts <span class="tiny">(si joue)</span></b></div>').join('');
+ return '<div class="panel">'+heading('Le résumé','Les chiffres essentiels du moteur')+metrics+'</div>'+
+ '<div class="panel">'+heading('Meilleurs marqueurs attendus','Parmi les joueurs pour lesquels il existe assez de données')+
+ (rows||'<div class="scarce">Pas encore assez de boxscores individuels pour établir des projections fiables.</div>')+
+ '<button class="go" data-tab="joueurs" style="margin-top:13px">Voir tous les joueurs</button></div>'+
+ '<div class="panel">'+heading('L’analyse de MacFly','Informations vérifiées et risques avant match')+macfly(g,true)+'</div>';
+}
+function playerCard(x){
+ const out=x.availability==='OFFICIAL_OUT',uncertain=x.availability==='OFFICIAL_UNCERTAIN';
+ const v=out?'0':score(x.predicted_points_if_active);
+ const rng=x.predicted_interval_80_if_active?.length?x.predicted_interval_80_if_active.map(score).join(' à '):'—';
+ const cond=x.caution==='ESPN_STATUS_NOT_CONFIRMED_FOR_THIS_GAME'?'Statut ESPN à confirmer pour CE match':x.caution==='SAMPLE_TOO_SMALL'?'Historique individuel insuffisant':
+ out?'Absence confirmée sur rapport officiel':uncertain?'Participation incertaine selon rapport officiel':'Participation non officiellement confirmée';
+ const points=Number.isFinite(x.predicted_points_if_active)?esc(x.predicted_points_if_active.toFixed(1)):'—';
+ const info=out?'Absent confirmé':uncertain?'Si joue (incertain)':'Si joue';
+ return '<article class="player"><div class="playerHead"><div><strong>'+esc(x.name)+'</strong><small>'+esc(info)+'</small></div><div style="text-align:right"><b>'+esc(v)+'</b><small>points '+(out?'attendus':'si joue')+'</small></div></div>'+
+ '<div class="playerDetails">Moyenne '+esc(x.historical_points_per_game??'—')+' pts · '+esc(x.projected_minutes_if_active??'—')+' min estimées · '+esc(x.recent_games)+' matchs</div>'+
+ (out?'':('<div class="playerDetails">Intervalle 80 % si joue : '+esc(rng)+' points · projection exacte : '+points+'</div>'))+
+ (x.scenarios?'<div class="playerDetails">Scénarios : normal '+esc(x.scenarios.available.points)+' · limité '+esc(x.scenarios.limited.points)+' · absent 0 pts</div>':'')+
+ '<div class="playerFoot">'+esc(cond)+'</div></article>';
+}
+function playerGroup(grp,label){
+ const xs=grp?.players||[];
+ const withSample=xs.filter(x=>Number.isFinite(x.predicted_points_if_active)||x.availability==='OFFICIAL_OUT');
+ const noSample=xs.filter(x=>!Number.isFinite(x.predicted_points_if_active)&&x.availability!=='OFFICIAL_OUT');
+ return '<section class="panel"><div class="playerTeam"><h3>'+esc(label)+'</h3><span class="tiny">'+esc(grp?.boxscore_games??0)+' feuilles de match disponibles</span></div>'+
+ '<p class="tiny" style="margin-bottom:9px">Points estimés par joueur SI IL JOUE. Ce ne sont pas des prévisions de présence sur le parquet.</p>'+
+ (withSample.length?'<div class="playerList">'+withSample.map(playerCard).join('')+'</div>':'<div class="scarce">Pas assez d’apparitions récentes pour calculer les points des joueurs de cette équipe.</div>')+
+ (noSample.length?'<details class="expert"><summary>'+noSample.length+' joueur(s) sans projection suffisante</summary><p>'+noSample.map(x=>esc(x.name)).join(' · ')+'</p></details>':'')+'</section>';
+}
+function renderPlayers(g){
+ const p=playerPoints(g);
+ if(!p)return '<div class="panel"><div class="scarce">Le module de points des joueurs n’a pas encore terminé sa première collecte pour cette rencontre.</div></div>';
+ if(p.status==='NO_PREMATCH')return '<div class="panel"><div class="scarce">Les nouvelles projections individuelles ne sont calculées qu’avant le match. Les prévisions figées avant le coup d’envoi restent consultables dans le rapport expert.</div></div>';
+ return '<div class="panel"><div class="note">Les données ESPN « Out » sont des signaux à revérifier : seule une confirmation officielle reliée à ce match peut établir une absence. Les scénarios restent des estimations.</div></div>'+
+ playerGroup(p.away,g.away.name)+playerGroup(p.home,g.home.name)+
+ '<div class="panel"><p class="tiny">Méthode : points par minute récents × minutes estimées, ajustement modéré sur la projection de points de l’équipe, intervalle de dispersion empirique. Projections non calibrées ; ne pas additionner les points des joueurs pour obtenir un total d’équipe.</p></div>';
+}
+function renderAnalysis(g){
+ const f=forecast(g),valid=usable(f),box=f?.advanced||{},inj=g.injuries||{};
+ const metrics=['OffRtg','DefRtg','Possessions','eFG %','TOV %','ORB %','FT rate'];
+ const keys=['off_rating','def_rating','possessions','efg_pct','tov_pct','orb_pct','ft_rate'];
+ const rows=keys.map((key,i)=>'<div class="rowInfo"><span>'+esc(metrics[i])+'</span><b>'+esc(box.away?.[key]??'—')+' / '+esc(box.home?.[key]??'—')+'</b></div>').join('');
+ const issues=(g.coverage?.missing||[]).map(x=>'<div class="risk">'+esc(x)+'</div>').join('');
+ const injury=(array,label)=>'<h3 class="sectionTitle">'+esc(label)+'</h3>'+
+ (!Array.isArray(array)?'<p class="tiny">Source blessures indisponible pour cette équipe.</p>':
+ array.length?array.map(x=>'<div class="rowInfo"><span>'+esc(x.player)+' · '+esc(x.status)+'</span><b class="tiny">ESPN · non confirmé pour ce match</b></div>').join(''):'<p class="tiny">Aucun signal présent dans le flux ESPN. Cela ne vaut pas confirmation médicale.</p>');
+ return '<div class="panel">'+heading('Détails statistiques','Valeurs équipe visiteuse / équipe à domicile')+
+ rows+'<p class="tiny" style="margin-top:10px">OffRtg/possessions estimés à partir des boxscores, sans prétendre reproduire les chiffres officiels play-by-play. Échantillon : '+esc(box.away?.games??0)+' / '+esc(box.home?.games??0)+' matchs.</p></div>'+
+ '<div class="panel">'+heading('Projection du score','Fourchettes statistiques issues des simulations')+
+ (valid?'<div class="rowInfo"><span>Visiteur</span><b>'+esc((f.interval_80?.away||[]).map(score).join(' à '))+' pts</b></div>'+
+ '<div class="rowInfo"><span>Domicile</span><b>'+esc((f.interval_80?.home||[]).map(score).join(' à '))+' pts</b></div>'+
+ '<div class="rowInfo"><span>Total</span><b>'+esc((f.interval_80?.total||[]).map(score).join(' à '))+' pts</b></div>'+
+ '<p class="tiny" style="margin-top:12px">'+esc(f.simulated_runs)+' simulations exécutées · Non calibré</p>':'<div class="scarce">Projection indisponible faute de données suffisantes.</div>')+'</div>'+
+ '<div class="panel">'+heading('Blessures et alertes','Flux ESPN non spécifique à cette rencontre : confirmation NBA prioritaire')+
+ injury(inj.away,g.away.name)+injury(inj.home,g.home.name)+
+ '<p class="tiny" style="margin-top:10px">Confirmations NBA spécifiques au match : '+esc(g.independent_analysis?.advanced?.official_injuries_count??0)+' joueur(s).</p></div>'+
+ (issues?'<div class="panel">'+heading('Limites de l’analyse')+issues+'</div>':'');
+}
+function renderExpert(g){
+ const report=g.ai_review??g.research;
+ const rows=(report?.sections||[]).map(x=>'<details><summary>'+esc(x.section_id)+'. '+esc(x.title)+' · '+esc(x.status)+'</summary>'+
+ '<p>'+esc((x.findings||[]).join(' | '))+'</p><p>Manques : '+esc((x.missing||[]).join(' · ')||'Aucun signalé')+'</p></details>').join('');
+ const sources=(report?.sources||[]).map(x=>'<a target="_blank" rel="noopener noreferrer" href="'+esc(x.url)+'">'+esc(x.title)+' · '+esc(local(x.checked_at))+'</a>').join('');
+ return '<div class="panel expert">'+heading('Rapport expert MacFly','16 sections, faits vérifiés, contradictions et manques')+
+ macfly(g,false)+(rows||'<div class="scarce">Rapport MacFly non encore disponible ou partiel.</div>')+
+ '<h3 class="sectionTitle" style="margin-top:16px">Sources vérifiées</h3><div class="sources">'+(sources||'<p class="tiny">Aucune source supplémentaire enregistrée.</p>')+'</div></div>'+
+ '<div class="panel">'+heading('Évolution réelle des prévisions','Captures enregistrées avant le coup d’envoi uniquement')+
+ '<div id="timeline"><div class="tiny">Chargement des prévisions horodatées…</div></div></div>';
+}
+function tabView(g){
+ if(state.tab==='joueurs')return renderPlayers(g);
+ if(state.tab==='analyse')return renderAnalysis(g);
+ if(state.tab==='expert')return renderExpert(g);
+ return renderSummary(g);
+}
+function renderDetail(g){
+ const buttons=[['resume','Résumé'],['joueurs','Points joueurs'],['analyse','Statistiques'],['expert','Expert']].map(v=>
+ '<button class="tab '+(state.tab===v[0]?'active':'')+'" data-tab="'+v[0]+'">'+v[1]+'</button>').join('');
+ $('matchView').innerHTML=hero(g)+'<div class="tabs" role="tablist" aria-label="Sections du match">'+buttons+'</div><div class="tabContent">'+tabView(g)+'</div>';
+ if(state.tab==='expert')loadTimeline(g.id);
+}
+function render(){
+ const id=matchId(),g=id?state.games.find(x=>String(x.id)===id):null;
+ $('overview').hidden=!!g;$('detail').hidden=!g;
+ if(g)renderDetail(g);else renderOverview();
+ $('lastCollect').textContent='Collecte : '+local(state.health?.last_success||state.updated_at);
+ $('coverage').textContent='Boxscores : '+(state.health?.sources?.player_boxes?.cached??0);
+ $('research').textContent='MacFly : '+(state.research_count??0)+' rapports · '+(state.research_agenda?.due_count??0)+' contrôle(s) prioritaires';
+ const metric=state.metrics||{},pm=state.playerMetrics||{};
+ $('metrics').innerHTML='<p>Prévisions de victoire évaluées : '+esc(metric.games_evaluated??0)+' matchs · Brier '+esc(metric.brier??'—')+' · Log Loss '+esc(metric.log_loss??'—')+'</p>'+
+ '<p>Points des joueurs évalués : '+esc(pm.players_evaluated??0)+' projections sur '+esc(pm.games_evaluated??0)+' matchs · erreur absolue moyenne '+esc(pm.mae??'—')+' pts · RMSE '+esc(pm.rmse??'—')+'</p>'+
+ '<p>Sur la dernière collecte : '+esc(state.forecast_efficiency?.recalculated??'—')+' simulation(s) complète(s) relancée(s), '+esc(state.forecast_efficiency?.reused??'—')+' résultat(s) réutilisé(s) sans calcul redondant.</p>'+ 
+ '<p>Recherche ciblée : '+esc(state.research_agenda?.due_count??'—')+' contrôle(s) MacFly à effectuer selon H24/H6/H3/H1/H30. MacFly est horaire, pas instantané.</p>'+ 
+ '<p>Statut : NON CALIBRÉ. Évaluation fondée sur des projections réellement enregistrées avant le début des matchs. Historique archivé : '+esc(state.health?.sources?.archive?.days??0)+' / '+esc(state.health?.sources?.archive?.target??'—')+' journées.</p>';
+}
+function timelineHtml(data){
+ const lines=(data.timeline||[]).filter(x=>x.at).map(x=>{
+  const f=x.forecast,p=x.player_points;
+  return '<div class="rowInfo"><span>'+esc(x.checkpoint)+' · '+esc(local(x.at))+'</span><b>'+
+   (Number.isFinite(f?.probability_home)?percent(f.probability_home):'sans probabilité')+
+   (p?' · '+esc((p.home?.projectable_players??0)+(p.away?.projectable_players??0))+' joueurs':'')+'</b></div>';
+ }).join('');
+ const e=data.evaluation,pe=data.player_evaluation;
+ return (lines||'<div class="scarce">Aucun relevé pré-match disponible pour cette rencontre.</div>')+
+ (e?'<div class="risk">Évaluation du vainqueur : Brier '+esc(e.brier)+' · Log Loss '+esc(e.log_loss)+'</div>':'')+
+ (pe?'<div class="risk">Prédictions individuelles : MAE '+esc(pe.mae)+' points · '+esc(pe.matched)+' joueurs vérifiés.</div>':'')+
+ '<p class="tiny" style="margin-top:10px">Les anciens relevés ne sont jamais recalculés après le résultat.</p>';
+}
+async function loadTimeline(id){
+ const target=$('timeline');if(!target)return;
+ if(state.historyCache[id]){target.innerHTML=timelineHtml(state.historyCache[id]);return}
+ try{
+  const res=await fetch('/api/game?id='+encodeURIComponent(id),{cache:'no-store'});
+  if(!res.ok)throw new Error('HTTP '+res.status);
+  const data=await res.json();state.historyCache[id]=data;
+  const live=$('timeline');if(live&&matchId()===id)live.innerHTML=timelineHtml(data);
+ }catch(err){const live=$('timeline');if(live)live.textContent='Historique indisponible : '+err.message}
+}
+async function load(){
+ $('refresh').disabled=true;
+ try{
+  const [a,b,c,d]=await Promise.all([
+   fetch('/api/slate',{cache:'no-store'}),fetch('/api/health',{cache:'no-store'}),
+   fetch('/api/metrics',{cache:'no-store'}),fetch('/api/player-metrics',{cache:'no-store'})]);
+  if(!a.ok||!b.ok)throw Error('Collecte indisponible');
+  const slate=await a.json(),health=await b.json(),metrics=c.ok?await c.json():null,playerMetrics=d.ok?await d.json():null;
+  state={...state,...slate,health,metrics,playerMetrics};render();
+ }catch(err){
+  if(!state.games.length)$('games').innerHTML='<div class="empty">Impossible de charger les données : '+esc(err.message)+'</div>';
+  $('lastCollect').textContent='État à vérifier';
+ }finally{$('refresh').disabled=false}
+}
+document.addEventListener('click',event=>{
+ const game=event.target.closest('[data-game]');
+ if(game){state.tab='resume';location.hash='#match-'+game.dataset.game;render();window.scrollTo({top:0,behavior:'instant'});return}
+ const filter=event.target.closest('[data-filter]');
+ if(filter){state.filter=filter.dataset.filter;renderOverview();return}
+ const tab=event.target.closest('[data-tab]');
+ if(tab){state.tab=tab.dataset.tab;render();return}
+});
+$('back').addEventListener('click',()=>{location.hash='';state.tab='resume';render();window.scrollTo({top:0,behavior:'instant'})});
+$('refresh').addEventListener('click',load);
+window.addEventListener('hashchange',render);
+load();setInterval(load,60000);
+</script></body></html>

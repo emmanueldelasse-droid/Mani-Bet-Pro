@@ -156,3 +156,18 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
 - workflow `.github/workflows/regression-tests.yml` · auto-découverte `scripts/test-*.mjs`
 - validation PR #241 · 01/10/2026 · **36 suites · 0 fail**
 - couvre notamment · parité moteur NBA · checkpoints · closing line · D1 · season/event classification · pré-saison · prime-time dual-slate · shadows EMA/B2B/DQ/spread · settlement · health · sécurité marchés props/parlay
+
+## ManiBetProMax · shadow indépendant (2026-11-02)
+- Branche · claude/manibetpromax-shadow-v1 · Worker prévu manibetpromax-shadow · KV dédié EU
+- Source · max/worker.mjs + max/dashboard.html + tests + build + ADR DECISION-007
+- Collecte NBA 15 min · routes historiques read-only matches/injuries ESPN · aucune modification moteur ManiBetPro
+- IA/API GPT désactivée par défaut · budget explicite préalable · pas de pourcentage inventé
+- Validation de release requise : tests + upload Worker Max + smoke + observation cron + revue/merge
+- PR #251 D1 historique reste distincte ; ne pas mélanger avec ce chantier
+
+## MAJ · ManiBetProMax indépendant / sans abonnement
+- Choix du créateur : NE PAS utiliser manibetpro comme source/provider ni souscrire à des fournisseurs payants.
+- Branche claude/manibetpromax-shadow-v1 : moteur ESPN indépendant, fichier contrat 16 sections, recherche MacFly horaire, sans OpenAI API.
+- Cron 15 min Worker Max ; KV EU dédié ; PR #254 draft ; tests modèles/rapport/abstention.
+- Une source non disponible reste INCONCLUSIVE ; probabilités Elo non calibrées sans recommandation.
+- Avant GO merge : déploiement module engine+worker, contrôle KV last_success, UI, no legacy binding, source directe réelle, mémoire et tests complets.
