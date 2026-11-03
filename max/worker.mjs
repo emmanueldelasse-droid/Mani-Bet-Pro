@@ -11,6 +11,13 @@ const MAX_ANALYST_PROMPT=''; // méthode publique, lue par MacFly depuis GitHub.
 const VERSION='max-independent-0.3.0';
 const BOXES_PER_CYCLE=2;
 const KEY_METRICS='max:metrics:predictions';
+const KEY_ARCHIVE='max:archive:progress';
+// Archives isolées de la prédiction live : pas de fuite des résultats futurs.
+const ARCHIVE_SEASONS=[
+ {season:'2024-25',start:'20241022',end:'20250630'},
+ {season:'2025-26',start:'20251021',end:'20260630'}
+];
+const ARCHIVE_PER_CYCLE=2;
 const ESPN='https://site.api.espn.com/apis/site/v2/sports/basketball/nba';
 const KEY_HEALTH='max:health:last';
 const KEY_SLATE='max:slate:latest';
@@ -55,6 +62,51 @@ async function sourceJSON(fetcher,path,timeout=12500){
  if(!v||typeof v!=='object')throw new Error('PROVIDER_INVALID_JSON');
  v._fetched_at=new Date().toISOString();
  return v;
+}
+function utcDay(s){return Date.UTC(Number(s.slice(0,4)),Number(s.slice(4,6))-1,Number(s.slice(6,8)));}
+function nextArchiveDay(s){return new Date(utcDay(s)+DAY_MS).toISOString().slice(0,10).replace(/-/g,'');}
+function archiveTarget(){return ARCHIVE_SEASONS.reduce((sum,s)=>sum+1+Math.round((utcDay(s.end)-utcDay(s.start))/DAY_MS),0);}
+export async function archiveStep(kv,fetcher,nowISO,errors=[]){
+ const prior=await read(kv,KEY_ARCHIVE);
+ const p=prior&&Number.isInteger(prior.season_index)&&Number.isInteger(prior.saved_days)?{...prior}:
+  {season_index:0,next_date:ARCHIVE_SEASONS[0].start,saved_days:0,saved_games:0};
+ const target=archiveTarget();
+ if(p.season_index>=ARCHIVE_SEASONS.length)
+  return {state:'COMPLETE',days:p.saved_days,target,games:p.saved_games};
+ // Réessayer les échecs seulement après 1h : ne jamais insister sur une source en panne.
+ if(p.last_error_at&&Date.parse(nowISO)-Date.parse(p.last_error_at)<3600000)
+  return {state:'RETRY_PAUSED',days:p.saved_days,target,games:p.saved_games,last_error:p.last_error};
+ let advanced=0;
+ for(let i=0;i<ARCHIVE_PER_CYCLE;i++){
+  let season=ARCHIVE_SEASONS[p.season_index];
+  if(!season)break;
+  if(p.next_date>season.end){
+   p.season_index++;season=ARCHIVE_SEASONS[p.season_index];
+   if(!season)break;
+   p.next_date=season.start;
+  }
+  const key=p.next_date;
+  try{
+   const raw=await sourceJSON(fetcher,'/scoreboard?dates='+key+'&limit=25',12500);
+   if(!Array.isArray(raw.events))throw Error('ARCHIVE_RESPONSE_INVALID');
+   const games=parseESPNScoreboards([raw]);
+   await put(kv,'max:archive:scoreboard:'+key,{date:key,season:season.season,
+    games,source:'ESPN scoreboard',saved_at:nowISO},86400*365*3);
+   p.saved_days++;p.saved_games+=games.length;p.next_date=nextArchiveDay(key);
+   p.last_success=nowISO;p.last_error=null;p.last_error_at=null;
+   advanced++;
+  }catch(err){
+   p.last_error=String(err?.message??'ARCHIVE_UNKNOWN').slice(0,100);
+   p.last_error_at=nowISO;
+   errors.push('ARCHIVE:'+key+':'+p.last_error);
+   break;
+  }
+ }
+ if(advanced||p.last_error_at)await put(kv,KEY_ARCHIVE,p,86400*365*3);
+ return {state:p.season_index>=ARCHIVE_SEASONS.length?'COMPLETE':p.last_error_at?'ERROR':'WARMING',
+  days:p.saved_days,target,games:p.saved_games,
+  current_season:ARCHIVE_SEASONS[p.season_index]?.season??null,
+  next_date:p.next_date,advanced,last_error:p.last_error??null};
 }
 function recoverInjury(report,previous,nowMS) {
  if(report)return {value:report,age_min:0,state:'OK'};
@@ -204,6 +256,9 @@ export async function collect(env,fetcher=fetch,now=new Date()){
  sources.player_boxes={state:boxes.length?'PARTIAL':'WARMING',
   cached:boxes.length,possible:candidates.length,fetched:newBoxes,
   source:'ESPN game summary',checked_at:nowISO};
+ const archive=await archiveStep(kv,fetcher,nowISO,errors);
+ sources.archive={...archive,source:'ESPN historical scoreboard',
+  label:'Training/backtest archive only; excluded from live forecast to prevent leakage'};
  const previousEvents=await read(kv,KEY_EVENTS);
  const events=Array.isArray(previousEvents)?previousEvents.slice(0,50):[];
  const games=[];let changed=0,researchCount=0;
@@ -284,7 +339,7 @@ export async function collect(env,fetcher=fetch,now=new Date()){
    brier:metrics.brier,log_loss:metrics.log_loss,calibrated:false},
   updated_at:nowISO,mode:'INDEPENDENT_SHADOW',
   games,sources,errors:errors.slice(0,20),
-  ai_status:'MACFLY_CHATGPT_HOURLY',research_count:researchCount,boxscore_count:boxes.length,external_paid_api:false,
+  ai_status:'MACFLY_CHATGPT_HOURLY',research_count:researchCount,boxscore_count:boxes.length,archive_progress:archive,external_paid_api:false,
   disclaimer:'Analyse indépendante expérimentale ; aucune preuve de calibration ni recommandation de pari.'};
  await put(kv,KEY_SLATE,slate,86400*3);
  if(changed)await put(kv,KEY_EVENTS,events.slice(0,50),86400*30);
@@ -306,6 +361,9 @@ export default{
    ai_status:'NOT_CONFIGURED'});
   if(path==='/api/events')return json({events:await read(env.MAX_STATE,KEY_EVENTS)??[]});
   if(path==='/api/metrics')return json(await read(env.MAX_STATE,KEY_METRICS)??summarizeEvaluations([]));
+  if(path==='/api/archive')return json({progress:await read(env.MAX_STATE,KEY_ARCHIVE)??{
+   season_index:0,saved_days:0,saved_games:0,next_date:ARCHIVE_SEASONS[0].start},
+   seasons:ARCHIVE_SEASONS,target_days:archiveTarget(),live_predictions_include_archive:false});
   if(path==='/api/methodology')return new Response(MAX_ANALYST_PROMPT,{headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}});
   return json({error:'NOT_FOUND'},404);
  },
