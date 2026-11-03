@@ -9,7 +9,7 @@ import {POINTS_VERSION,projectPlayerPoints,evaluatePlayerPoints,summarizePlayerP
 
 const MAX_APP_HTML='';
 const MAX_ANALYST_PROMPT=''; // méthode publique, lue par MacFly depuis GitHub.
-const VERSION='max-independent-0.5.0';
+const VERSION='max-independent-0.5.1';
 const BOXES_PER_CYCLE=2;
 const KEY_METRICS='max:metrics:predictions';
 const KEY_PLAYER_METRICS='max:metrics:player-points';
@@ -253,12 +253,50 @@ export async function collect(env,fetcher=fetch,now=new Date()){
  // contrôles de cohérence et cache indépendant des autres Workers.
  const candidates=verifiedFinalGames(historical,nowISO)
   .sort((a,b)=>b.start.localeCompare(a.start)).slice(0,150);
- const boxes=[],pending=[];
+ const boxes=[],pending=[],missing=[];
  const cachedBoxes=await Promise.all(candidates.map(x=>read(kv,'max:box:'+x.id)));
  for(let i=0;i<candidates.length;i++){
   const x=candidates[i],cached=cachedBoxes[i];
   if(cached?.schema_version==='max-box-v1'&&cached.game_id===x.id)boxes.push(cached);
-  else if(pending.length<BOXES_PER_CYCLE&&!await read(kv,'max:box:failed:'+x.id))pending.push(x);
+  else missing.push(x);
+ }
+ // Prioriser les boxscores des équipes QUI JOUENT PROCHAINEMENT plutôt que
+ // collecter indifféremment les derniers matchs de toutes les franchises.
+ const nextGames=coreGames.filter(x=>Date.parse(x.start)>nowMs&&
+  Date.parse(x.start)-nowMs<=48*3600000&&x.status==='STATUS_SCHEDULED');
+ const relevant=new Map();
+ for(const x of nextGames){
+  const hours=(Date.parse(x.start)-nowMs)/3600000;
+  for(const id of [String(x.home.id),String(x.away.id)]){
+   const prev=relevant.get(id);
+   relevant.set(id,Math.min(prev??99,hours));
+  }
+ }
+ const already=new Map();
+ for(const box of boxes)for(const id of [String(box.home_id),String(box.away_id)])
+  already.set(id,(already.get(id)??0)+1);
+ const skipped=new Set();
+ for(let i=0;i<BOXES_PER_CYCLE;i++){
+  const ranked=missing.filter(x=>!skipped.has(x.id)).sort((a,b)=>{
+   const rank=x=>{
+    let priority=0;
+    for(const id of [String(x.home.id),String(x.away.id)]){
+     const hours=relevant.get(id);
+     if(hours!==undefined)priority+=(8-Math.min(7,already.get(id)??0))*
+      (1.2-0.4*hours/48)*100;
+    }
+    return priority+Date.parse(x.start)/8640000000;
+   };
+   return rank(b)-rank(a);
+  });
+  let selected=null;
+  for(const x of ranked)if(!await read(kv,'max:box:failed:'+x.id)){
+   selected=x;break;
+  }else skipped.add(x.id);
+  if(!selected)break;
+  pending.push(selected);skipped.add(selected.id);
+  for(const id of [String(selected.home.id),String(selected.away.id)])
+   already.set(id,(already.get(id)??0)+1);
  }
  let newBoxes=0;
  for(const x of pending){
