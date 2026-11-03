@@ -27,6 +27,16 @@
 - Les prévisions des joueurs sont figées avant le tip (`max:pre:<game_id>:PLAYER_V1/PLAYER_H24/PLAYER_H6/PLAYER_H3/PLAYER_H1`) puis confrontées aux véritables points marqués en fin de match (`max:eval:players:<game_id>`), en calculant MAE/RMSE uniquement sur les joueurs ayant effectivement joué. Absences/non-participations enregistrées séparément.
 - Interface à trois niveaux : liste compacte (équipes / score prévisionnel / TOTAL), fiche match (résumé, projections de TOUS les joueurs, analyse), puis rapport expert MacFly 16 sections et historique. Les projections individuelles ne s'additionnent pas automatiquement au total d'équipe.
 
+
+## Pilotage adaptatif optimisé (v0.6)
+- **Cloudflare Cron** `*/15 * * * *` maintenu : scoreboards, blessures ESPN et surveillance des changements. Ne promet aucune alerte push instantanée : une information nouvelle est détectée à la prochaine collecte puis recoupée.
+- **MacFly ChatGPT** reste à cadence horaire, contrainte de l'automatisation. Chaque passage lit `max:slate:latest.research_agenda` (ou GET `/api/research-plan`) avant toute recherche lourde. `due_count=0` et aucun incident majeur => ne rien rechercher/réécrire inutilement.
+- Jalons de recherche, sur la base de l'heure locale du match : **PREP dans les 48 h**, **DEEP une seule fois vers H24**, **DELTA vers H6, H3, H1, H30**. H30 est une *fenêtre à tenter* et non une promesse : le déclencheur horaire peut manquer l'intervalle de 30 min. Les sources changées restent en statut RECHECK jusqu'à une analyse MacFly postérieure au signal. La seule absence de données nouvelles ne justifie pas 16 sections refaites toutes les heures.
+- **Moteur de scores :** signature déterministe des résultats vérifiés, boxscores d'équipes concernés et version moteur. Si aucune entrée n'a changé, le résultat des 50 000 simulations précédentes est réutilisé. Une nouvelle finale, un boxscore ou une correction invalide le cache et recalcule automatiquement.
+- **Snapshots pré-match immuables** EARLIEST, H24/H6/H3/H1/**H30** et équivalents PLAYER. Après le coup d'envoi, pas de rétroprédiction ; mesure Brier/Log Loss et MAE/RMSE sur prédictions préalablement figées.
+- **Coûts :** pas de nouvelle API payante. Archives ESPN à 2 jours toutes les 30 minutes, boxscores à 2 par cycle ; les statistiques disponibles sont enrichies progressivement. L'exécution horaire de MacFly n'implique pas une nouvelle collecte générale si la recherche n'est pas due.
+- Tests : `node max/tests/test-scheduler.mjs` (29 assertions) et `node max/tests/test-adaptive-integration.mjs` (24 vérifications), en plus des tests historiques.
+
 ## Méthode
 - Collecte toutes les 15 minutes par Cloudflare. Analyse journalistique MacFly une fois par heure via Automations ChatGPT existantes.
 - Sections 1 à 16, sources exactes, heures, données manquantes, statut VERIFIED/PARTIAL/UNAVAILABLE/CONFLICT. Les domaines non observés restent indisponibles.
