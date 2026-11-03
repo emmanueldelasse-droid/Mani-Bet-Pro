@@ -19,14 +19,16 @@
 .reasons{font-size:12px;color:var(--muted);border-top:1px solid var(--edge);padding-top:13px;min-height:50px}.reasons b{color:var(--text)}.tag{font-size:11px;display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border-radius:8px;background:#1b2b44;margin:8px 6px 0 0}
 details{margin-top:13px;border-top:1px solid var(--edge);padding-top:11px}summary{font-weight:700;color:#a4c8ff;cursor:pointer}details h4{margin:14px 0 5px;font-size:12px;color:var(--cyan);letter-spacing:.5px}details p,.notes{font-size:12px;line-height:1.6;color:#cbd8ea}.notes{border-left:2px solid #608bce;padding-left:9px;margin-top:8px}.empty{padding:24px;border:1px dashed var(--edge);border-radius:16px;color:var(--muted);background:#131f3155}
 .timeline{margin-top:30px}.events{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.event{padding:13px;border-radius:12px;background:#121e31;border:1px solid var(--edge);font-size:13px}.event strong{display:block}.event span{font-size:11px;color:var(--muted)}footer{margin-top:35px;padding-top:18px;border-top:1px solid var(--edge);color:var(--muted);font-size:12px}
-@media(max-width:720px){.shell{padding:18px 12px 55px}.hero,.games,.events{grid-template-columns:1fr}.hero{gap:10px}.intro,.health-panel{padding:20px}.stats{grid-template-columns:repeat(2,1fr)}.top{margin-bottom:22px}.game{padding:16px}.brand strong{font-size:18px}.sectionhead h2{font-size:19px}.team{font-size:16px}}
+.forecast{padding:14px;margin:12px 0;border:1px solid #3e587a;background:#102642;border-radius:14px}.prob-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.prob-grid b{display:block;font-size:20px}.prob-grid small{font-size:11px;color:var(--muted)}.forecast .bar{height:9px;border-radius:20px;background:#51607b;overflow:hidden;margin:10px 0}.forecast .bar span{height:100%;display:block;background:linear-gradient(90deg,#69dbcf,#659aff)}.forecast .extra{font-size:12px;color:#d0dcf2;line-height:1.7}.caveat{color:var(--amber);font-size:11px;margin-top:8px}.metrics-strip{padding:15px;background:#15213a;border:1px solid var(--edge);border-radius:15px;margin-bottom:20px;color:var(--muted);font-size:12px}.metrics-strip b{color:var(--text)}.rotations{display:grid;grid-template-columns:1fr 1fr;gap:12px}.player-row{display:flex;align-items:center;justify-content:space-between;gap:5px;font-size:11px;border-bottom:1px solid var(--edge);padding:4px 0}.player-row span{overflow-wrap:anywhere}
+@media(max-width:720px){.shell{padding:18px 12px 55px}.hero,.games,.events{grid-template-columns:1fr}.hero{gap:10px}.intro,.health-panel{padding:20px}.stats{grid-template-columns:repeat(2,1fr)}.top{margin-bottom:22px}.game{padding:16px}.brand strong{font-size:18px}.sectionhead h2{font-size:19px}.team{font-size:16px}.rotations{grid-template-columns:1fr}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 </style>
 </head>
 <body><div class="shell">
 <header class="top"><div class="brand"><div class="mark">M</div><div><strong>ManiBetProMax</strong><small>NBA INTELLIGENCE</small></div></div><button class="btn" id="refresh">Actualiser la vue</button></header>
-<section class="hero"><div class="intro"><div class="eyebrow"><span class="dot"></span>Collecte directe · enquête gratuite MacFly</div><h1>Chaque information peut <span>changer le match.</span></h1><p class="sub">Nouveau moteur NBA autonome. Collecte ESPN directe, historique, forme et Elo expérimental. MacFly croise gratuitement les sources accessibles sur Internet ; aucune API IA payante.</p></div><aside class="health-panel"><div class="health-title">État de l'alimentation</div><div class="health-row"><span>Dernière collecte</span><b id="last">—</b></div><div class="health-row"><span>Source matchs</span><b id="matches-health">—</b></div><div class="health-row"><span>Blessures</span><b id="injuries-health">—</b></div><div class="health-row"><span>Analyse IA</span><b id="ai-health">—</b></div></aside></section>
+<section class="hero"><div class="intro"><div class="eyebrow"><span class="dot"></span>Collecte directe · enquête gratuite MacFly</div><h1>Chaque information peut <span>changer le match.</span></h1><p class="sub">Moteur NBA autonome : minutes joueurs, historiques, scénarios de blessures, simulations statistiques et recherches MacFly sourcées. Sans API payante.</p></div><aside class="health-panel"><div class="health-title">État de l'alimentation</div><div class="health-row"><span>Dernière collecte</span><b id="last">—</b></div><div class="health-row"><span>Source matchs</span><b id="matches-health">—</b></div><div class="health-row"><span>Blessures</span><b id="injuries-health">—</b></div><div class="health-row"><span>Boxscores joueurs</span><b id="boxes-health">—</b></div><div class="health-row"><span>Analyse IA</span><b id="ai-health">—</b></div></aside></section>
 <div class="stats"><div class="stat"><b id="count">—</b><span>Matchs suivis</span></div><div class="stat"><b id="upcoming">—</b><span>À venir</span></div><div class="stat"><b id="inc">—</b><span>À confirmer</span></div><div class="stat"><b id="changes">—</b><span>Évolutions détectées</span></div></div>
+<div class="metrics-strip" id="metrics"><b>Évaluation prospective</b> · Aucune prédiction évaluée sans snapshot antérieur au coup d’envoi.</div>
 <div class="sectionhead"><div><h2>Rencontres NBA</h2><p id="updated">Vérification des données…</p></div><select id="filter"><option value="all">Tous les matchs</option><option value="upcoming">À venir</option><option value="review">Données incomplètes</option></select></div>
 <main class="games" id="games" aria-live="polite"><div class="empty">Chargement des rencontres…</div></main>
 <section class="timeline"><div class="sectionhead"><div><h2>Journal des changements</h2><p>Historique des changements de statut ou de blessures</p></div></div><div class="events" id="events"><div class="empty">Aucune information disponible.</div></div></section>
@@ -36,12 +38,37 @@ details{margin-top:13px;border-top:1px solid var(--edge);padding-top:11px}summar
 const $=id=>document.getElementById(id);
 const escapeHtml=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const local=t=>t?new Date(t).toLocaleString('fr-FR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',timeZone:'Europe/Paris'}):'—';
-let state={games:[],events:[],updated_at:null,sources:null,ai_status:null,health:null};
+let state={games:[],events:[],updated_at:null,sources:null,ai_status:null,health:null,metrics:null};
 const shortStatus=v=>{const x=String(v||'').toUpperCase();if(x.includes('FINAL'))return 'Terminé';if(x.includes('IN_PROGRESS')||x.includes('HALFTIME'))return 'En cours';if(x.includes('POSTPONED'))return 'Reporté';if(x.includes('CANCELED'))return 'Annulé';return 'Pré-match'};
 const injury=(items,team)=>{if(!Array.isArray(items))return '<p>Statuts non vérifiés — aucune conclusion possible.</p>';if(!items.length)return '<p>Aucune absence enregistrée dans la source disponible, à reconfirmer avant le match.</p>';return '<div class="notes">'+items.map(p=>escapeHtml(p.player)+' · '+escapeHtml(p.status)+(p.detail?' · '+escapeHtml(p.detail):'')).join('<br>')+'</div>'};
+function projection(p,g){
+ if(p?.status!=='SIMULATED_UNCALIBRATED')return '<p>Simulations : '+escapeHtml(p?.status||'non disponible')+'. Le moteur ne fabrique pas de probabilités sans historique suffisant.</p>';
+ const h=Number(p.probability_home),away=Number(p.probability_away),w=Math.min(100,Math.max(0,Math.round(h*100)));
+ const s=p.projected_score||{},interval=p.interval_80?.total||[];
+ const adv=p.advanced||{};
+ return '<section class="forecast"><h4>Simulation probabiliste réellement exécutée</h4>'+
+ '<div class="prob-grid"><div><b>'+escapeHtml(g.home.abbreviation)+' · '+escapeHtml((h*100).toFixed(1))+' %</b><small>Victoire domicile estimée</small></div>'+
+ '<div><b>'+escapeHtml(g.away.abbreviation)+' · '+escapeHtml((away*100).toFixed(1))+' %</b><small>Victoire visiteur estimée</small></div></div>'+
+ '<div class="bar" role="img" aria-label="Probabilité domicile '+w+' %"><span style="width:'+w+'%"></span></div>'+
+ '<p class="extra">Projection : '+escapeHtml(s.home)+' – '+escapeHtml(s.away)+
+ ' · Intervalle 80 % du total : '+escapeHtml(interval.join(' à '))+
+ ' · '+escapeHtml(Number(p.simulated_runs).toLocaleString('fr-FR'))+' simulations</p>'+
+ '<p class="extra">Boxscores équipe : '+escapeHtml(adv.home?.games??0)+' / '+escapeHtml(adv.away?.games??0)+
+ ' · ORtg : '+escapeHtml(adv.home?.off_rating??'—')+' / '+escapeHtml(adv.away?.off_rating??'—')+'</p>'+
+ '<p class="caveat">'+escapeHtml(p.warning)+' Les blessures ne sont pas injectées numériquement sans impact validé.</p></section>';
+}
+function rotationView(rot,g){
+ if(!rot)return '<p>Pas de projection de rotation construite après le début du match.</p>';
+ const part=(v,label)=>'<div><h4>'+escapeHtml(label)+'</h4>'+
+ (v?.rotation?.length?v.rotation.slice(0,8).map(x=>'<div class="player-row"><span>'+escapeHtml(x.name)+
+ (x.availability==='OUT'?' · OUT':x.availability==='UNCERTAIN'?' · incertain':'')+
+ '</span><b>'+escapeHtml(x.minutes_hypothesis)+' min</b></div>').join(''):'<p>Historique joueur insuffisant.</p>')+'</div>';
+ return '<div class="rotations">'+part(rot.away,g.away.name)+part(rot.home,g.home.name)+'</div>'+
+ '<p class="caveat">Minutes indicatives issues des cinq derniers matchs joués. Scénarios disponible / limité / absent : hypothèses, pas confirmation officielle.</p>';
+}
 function card(g){
  const future=Date.parse(g.start)>Date.now(),incomplete=g.coverage?.status==='INCONCLUSIVE';
- const a=g.ai_review;const report=g.independent_analysis;const form=report?.home;const formAway=report?.away;const elo=report?.elo;
+ const a=g.ai_review;const report=g.independent_analysis;const form=report?.home;const formAway=report?.away;const elo=report?.elo;const advanced=report?.advanced;
  return '<article class="game"><div class="gamehead"><time>'+escapeHtml(local(g.start))+'</time><span class="pill '+(incomplete?'problem':'')+'">'+escapeHtml(incomplete?'Données à confirmer':'Observations disponibles')+'</span></div>'+
  '<div class="versus"><div class="team">'+escapeHtml(g.away?.name)+'<small>Visiteur · '+escapeHtml(g.away?.record||'Bilan indisponible')+'</small></div><span class="vs">VS</span><div class="team right">'+escapeHtml(g.home?.name)+'<small>Domicile · '+escapeHtml(g.home?.record||'Bilan indisponible')+'</small></div></div>'+
  '<div class="reasons"><b>'+escapeHtml(shortStatus(g.status))+'</b> · '+(future?'Avant coup d’envoi':'Match débuté ou terminé')+
@@ -50,6 +77,8 @@ function card(g){
  '<details><summary>Voir blessures et analyse</summary><h4>Absences · '+escapeHtml(g.away?.name)+'</h4>'+injury(g.injuries?.away,g.away?.name)+'<h4>Absences · '+escapeHtml(g.home?.name)+'</h4>'+injury(g.injuries?.home,g.home?.name)+
  '<h4>Moteur indépendant · données calculées</h4>'+ (report?'<p>Historique : '+escapeHtml(report.inputs?.historical_games)+' matchs · Derniers 10 : '+escapeHtml(form?.last10?.n)+' / '+escapeHtml(formAway?.last10?.n)+' · Repos : '+escapeHtml(form?.rest_days_approx)+' / '+escapeHtml(formAway?.rest_days_approx)+' jours.</p>': '<p>Historique non encore disponible.</p>')+
  (elo?'<div class="tag">Elo exploratoire · '+escapeHtml(g.home?.abbreviation)+' '+escapeHtml(Math.round(elo.probability_home*100))+' % / '+escapeHtml(g.away?.abbreviation)+' '+escapeHtml(Math.round(elo.probability_away*100))+' % · non calibré</div>':'<p>Échantillon encore insuffisant pour l’Elo.</p>')+
+ '<h4>Projection et 50 000 simulations</h4>'+projection(advanced?.forecast,g)+
+ '<h4>Rotations, minutes et absences</h4>'+rotationView(advanced?.rotations,g)+
  '<h4>MacFly · enquête indépendante</h4>'+(a?'<p>'+escapeHtml(a.summary)+'</p><div class="tag">Sections documentées : '+escapeHtml(a.coverage_sections||0)+' / 16 · '+escapeHtml(a.status)+'</div>'+
  '<h4>Principaux risques</h4><div class="notes">'+(a.key_risks||[]).map(escapeHtml).join('<br>')+'</div>'+
  '<h4>Points à revérifier</h4><div class="notes">'+(a.recheck||[]).map(escapeHtml).join('<br>')+'</div>'+
@@ -66,9 +95,14 @@ function render(){
  $('upcoming').textContent=games.filter(g=>Date.parse(g.start)>Date.now()).length;
  $('inc').textContent=games.filter(g=>g.coverage?.status==='INCONCLUSIVE').length;
  $('changes').textContent=state.events?.length||0;
+ const met=state.metrics||{};
+ $('metrics').innerHTML='<b>Évaluation prospective</b> · '+escapeHtml(met.games_evaluated??0)+
+ ' matchs · Brier : '+escapeHtml(met.brier??'—')+' · Log Loss : '+escapeHtml(met.log_loss??'—')+
+ ' · <b>Non calibré</b><p class="caveat">'+escapeHtml(met.warning||'En attente de résultats postérieurs aux premières prévisions.')+'</p>';
  $('last').textContent=local(state.health?.last_success||state.updated_at);
  $('matches-health').textContent=state.health?.sources?.scoreboard?.state||state.sources?.scoreboard?.state||'—';
  $('injuries-health').textContent=state.health?.sources?.injuries?.state||state.sources?.injuries?.state||'—';
+ $('boxes-health').textContent=String(state.health?.sources?.player_boxes?.cached??0)+' validés';
  $('ai-health').textContent=state.ai_status==='MACFLY_CHATGPT_HOURLY'?'MacFly · veille horaire':'Veille non disponible';
  const stale=!state.health?.last_success||(Date.now()-Date.parse(state.health.last_success)>45*60000);
  const down=state.health?.sources?.scoreboard?.state==='ERROR';
@@ -78,10 +112,10 @@ function render(){
 async function load(){
  $('refresh').disabled=true;
  try{
-  const [slate,events,health]=await Promise.all([fetch('/api/slate',{cache:'no-store'}),fetch('/api/events',{cache:'no-store'}),fetch('/api/health',{cache:'no-store'})]);
+  const [slate,events,health,metrics]=await Promise.all([fetch('/api/slate',{cache:'no-store'}),fetch('/api/events',{cache:'no-store'}),fetch('/api/health',{cache:'no-store'}),fetch('/api/metrics',{cache:'no-store'})]);
   if(!slate.ok||!events.ok||!health.ok)throw new Error('Données non disponibles');
-  const d=await slate.json(),e=await events.json(),h=await health.json();
-  state={...d,events:e.events||[],health:h};render();
+  const d=await slate.json(),e=await events.json(),h=await health.json(),m=metrics.ok?await metrics.json():null;
+  state={...d,events:e.events||[],health:h,metrics:m};render();
  }catch(err){$('updated').textContent='Erreur de lecture · '+err.message;}
  finally{$('refresh').disabled=false;}
 }
