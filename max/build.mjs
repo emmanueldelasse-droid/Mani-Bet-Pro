@@ -1,10 +1,11 @@
 import {readFile,mkdir,writeFile} from 'node:fs/promises';
 const dir=new URL('.',import.meta.url);
-const [worker,engine,advanced,points,html,prompt]=await Promise.all([
+const [worker,engine,advanced,points,scheduler,html,prompt]=await Promise.all([
  readFile(new URL('./worker.mjs',dir),'utf8'),
  readFile(new URL('./engine.mjs',dir),'utf8'),
  readFile(new URL('./advanced.mjs',dir),'utf8'),
  readFile(new URL('./points.mjs',dir),'utf8'),
+ readFile(new URL('./scheduler.mjs',dir),'utf8'),
  readFile(new URL('./dashboard.html',dir),'utf8'),
  readFile(new URL('./analyst-prompt.md',dir),'utf8')
 ]);
@@ -17,6 +18,7 @@ await Promise.all([
  writeFile(new URL('./dist/worker.mjs',dir),bundle,'utf8'),
  writeFile(new URL('./dist/engine.mjs',dir),engine,'utf8'),
  writeFile(new URL('./dist/advanced.mjs',dir),advanced,'utf8'),
- writeFile(new URL('./dist/points.mjs',dir),points,'utf8')
+ writeFile(new URL('./dist/points.mjs',dir),points,'utf8'),
+ writeFile(new URL('./dist/scheduler.mjs',dir),scheduler,'utf8')
 ]);
-console.log('ManiBetProMax independent build: worker',bundle.length,'/ engine',engine.length,'/ advanced',advanced.length,'/ points',points.length);
+console.log('ManiBetProMax independent build: worker',bundle.length,'/ engine',engine.length,'/ advanced',advanced.length,'/ points',points.length,'/ scheduler',scheduler.length);
