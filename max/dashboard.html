@@ -179,10 +179,12 @@ function render(){
  if(g)renderDetail(g);else renderOverview();
  $('lastCollect').textContent='Collecte : '+local(state.health?.last_success||state.updated_at);
  $('coverage').textContent='Boxscores : '+(state.health?.sources?.player_boxes?.cached??0);
- $('research').textContent='MacFly : '+(state.research_count??0)+' rapports';
+ $('research').textContent='MacFly : '+(state.research_count??0)+' rapports · '+(state.research_agenda?.due_count??0)+' contrôle(s) prioritaires';
  const metric=state.metrics||{},pm=state.playerMetrics||{};
  $('metrics').innerHTML='<p>Prévisions de victoire évaluées : '+esc(metric.games_evaluated??0)+' matchs · Brier '+esc(metric.brier??'—')+' · Log Loss '+esc(metric.log_loss??'—')+'</p>'+
  '<p>Points des joueurs évalués : '+esc(pm.players_evaluated??0)+' projections sur '+esc(pm.games_evaluated??0)+' matchs · erreur absolue moyenne '+esc(pm.mae??'—')+' pts · RMSE '+esc(pm.rmse??'—')+'</p>'+
+ '<p>Sur la dernière collecte : '+esc(state.forecast_efficiency?.recalculated??'—')+' simulation(s) complète(s) relancée(s), '+esc(state.forecast_efficiency?.reused??'—')+' résultat(s) réutilisé(s) sans calcul redondant.</p>'+ 
+ '<p>Recherche ciblée : '+esc(state.research_agenda?.due_count??'—')+' contrôle(s) MacFly à effectuer selon H24/H6/H3/H1/H30. MacFly est horaire, pas instantané.</p>'+ 
  '<p>Statut : NON CALIBRÉ. Évaluation fondée sur des projections réellement enregistrées avant le début des matchs. Historique archivé : '+esc(state.health?.sources?.archive?.days??0)+' / '+esc(state.health?.sources?.archive?.target??'—')+' journées.</p>';
 }
 function timelineHtml(data){
