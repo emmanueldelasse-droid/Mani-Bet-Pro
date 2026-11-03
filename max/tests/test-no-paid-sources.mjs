@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 
 const base=new URL('../',import.meta.url);
-const [worker,engine,config,prompt]=await Promise.all([
+const [worker,engine,advanced,config,prompt]=await Promise.all([
  readFile(new URL('worker.mjs',base),'utf8'),
  readFile(new URL('engine.mjs',base),'utf8'),
+ readFile(new URL('advanced.mjs',base),'utf8'),
  readFile(new URL('wrangler.jsonc',base),'utf8'),
  readFile(new URL('analyst-prompt.md',base),'utf8')
 ]);
@@ -15,6 +16,7 @@ for(const forbidden of ['api.openai.com','api.anthropic.com','rapidapi.com',
  'PAPER_TRADING','MANI_HISTORY_DB','CLAUDE_API_KEY','OPENAI_API_KEY']){
  test(!worker.includes(forbidden),'Worker Max référence une source interdite : '+forbidden);
  test(!engine.includes(forbidden),'Engine Max référence une source interdite : '+forbidden);
+ test(!advanced.includes(forbidden),'Quant engine Max référence une source interdite : '+forbidden);
 }
 const settings=JSON.parse(config);
 test(settings.name==='manibetpromax-shadow','Nom Worker séparé');
@@ -26,6 +28,10 @@ test(settings.triggers?.crons?.includes('*/15 * * * *'),'Collecte automatique ac
 test(!worker.includes('runAI('),'Aucun client de modèle payant appelé');
 test(worker.includes('validateResearch'),'Rapports MacFly sourcés validés');
 test(worker.includes("api/methodology"),'Prompt documenté publiquement');
+test(worker.includes("api/metrics"),'Évaluation prospective exposée');
+test(advanced.includes("simulated_runs"),'Monte Carlo réellement calculé');
+test(advanced.includes("evaluatePregame"),'Aucune évaluation avant résultat');
+test(advanced.includes("parseBoxscore"),'Feuilles joueurs indépendantes');
 for(let i=1;i<=16;i++){
  test(new RegExp('(?:^|\\n)'+i+'\\. [A-ZÉÈÛÀ]', 'u').test(prompt),'Section '+i+' manquante');
 }
