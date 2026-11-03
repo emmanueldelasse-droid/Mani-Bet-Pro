@@ -2,7 +2,8 @@
 
 ## Architecture
 - Worker Cloudflare manibetpromax-shadow autonome, KV EU MANIBETPROMAX_SHADOW séparé.
-- Collecte ESPN scoreboard/injuries + ESPN game summary?event=id (feuilles finales vérifiées, 2 nouvelles maximum par Cron) ; aucun service binding ni API du projet ManiBetPro historique.
+- Collecte ESPN scoreboard/injuries + ESPN `summary?event=id` (feuilles finales vérifiées, 2 nouvelles maximum par Cron) ; aucun service binding ni API du projet ManiBetPro historique.
+- Archivage asynchrone par Cron des saisons 2024-25 (22 octobre 2024–30 juin 2025) et 2025-26 (21 octobre 2025–30 juin 2026) : **505 journées calendaires**, jusqu'à deux nouvelles journées par cycle, curseur permanent `max:archive:progress`, snapshots `max:archive:scoreboard:YYYYMMDD`. Aucune date archivée n'est injectée dans le modèle live sans évaluation chronologique adéquate ; les saisons archivées ne servent pas encore à recalibrer les probabilités.
 - Deux moteurs indépendants : max/engine.mjs (formes 5/10/20, repos, Elo exploratoire) et max/advanced.mjs (minutes/statistiques des joueurs ESPN, quatre facteurs, possessions/ratings, simulations de 50 000 tirages effectifs, évaluation post-match Brier/Log Loss).
 - Référentiel intégral des 16 domaines dans max/analyst-prompt.md.
 - MacFly ChatGPT : enquête publique et gratuite horaire, puis écriture de rapports sourcés max:research:<match_id> dans le KV Max.
@@ -28,8 +29,8 @@
 - Interdiction de promettre toutes les statistiques indisponibles ou payantes.
 
 ## Routes & tests
-- GET /, /api/slate, /api/events, /api/health, /api/metrics et /api/methodology.
-- `node max/tests/test-core.mjs` ; `node max/tests/test-advanced.mjs` (27 assertions) ; `node max/tests/test-no-paid-sources.mjs` ; `node max/build.mjs`.
+- GET `/`, `/api/slate`, `/api/events`, `/api/health`, `/api/metrics`, `/api/archive` et `/api/methodology`.
+- `node max/tests/test-core.mjs` ; `node max/tests/test-advanced.mjs` (27 assertions) ; `node max/tests/test-archive.mjs` (17 assertions) ; `node max/tests/test-no-paid-sources.mjs` ; `node max/build.mjs`.
 - npx wrangler deploy --config max/wrangler.jsonc ; IMPORTANT : ne jamais déployer sur le Worker manibetpro.
 - Vérifier les sources effectives du Cron, absence de LEGACY_SERVICE, mode INDEPENDENT_SHADOW.
 - Aucune source ou abonnement payant activé. Cloudflare et ChatGPT restent soumis aux limites du compte existant.
@@ -40,7 +41,7 @@
 - Les simulations 50 000 tirages sont implémentées et exercées par les tests, mais leur calibration, leur performance hors échantillon et la fiabilité des scores restent À DÉMONTRER. Les métadonnées Brier/Log Loss ne commenceront qu'après le résultat de matchs futurs ayant réellement un snapshot pré-tip.
 - Collecte structurée ESPN final boxscore progressive; ne fournit pas encore EPM/DPM propriétaires, véritable tracking spatial, toutes les possessions ni une estimation causale d'absence.
 - Pas de diffusion de cotes artificielles, EV/CLV/ROI : champs volontairement null. La collecte de cotes gratuites n'est pas active.
-- Historique saisonnier initial des 45 jours, non encore trois saisons complètes. MacFly conserve une cadence horaire; ne peut pas garantir une veille manuelle instantanée.
+- Historique initial 45 jours complet, archivage progressif de deux saisons précédentes ajouté au Cron mais à laisser se remplir. Pas encore de validation hors échantillon par saison. MacFly conserve une cadence horaire ; ne peut pas garantir une veille manuelle instantanée.
 - Historique KV temporaire, D1 indépendante future pour audit append-only.
 
 ## MEMORY FILES UPDATED
