@@ -6,10 +6,11 @@
 import {ENGINE_VERSION,parseESPNScoreboards,parseESPNInjuries,analyzeNBA,verifiedFinalGames} from './engine.mjs';
 import {ADVANCED_VERSION,parseBoxscore,rotationAnalysis,forecastGame,evaluatePregame,summarizeEvaluations} from './advanced.mjs';
 import {POINTS_VERSION,projectPlayerPoints,evaluatePlayerPoints,summarizePlayerPointsEvaluations} from './points.mjs';
+import {SCHEDULER_VERSION,forecastInputSignature,canReuseForecast,researchPriority,agendaFromGames} from './scheduler.mjs';
 
 const MAX_APP_HTML='';
 const MAX_ANALYST_PROMPT=''; // méthode publique, lue par MacFly depuis GitHub.
-const VERSION='max-independent-0.5.2';
+const VERSION='max-independent-0.6.0';
 const BOXES_PER_CYCLE=2;
 const KEY_METRICS='max:metrics:predictions';
 const KEY_PLAYER_METRICS='max:metrics:player-points';
@@ -120,7 +121,7 @@ function recoverInjury(report,previous,nowMS) {
 function currentCheckpoint(game,nowMs){
  const hours=(Date.parse(game.start)-nowMs)/3600000;
  if(hours<=0||hours>26||String(game.status).includes('FINAL'))return null;
- return hours<=1.25?'H1':hours<=3.25?'H3':hours<=6.25?'H6':hours<=24.25?'H24':null;
+ return hours<=0.5?'H30':hours<=1.25?'H1':hours<=3.25?'H3':hours<=6.25?'H6':hours<=24.25?'H24':null;
 }
 function sanitizeText(x,max=400){return typeof x==='string'?x.slice(0,max):'';}
 function forAI(game){
@@ -327,6 +328,7 @@ export async function collect(env,fetcher=fetch,now=new Date()){
  const previousEvents=await read(kv,KEY_EVENTS);
  const events=Array.isArray(previousEvents)?previousEvents.slice(0,50):[];
  const games=[];let changed=0,researchCount=0;
+ let monteCarloRun=0,monteCarloReuse=0;
  const activeGames=coreGames.slice(0,40);
  const [priors,researches]=await Promise.all([
   Promise.all(activeGames.map(x=>read(kv,'max:game:'+x.id))),
@@ -340,7 +342,15 @@ export async function collect(env,fetcher=fetch,now=new Date()){
  for(let gameIndex=0;gameIndex<activeGames.length;gameIndex++){
   const sourceGame=activeGames[gameIndex],prior=priors[gameIndex];
   const statistical=analyzeNBA(sourceGame,historical,injury.value,nowISO);
-  const forecast=forecastGame(sourceGame,historical,boxes,nowISO);
+  const isPregame=statistical.pregame;
+  const inputSignature=isPregame?
+   forecastInputSignature(sourceGame,historical,boxes,ADVANCED_VERSION):null;
+  const reusable=isPregame&&canReuseForecast(prior,inputSignature,sourceGame,nowISO);
+  const forecast=reusable?prior.independent_analysis.advanced.forecast:
+   forecastGame(sourceGame,historical,boxes,nowISO);
+  if(forecast.simulated_runs===50000){
+   if(reusable)monteCarloReuse++;else monteCarloRun++;
+  }
   const rawResearch=researches[gameIndex];
   const verifiedResearch=validateResearch(rawResearch,sourceGame,nowISO);
   if(verifiedResearch)researchCount++;
@@ -353,7 +363,10 @@ export async function collect(env,fetcher=fetch,now=new Date()){
   const playerPoints=projectPlayerPoints(sourceGame,boxes,statistical.injuries,
    official,forecast,nowISO);
   const advanced={version:ADVANCED_VERSION,player_points_version:POINTS_VERSION,
-   forecast,player_points:playerPoints,rotations,
+   forecast,forecast_signature:inputSignature,
+   forecast_calculated_at:reusable?
+    prior.independent_analysis.advanced.forecast_calculated_at??null:nowISO,
+   player_points:playerPoints,rotations,
    official_injuries_count:official.length,
    source_games:historical.length,boxscore_games:boxes.length,calibrated:false};
   const g={...sourceGame,checked_at:nowISO,
@@ -371,12 +384,20 @@ export async function collect(env,fetcher=fetch,now=new Date()){
    ai_review:verifiedResearch?{...verifiedResearch,
      model:'MacFly · ChatGPT',web_search_enabled:true}:null};
   const changes=changesForGame(prior,g);
+  g.source_changes=changes;
+  const rawAgendaRecord=rawResearch?.schema_version==='max-research-v1'&&
+   String(rawResearch?.match_id)===String(g.id)&&
+   Number.isFinite(Date.parse(rawResearch.generated_at))&&
+   Date.parse(rawResearch.generated_at)<Date.parse(g.start)&&
+   Date.parse(rawResearch.generated_at)<=nowMs&&
+   Array.isArray(rawResearch.sources)&&rawResearch.sources.some(x=>/^https:\/\//.test(x?.url??''))?
+    {match_id:g.id,generated_at:rawResearch.generated_at}:verifiedResearch;
+  g.research_priority=researchPriority(g,rawAgendaRecord,nowISO,changes);
   if(changes.length){
    changed++;
    events.unshift({id:g.id,match:g.away.name+' @ '+g.home.name,changes,at:nowISO});
    await put(kv,'max:history:'+g.id+':'+nowMs,{at:nowISO,changes,game:g},86400*30);
   }
-  const isPregame=statistical.pregame;
   const cp=isPregame?currentCheckpoint(g,nowMs):null;
   if(isPregame){
    for(const checkpoint of ['EARLIEST',...(cp?[cp]:[])]){
@@ -400,7 +421,7 @@ export async function collect(env,fetcher=fetch,now=new Date()){
   if(String(g.status).includes('FINAL')&&Number.isFinite(g.home.score)&&Number.isFinite(g.away.score)){
    const existing=await read(kv,'max:eval:'+g.id);
    if(!existing){
-    for(const checkpoint of ['H1','H3','H6','H24','EARLIEST']){
+    for(const checkpoint of ['H30','H1','H3','H6','H24','EARLIEST']){
      const snap=await read(kv,'max:pre:'+g.id+':'+checkpoint);
      const evaluation=evaluatePregame(g,snap);
      if(evaluation){
@@ -415,7 +436,7 @@ export async function collect(env,fetcher=fetch,now=new Date()){
    const exists=await read(kv,'max:eval:players:'+g.id);
    const finalBox=boxes.find(b=>b.game_id===g.id);
    if(!exists&&finalBox){
-    for(const checkpoint of ['PLAYER_H1','PLAYER_H3','PLAYER_H6','PLAYER_H24','PLAYER_V1']){
+    for(const checkpoint of ['PLAYER_H30','PLAYER_H1','PLAYER_H3','PLAYER_H6','PLAYER_H24','PLAYER_V1']){
      const snap=await read(kv,'max:pre:'+g.id+':'+checkpoint);
      const ev=evaluatePlayerPoints(g,finalBox,snap);
      if(ev){
@@ -425,7 +446,9 @@ export async function collect(env,fetcher=fetch,now=new Date()){
     }
    }
   }
-  if(!prior||!prior.independent_analysis||changes.length||prior.quantitative_version!==POINTS_VERSION)
+  if(!prior||!prior.independent_analysis||changes.length||
+   prior.quantitative_version!==POINTS_VERSION||
+   prior.independent_analysis?.advanced?.forecast_signature!==inputSignature)
    gameWrites.push(put(kv,'max:game:'+g.id,g));
   games.push(g);
  }
@@ -444,7 +467,10 @@ export async function collect(env,fetcher=fetch,now=new Date()){
  const [metrics,playerMetrics]=await Promise.all([
   read(kv,KEY_METRICS),read(kv,KEY_PLAYER_METRICS)
  ]);
+ const agenda=agendaFromGames(games,nowISO);
  const slate={schema_version:VERSION,engine_version:ENGINE_VERSION,
+  scheduler_version:SCHEDULER_VERSION,research_agenda:agenda,
+  forecast_efficiency:{recalculated:monteCarloRun,reused:monteCarloReuse},
   advanced_version:ADVANCED_VERSION,points_version:POINTS_VERSION,
   metrics_summary:{games_evaluated:metrics?.games_evaluated??0,
    brier:metrics?.brier??null,log_loss:metrics?.log_loss??null,
@@ -460,7 +486,11 @@ export async function collect(env,fetcher=fetch,now=new Date()){
  if(changed)await put(kv,KEY_EVENTS,events.slice(0,50),86400*30);
  health.last_success=nowISO;health.game_count=games.length;
  await put(kv,KEY_HEALTH,health,86400*7);
- return {...health,updated:true,events_new:changed,research_reports:researchCount,boxes_cached:boxes.length,boxes_new:newBoxes,new_evaluations:newEvaluations,new_player_evaluations:newPlayerEvaluations,external_paid_api:false,history_fetched:fetched.filter(x=>x.status==='fulfilled').length};
+ return {...health,updated:true,events_new:changed,research_reports:researchCount,
+  research_due:agenda.due_count,monte_carlo_executed:monteCarloRun,
+  monte_carlo_reused:monteCarloReuse,boxes_cached:boxes.length,boxes_new:newBoxes,
+  new_evaluations:newEvaluations,new_player_evaluations:newPlayerEvaluations,
+  external_paid_api:false,history_fetched:fetched.filter(x=>x.status==='fulfilled').length};
 }
 export default{
  async fetch(request,env){
@@ -477,7 +507,7 @@ export default{
    const slate=await read(env.MAX_STATE,KEY_SLATE);
    const game=slate?.games?.find(g=>String(g.id)===id);
    if(!game)return json({error:'GAME_NOT_FOUND'},404);
-   const checkpoints=['EARLIEST','H24','H6','H3','H1','PLAYER_V1','PLAYER_H24','PLAYER_H6','PLAYER_H3','PLAYER_H1'];
+   const checkpoints=['EARLIEST','H24','H6','H3','H1','H30','PLAYER_V1','PLAYER_H24','PLAYER_H6','PLAYER_H3','PLAYER_H1','PLAYER_H30'];
    const [snapshots,evaluation,playerEvaluation]=await Promise.all([
     Promise.all(checkpoints.map(cp=>read(env.MAX_STATE,'max:pre:'+id+':'+cp))),
     read(env.MAX_STATE,'max:eval:'+id),
@@ -505,6 +535,8 @@ export default{
   if(path==='/api/events')return json({events:await read(env.MAX_STATE,KEY_EVENTS)??[]});
   if(path==='/api/metrics')return json(await read(env.MAX_STATE,KEY_METRICS)??summarizeEvaluations([]));
   if(path==='/api/player-metrics')return json(await read(env.MAX_STATE,KEY_PLAYER_METRICS)??summarizePlayerPointsEvaluations([]));
+  if(path==='/api/research-plan')return json((await read(env.MAX_STATE,KEY_SLATE))?.research_agenda??{
+   generated_at:null,eligible:0,due_count:0,due:[],all:[],state:'AWAITING_FIRST_COLLECTION'});
   if(path==='/api/archive')return json({progress:await read(env.MAX_STATE,KEY_ARCHIVE)??{
    season_index:0,saved_days:0,saved_games:0,next_date:ARCHIVE_SEASONS[0].start},
    seasons:ARCHIVE_SEASONS,target_days:archiveTarget(),live_predictions_include_archive:false});
