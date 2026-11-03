@@ -8,7 +8,7 @@ import {ADVANCED_VERSION,parseBoxscore,rotationAnalysis,forecastGame,evaluatePre
 
 const MAX_APP_HTML='';
 const MAX_ANALYST_PROMPT=''; // méthode publique, lue par MacFly depuis GitHub.
-const VERSION='max-independent-0.4.0';
+const VERSION='max-independent-0.4.1';
 const BOXES_PER_CYCLE=2;
 const KEY_METRICS='max:metrics:predictions';
 const KEY_ARCHIVE='max:archive:progress';
@@ -362,6 +362,31 @@ export default{
     'X-Frame-Options':'DENY','X-Content-Type-Options':'nosniff'}});
   if(!env?.MAX_STATE)return json({error:'STORAGE_NOT_CONFIGURED'},503);
   if(path==='/api/health')return json(await read(env.MAX_STATE,KEY_HEALTH)??{state:'NO_DATA'});
+  if(path==='/api/game'){
+   const id=new URL(request.url).searchParams.get('id')??'';
+   if(!/^\d{5,15}$/.test(id))return json({error:'INVALID_GAME_ID'},400);
+   const slate=await read(env.MAX_STATE,KEY_SLATE);
+   const game=slate?.games?.find(g=>String(g.id)===id);
+   if(!game)return json({error:'GAME_NOT_FOUND'},404);
+   const checkpoints=['EARLIEST','H24','H6','H3','H1'];
+   const [snapshots,evaluation]=await Promise.all([
+    Promise.all(checkpoints.map(cp=>read(env.MAX_STATE,'max:pre:'+id+':'+cp))),
+    read(env.MAX_STATE,'max:eval:'+id)
+   ]);
+   const timeline=snapshots.filter(p=>p&&p.game_id===id&&
+    Number.isFinite(Date.parse(p.at))&&Date.parse(p.at)<Date.parse(game.start))
+    .sort((a,b)=>a.at.localeCompare(b.at))
+    .map(p=>({checkpoint:p.checkpoint,at:p.at,model:p.model,
+     forecast:p.forecast??null,context_status:p.context_status??'UNKNOWN',
+     injury_counts:{
+      home:Array.isArray(p.injuries?.home)?p.injuries.home.length:null,
+      away:Array.isArray(p.injuries?.away)?p.injuries.away.length:null
+     }}));
+   return json({match_id:id,start:game.start,teams:{home:game.home.name,away:game.away.name},
+    timeline,evaluation:evaluation?.pregame_at&&Date.parse(evaluation.pregame_at)<Date.parse(game.start)?
+     evaluation:null,source:'Max immutable pre-tip snapshots',
+    warning:'Snapshots réellement enregistrés avant coup d’envoi uniquement ; pas de reconstruction rétroactive.'});
+  }
   if(path==='/api/slate')return json(await read(env.MAX_STATE,KEY_SLATE)??{
    schema_version:VERSION,updated_at:null,games:[],mode:'INDEPENDENT_SHADOW',
    ai_status:'NOT_CONFIGURED'});
