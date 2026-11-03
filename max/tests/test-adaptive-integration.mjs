@@ -27,10 +27,13 @@ for(let offset=2;offset<=46;offset++){
   games:prior.filter(x=>x.start.slice(0,10).replace(/-/g,'')===day)}));
 }
 for(const g of prior)state.set('max:box:failed:'+g.id,JSON.stringify({reason:'TEST_NOT_AVAILABLE'}));
+let injuryAlert=false;
 const fetcher=async url=>{
  const d=url.match(/dates=(\d{8})/)?.[1];
  return {ok:true,json:async()=>url.endsWith('/injuries')?
-  {injuries:[{displayName:'Denver Nuggets',injuries:[]},{displayName:'Los Angeles Lakers',injuries:[]}]}:
+  {injuries:[{displayName:'Denver Nuggets',injuries:injuryAlert?
+   [{athlete:{displayName:'Late Player'},status:'Questionable',shortComment:'New signal'}]:[]},
+   {displayName:'Los Angeles Lakers',injuries:[]}]}:
   {events:d==='20261104'?[payload(upcoming)]:[]}};
 };
 const one=await collect({MAX_STATE:kv},fetcher,firstNow);
@@ -67,5 +70,22 @@ const three=await collect({MAX_STATE:kv},fetcher,new Date('2026-11-03T19:30:00.0
 eq(three.monte_carlo_reused,1,'reused through next phase on unchanged NBA inputs');
 eq(three.research_due,1,'H6 research now due');
 eq(JSON.parse(state.get('max:slate:latest')).research_agenda.due[0].phase,'H6','H6 delta scheduled');
+injuryAlert=true;
+const fourth=await collect({MAX_STATE:kv},fetcher,new Date('2026-11-03T19:45:00.000Z'));
+ok(fourth.events_new>=1,'new injury feed signal detected');
+const latest=JSON.parse(state.get('max:slate:latest'));
+eq(latest.research_agenda.due[0].action,'RECHECK','change promotes targeted verification');
+const signal=latest.games[0].source_signal_at;
+ok(signal,'change recorded until acknowledged');
+const fifth=await collect({MAX_STATE:kv},fetcher,new Date('2026-11-03T20:00:00.000Z'));
+eq(fifth.research_due,1,'unacknowledged change remains due for next MacFly run');
+eq(JSON.parse(state.get('max:slate:latest')).research_agenda.due[0].action,'RECHECK',
+ 'signal remains even though ESPN stops changing');
+const newer=JSON.parse(state.get('max:research:'+id));
+newer.generated_at='2026-11-03T20:05:00.000Z';
+newer.sources[0].checked_at='2026-11-03T20:03:00.000Z';
+state.set('max:research:'+id,JSON.stringify(newer));
+const sixth=await collect({MAX_STATE:kv},fetcher,new Date('2026-11-03T20:15:00.000Z'));
+eq(sixth.research_due,0,'new MacFly report acknowledges source change');
 ok(writes.every(key=>key.startsWith('max:')),'all storage writes strictly independent');
 console.log('ManiBetProMax adaptive end-to-end : '+n+' checks OK');
