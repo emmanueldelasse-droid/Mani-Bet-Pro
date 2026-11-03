@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 
 const base=new URL('../',import.meta.url);
-const [worker,engine,advanced,points,config,prompt]=await Promise.all([
+const [worker,engine,advanced,points,scheduler,config,prompt]=await Promise.all([
  readFile(new URL('worker.mjs',base),'utf8'),
  readFile(new URL('engine.mjs',base),'utf8'),
  readFile(new URL('advanced.mjs',base),'utf8'),
  readFile(new URL('points.mjs',base),'utf8'),
+ readFile(new URL('scheduler.mjs',base),'utf8'),
  readFile(new URL('wrangler.jsonc',base),'utf8'),
  readFile(new URL('analyst-prompt.md',base),'utf8')
 ]);
@@ -19,6 +20,7 @@ for(const forbidden of ['api.openai.com','api.anthropic.com','rapidapi.com',
  test(!engine.includes(forbidden),'Engine Max référence une source interdite : '+forbidden);
  test(!advanced.includes(forbidden),'Quant engine Max référence une source interdite : '+forbidden);
  test(!points.includes(forbidden),'Points Max référence une source interdite : '+forbidden);
+ test(!scheduler.includes(forbidden),'Scheduler Max référence une source interdite : '+forbidden);
 }
 const settings=JSON.parse(config);
 test(settings.name==='manibetpromax-shadow','Nom Worker séparé');
@@ -33,6 +35,10 @@ test(worker.includes("api/methodology"),'Prompt documenté publiquement');
 test(worker.includes("api/metrics"),'Évaluation prospective exposée');
 test(worker.includes("api/archive"),'Archives en lecture seule exposées');
 test(worker.includes("api/player-metrics"),'Erreurs individuelles observées');
+test(worker.includes("api/research-plan"),'Agenda MacFly consultable en lecture seule');
+test(scheduler.includes("researchPriority"),'Exécution MacFly guidée par besoin réel');
+test(scheduler.includes("canReuseForecast"),'Réutilisation simulations inchangées');
+test(scheduler.includes("H30"),'Contrôle pré-match à H30');
 test(points.includes("projectPlayerPoints"),'Projection points par joueur active');
 test(worker.includes("verified_injuries"),'Statuts NBA officielles liées au match uniquement');
 test(worker.includes("api/game"),'Snapshots historiques accessibles en lecture seule');
