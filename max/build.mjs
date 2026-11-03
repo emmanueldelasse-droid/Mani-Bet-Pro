@@ -1,8 +1,9 @@
 import {readFile,mkdir,writeFile} from 'node:fs/promises';
 const dir=new URL('.',import.meta.url);
-const [worker,engine,html,prompt]=await Promise.all([
+const [worker,engine,advanced,html,prompt]=await Promise.all([
  readFile(new URL('./worker.mjs',dir),'utf8'),
  readFile(new URL('./engine.mjs',dir),'utf8'),
+ readFile(new URL('./advanced.mjs',dir),'utf8'),
  readFile(new URL('./dashboard.html',dir),'utf8'),
  readFile(new URL('./analyst-prompt.md',dir),'utf8')
 ]);
@@ -13,6 +14,7 @@ const bundle=worker.replace("const MAX_APP_HTML='';",'const MAX_APP_HTML='+JSON.
 await mkdir(new URL('./dist/',dir),{recursive:true});
 await Promise.all([
  writeFile(new URL('./dist/worker.mjs',dir),bundle,'utf8'),
- writeFile(new URL('./dist/engine.mjs',dir),engine,'utf8')
+ writeFile(new URL('./dist/engine.mjs',dir),engine,'utf8'),
+ writeFile(new URL('./dist/advanced.mjs',dir),advanced,'utf8')
 ]);
 console.log('ManiBetProMax independent build: worker',bundle.length,'/ engine',engine.length);
