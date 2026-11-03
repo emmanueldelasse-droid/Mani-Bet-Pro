@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 
 const base=new URL('../',import.meta.url);
-const [worker,engine,advanced,config,prompt]=await Promise.all([
+const [worker,engine,advanced,points,config,prompt]=await Promise.all([
  readFile(new URL('worker.mjs',base),'utf8'),
  readFile(new URL('engine.mjs',base),'utf8'),
  readFile(new URL('advanced.mjs',base),'utf8'),
+ readFile(new URL('points.mjs',base),'utf8'),
  readFile(new URL('wrangler.jsonc',base),'utf8'),
  readFile(new URL('analyst-prompt.md',base),'utf8')
 ]);
@@ -17,6 +18,7 @@ for(const forbidden of ['api.openai.com','api.anthropic.com','rapidapi.com',
  test(!worker.includes(forbidden),'Worker Max référence une source interdite : '+forbidden);
  test(!engine.includes(forbidden),'Engine Max référence une source interdite : '+forbidden);
  test(!advanced.includes(forbidden),'Quant engine Max référence une source interdite : '+forbidden);
+ test(!points.includes(forbidden),'Points Max référence une source interdite : '+forbidden);
 }
 const settings=JSON.parse(config);
 test(settings.name==='manibetpromax-shadow','Nom Worker séparé');
@@ -30,6 +32,9 @@ test(worker.includes('validateResearch'),'Rapports MacFly sourcés validés');
 test(worker.includes("api/methodology"),'Prompt documenté publiquement');
 test(worker.includes("api/metrics"),'Évaluation prospective exposée');
 test(worker.includes("api/archive"),'Archives en lecture seule exposées');
+test(worker.includes("api/player-metrics"),'Erreurs individuelles observées');
+test(points.includes("projectPlayerPoints"),'Projection points par joueur active');
+test(worker.includes("verified_injuries"),'Statuts NBA officielles liées au match uniquement');
 test(worker.includes("api/game"),'Snapshots historiques accessibles en lecture seule');
 test(worker.includes("max:archive:progress"),'Curseur archives isolé Max');
 test(advanced.includes("simulated_runs"),'Monte Carlo réellement calculé');
