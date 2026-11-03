@@ -8,7 +8,7 @@ import {ADVANCED_VERSION,parseBoxscore,rotationAnalysis,forecastGame,evaluatePre
 
 const MAX_APP_HTML='';
 const MAX_ANALYST_PROMPT=''; // méthode publique, lue par MacFly depuis GitHub.
-const VERSION='max-independent-0.3.0';
+const VERSION='max-independent-0.4.0';
 const BOXES_PER_CYCLE=2;
 const KEY_METRICS='max:metrics:predictions';
 const KEY_ARCHIVE='max:archive:progress';
@@ -205,15 +205,13 @@ export async function collect(env,fetcher=fetch,now=new Date()){
  const historyRaw=[];
  const fetchDates=[];
  let cachedHistoryDays=0;
- for(let d=2;d<=HISTORY_DAYS+1;d++){
-  const day=dateKey(now,-d);
-  const snapshot=await read(kv,'max:scoreboard:'+day);
+ const historicDays=Array.from({length:HISTORY_DAYS},(_,i)=>dateKey(now,-i-2));
+ const historicCache=await Promise.all(historicDays.map(day=>read(kv,'max:scoreboard:'+day)));
+ for(let i=0;i<historicDays.length;i++){
+  const day=historicDays[i],snapshot=historicCache[i];
   if(snapshot?.date===day&&Array.isArray(snapshot.games)){
-   cachedHistoryDays++;
-   historyRaw.push(...snapshot.games);
-  }else if(fetchDates.length<HISTORY_PER_CYCLE){
-   fetchDates.push(day);
-  }
+   cachedHistoryDays++;historyRaw.push(...snapshot.games);
+  }else if(fetchDates.length<HISTORY_PER_CYCLE)fetchDates.push(day);
  }
  const fetched=await Promise.allSettled(fetchDates.map(async d=>{
   const raw=await sourceJSON(fetcher,'/scoreboard?dates='+d+'&limit=25');
@@ -235,8 +233,9 @@ export async function collect(env,fetcher=fetch,now=new Date()){
  const candidates=verifiedFinalGames(historical,nowISO)
   .sort((a,b)=>b.start.localeCompare(a.start)).slice(0,150);
  const boxes=[],pending=[];
- for(const x of candidates){
-  const cached=await read(kv,'max:box:'+x.id);
+ const cachedBoxes=await Promise.all(candidates.map(x=>read(kv,'max:box:'+x.id)));
+ for(let i=0;i<candidates.length;i++){
+  const x=candidates[i],cached=cachedBoxes[i];
   if(cached?.schema_version==='max-box-v1'&&cached.game_id===x.id)boxes.push(cached);
   else if(pending.length<BOXES_PER_CYCLE&&!await read(kv,'max:box:failed:'+x.id))pending.push(x);
  }
@@ -262,11 +261,17 @@ export async function collect(env,fetcher=fetch,now=new Date()){
  const previousEvents=await read(kv,KEY_EVENTS);
  const events=Array.isArray(previousEvents)?previousEvents.slice(0,50):[];
  const games=[];let changed=0,researchCount=0;
+ const activeGames=coreGames.slice(0,40);
+ const [priors,researches]=await Promise.all([
+  Promise.all(activeGames.map(x=>read(kv,'max:game:'+x.id))),
+  Promise.all(activeGames.map(x=>read(kv,'max:research:'+x.id)))
+ ]);
+ const gameWrites=[];
  const oldMetrics=await read(kv,KEY_METRICS);
  const metricsRows=Array.isArray(oldMetrics?.records)?oldMetrics.records.slice(-120):[];
  let newEvaluations=0;
- for(const sourceGame of coreGames.slice(0,40)){
-  const prior=await read(kv,'max:game:'+sourceGame.id);
+ for(let gameIndex=0;gameIndex<activeGames.length;gameIndex++){
+  const sourceGame=activeGames[gameIndex],prior=priors[gameIndex];
   const statistical=analyzeNBA(sourceGame,historical,injury.value,nowISO);
   const forecast=forecastGame(sourceGame,historical,boxes,nowISO);
   const rotations=statistical.pregame?{
@@ -275,7 +280,7 @@ export async function collect(env,fetcher=fetch,now=new Date()){
   }:null;
   const advanced={version:ADVANCED_VERSION,forecast,rotations,
    source_games:historical.length,boxscore_games:boxes.length,calibrated:false};
-  const rawResearch=await read(kv,'max:research:'+sourceGame.id);
+  const rawResearch=researches[gameIndex];
   const verifiedResearch=validateResearch(rawResearch,sourceGame,nowISO);
   if(verifiedResearch)researchCount++;
   const g={...sourceGame,checked_at:nowISO,
@@ -324,9 +329,10 @@ export async function collect(env,fetcher=fetch,now=new Date()){
    }
   }
   if(!prior||!prior.independent_analysis||changes.length||prior.quantitative_version!==ADVANCED_VERSION)
-   await put(kv,'max:game:'+g.id,g);
+   gameWrites.push(put(kv,'max:game:'+g.id,g));
   games.push(g);
  }
+ await Promise.all(gameWrites);
  if(newEvaluations){
   const distinct=[...new Map(metricsRows.map(x=>[x.match_id,x])).values()]
    .sort((a,b)=>a.tip.localeCompare(b.tip)).slice(-120);
