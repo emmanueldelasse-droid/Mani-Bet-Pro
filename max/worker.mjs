@@ -9,7 +9,7 @@ import {POINTS_VERSION,projectPlayerPoints,evaluatePlayerPoints,summarizePlayerP
 
 const MAX_APP_HTML='';
 const MAX_ANALYST_PROMPT=''; // méthode publique, lue par MacFly depuis GitHub.
-const VERSION='max-independent-0.5.1';
+const VERSION='max-independent-0.5.2';
 const BOXES_PER_CYCLE=2;
 const KEY_METRICS='max:metrics:predictions';
 const KEY_PLAYER_METRICS='max:metrics:player-points';
@@ -314,7 +314,14 @@ export async function collect(env,fetcher=fetch,now=new Date()){
  sources.player_boxes={state:boxes.length?'PARTIAL':'WARMING',
   cached:boxes.length,possible:candidates.length,fetched:newBoxes,
   source:'ESPN game summary',checked_at:nowISO};
- const archive=await archiveStep(kv,fetcher,nowISO,errors);
+ // La formule Cloudflare KV Free limite les écritures quotidiennes :
+ // archives 2 jours / 30 min (au lieu de chaque cycle 15 min) ; priorité
+ // aux boxscores des matches imminents et aux prévisions pré-match.
+ const archive=now.getUTCMinutes()%30===0?
+  await archiveStep(kv,fetcher,nowISO,errors):
+  ((progress)=>({state:'WARMING',days:progress?.saved_days??0,target:archiveTarget(),
+   games:progress?.saved_games??0,next_date:progress?.next_date??ARCHIVE_SEASONS[0].start,
+   advanced:0}))(await read(kv,KEY_ARCHIVE));
  sources.archive={...archive,source:'ESPN historical scoreboard',
   label:'Training/backtest archive only; excluded from live forecast to prevent leakage'};
  const previousEvents=await read(kv,KEY_EVENTS);
