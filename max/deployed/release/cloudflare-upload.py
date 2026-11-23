@@ -33,7 +33,7 @@ def main():
                      for k in config["kv_namespaces"]] +
                     [{"name": d["binding"], "type": "d1", "database_id": d["database_id"]}
                      for d in config["d1_databases"]],
-        "annotations": {"workers/message": "Max prospective research journal and fixed-unit simulation"},
+        "annotations": {"workers/message": "Max prospective MacFly research prompt experiments"},
     }
     if args.commit:
         runtime["annotations"]["workers/commit_sha"] = args.commit

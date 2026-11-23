@@ -14,7 +14,7 @@ python3 max/deployed/release/cloudflare-upload.py max/deployed > /tmp/verify-max
 
 ## Publier une version
 
-Utiliser la base `manibetpromax-journal`. Y appliquer les schémas `research-journal.sql`, `market-study.sql` et `study-runtime.sql`. Le binding D1 porte le nom `MAX_JOURNAL`. Les données préexistantes restent dans le KV `MAX_STATE`. La configuration du Worker est dans `max/deployed/wrangler.json`.
+Utiliser la base `manibetpromax-journal`. Y appliquer dans l’ordre les schémas `research-journal.sql`, `market-study.sql`, `study-runtime.sql`, puis `prompt-lab.sql`, `prompt-lab-score.sql` et `prompt-lab-supplements.sql` du même commit. Le binding D1 porte le nom `MAX_JOURNAL`. Les données préexistantes restent dans le KV `MAX_STATE`. La configuration du Worker est dans `max/deployed/wrangler.json`.
 
 La commande suivante génère le programme d’envoi pour le connecteur. Remplacer `COMMIT_SHA` par le commit de la copie de travail propre.
 
