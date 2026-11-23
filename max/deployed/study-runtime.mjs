@@ -1,3 +1,7 @@
+import {captureForPrompt,reviewPromptLab,promptLabSummary} from './prompt-lab-runner.mjs';
+import {settlePromptGame} from './prompt-lab-score.mjs';
+import {eligibleForExperiment,readActiveExperiment} from './prompt-lab-store.mjs';
+export {promptLabSummary};
 import { ADVANCED_VERSION } from './advanced.mjs';
 import { projectPlayerPoints } from './points.mjs';
 import { rotationTrial } from './experiments.mjs';
@@ -59,6 +63,33 @@ function selectInputs(ctx, editorial, legacy, at) {
   return {direct,official:[...injuries.values()],roles:[...roles.values()],medical};
 }
 
+function additionalInputs(inputs,extra,standardFacts,extraFacts,legacyRaw){
+  // Verification time alone cannot reverse a conflicting, dated announcement.
+  const official=new Map(inputs.official.map(f=>[rosterKey(f),f]));
+  const roles=new Map(inputs.roles.map(f=>[rosterKey(f),f]));
+  const publication=(f,facts,report)=>{
+    const known=facts.find(r=>r.team_id===String(f.team_id)&&rosterKey(r)===rosterKey(f)
+      && r.source_url===f.source_url && r.checked_at===f.checked_at);
+    const inReport=report?.sources?.find(s=>s.url===f.source_url);
+    return Date.parse(f.published_at??known?.published_at??reportTimestamp(f.source_url)??inReport?.published_at);
+  };
+  for(const [items,map,isMedical] of [[extra.verified_injuries,official,true],[extra.verified_role_facts,roles,false]]){
+    for(const f of items??[]){
+      const key=rosterKey(f), prior=map.get(key);
+      const date=publication(f,extraFacts,null);
+      const team=Object.values(inputs.medical?.teams??{}).find(t=>String(t.team_id)===String(f.team_id));
+      if(isMedical && team?.status==='SUBMITTED' && (!Number.isFinite(date)||Date.parse(inputs.medical.published_at)>=date))continue;
+      if(prior){
+        if(isMedical?f.status===prior.status:f.minutes_limit===prior.minutes_limit)continue;
+        const previous=publication(prior,standardFacts,legacyRaw);
+        if(!Number.isFinite(previous)||!Number.isFinite(date)||date<=previous)continue;
+      }
+      map.set(key,{...f,...(Number.isFinite(date)?{published_at:new Date(date).toISOString()}:{})});
+    }
+  }
+  return {...inputs,official:[...official.values()],roles:[...roles.values()]};
+}
+
 function model(ctx, rosters, inputs, at){
   const pp=projectPlayerPoints(ctx.game,ctx.boxes,ctx.injuries,inputs.official,ctx.forecast,at);
   const trial=rotationTrial(ctx.game,ctx.boxes,rosters,inputs.official,inputs.roles,
@@ -107,6 +138,46 @@ async function publishCard(db,game,versions,decision,report){
     WHERE excluded.version_id>=study_display.version_id`).bind(String(game.id),latest.id,JSON.stringify(card),report?JSON.stringify(report):null).run();
   return card;
 }
+// Isolated research replay: the standard cards, NBA research inbox and Winamax freeze are read-only here.
+async function replayPrompt(db,ctx,validateResearch,trigger,active=null,known=null){
+  const at=known?.at??current(), exp=active??await readActiveExperiment(db);
+  if(!exp || !eligibleForExperiment(exp,ctx.game,at))return;
+  const cutoff=Date.parse(at);
+  if(Date.parse(ctx.sourceAt)>cutoff || Date.parse(ctx.medical?.checked_at)>cutoff ||
+    ctx.rosters.some(([,r])=>Date.parse(r.checked_at)>cutoff) || ctx.boxes.some(b=>Date.parse(b.fetched_at)>cutoff))return;
+  const rosters=new Map(ctx.rosters);
+  const inbox=known?.inbox??await readResearchInbox(db,ctx.game,at,validateResearch,rosters);
+  const legacy=validateResearch(ctx.legacy,ctx.game,at);
+  const inputs=known?.inputs??selectInputs(ctx,inbox.verified,legacy,at);
+  const standard=known?.full??model(ctx,rosters,inputs,at);
+  const signature=known?.signature??await digest([ctx, inbox.receipts.map(r=>r.id),inbox.facts]);
+  const pair=(m)=>compactPair(ctx.game,at,signature,ctx.forecast,m.points,m.trial);
+  return captureForPrompt(db,{ctx,trigger,at,active:exp,standardInbox:inbox,normalInputs:inputs,normalPair:pair(standard),
+    validateResearch,baseSignature:signature,makeExperimental:(extra,extraFacts)=>{
+      const branch=additionalInputs(inputs,extra,inbox.facts,extraFacts,ctx.legacy);
+      return {pair:pair(model(ctx,rosters,branch,at)),inputs:branch};
+    }});
+}
+async function baselinePromptCapture(db,ctx,validateResearch,version,known=null){
+  // The journal/market write has completed. A lab failure cannot interrupt the main operation.
+  try{await replayPrompt(db,ctx,validateResearch,'standard:'+version.id,null,known);}
+  catch(err){console.error('[PROMPT_LAB_CAPTURE]',ctx.game.id,String(err.message).slice(0,180));}
+}
+
+export async function tickPromptLab(db,validateResearch){
+  const processed=await reviewPromptLab(db);
+  for(const exp of processed.filter(x=>x.status==='ACTIVE')){
+    // At registration, freeze both arms for upcoming targets already present between scheduled cycles.
+    const now=current(),limit=new Date(Date.parse(now)+48*3600000).toISOString();
+    const scheduled=await db.prepare(`SELECT c.context FROM study_context c
+      JOIN prompt_lab_experiments e ON e.id=?
+      JOIN json_each(e.plan_json,'$.targets') t ON json_extract(t.value,'$.match_id')=c.match_id
+      WHERE c.tip>? AND c.tip<=? ORDER BY c.tip`).bind(exp.id,now,limit).all();
+    for(const row of scheduled.results)await replayPrompt(db,JSON.parse(row.context),validateResearch,'registration:'+exp.id,exp);
+  }
+  return processed;
+}
+
 export async function refreshStudy(db, ctx, validateResearch, {persistContext=false, delivery=false}={}) {
   db=primary(db);
   const at=current(), game=ctx.game;
@@ -120,6 +191,7 @@ export async function refreshStudy(db, ctx, validateResearch, {persistContext=fa
   const fresh=ids.filter(id=>!previousIds.has(id));
   if(delivery && prior && fresh.length===0 && prior.as_of>=ctx.sourceAt){
     const decision=await recordMarket(db,game,prior,current());
+    await baselinePromptCapture(db,ctx,validateResearch,prior);
     return {card:await publishCard(db,game,versions,decision,inbox.verified)};
   }
   const legacy=validateResearch(ctx.legacy,game,at);
@@ -140,12 +212,16 @@ export async function refreshStudy(db, ctx, validateResearch, {persistContext=fa
   pair.control=compactPair(game,at,evidenceId,ctx.forecast,previousModel.points,previousModel.trial);
   pair.incremental_before=previousModel.view;
   pair.new_receipt_ids=fresh;
+  pair.known_roles=inputs.roles.map(f=>({team_id:f.team_id,player_id:f.player_id,minutes_limit:f.minutes_limit,
+    starter:f.starter,source_url:f.source_url,checked_at:f.checked_at}));
+  pair.role_evidence_complete=true;
   const known=baseInputs.official;
   const facts=classifyFacts(inbox.facts,{official:inputs.official,direct:known,roles:inputs.roles});
   const saved=await saveJournalVersion(db,{game,asOf:at,receipts:inbox.receipts,facts,baseline:base.view,
     after:full.view,pair,inputSignature:contextId,deliveryKey:delivery?evidenceId:null});
   if(!saved)return null;
   const decision=await recordMarket(db,game,saved,current());
+  await baselinePromptCapture(db,ctx,validateResearch,saved,{at,inbox,inputs,full,signature:evidenceId});
   const currentVersions=versions.some(v=>v.id===saved.id)?versions:[...versions,saved];
   return {card:await publishCard(db,game,currentVersions,decision,inbox.verified),research:inbox.verified,raw:inbox.raw,
     points:full.points,trial:full.trial,official:inputs.official,roles:inputs.roles};
@@ -164,6 +240,8 @@ export async function settleStudy(db,game,box,asOf=current()){
   const cutoff=Date.parse(asOf),tip=Date.parse(game.start),observed=Date.parse(game.fetched_at??asOf);
   if(![cutoff,tip,observed].every(Number.isFinite) || cutoff>Date.now()+1000 || observed<=tip || observed>cutoff || !String(game.status).includes('FINAL'))return;
   if(box && (String(box.game_id)!==String(game.id) || !Number.isFinite(Date.parse(box.fetched_at)) || Date.parse(box.fetched_at)>cutoff || Date.parse(box.fetched_at)<=tip))box=null;
+  try{await settlePromptGame(db,game,box,asOf);}
+  catch(err){console.error('[PROMPT_LAB_FINAL]',game.id,String(err.message).slice(0,180));}
   const versions=(await readJournalVersions(db,String(game.id))).filter(v=>v.tip===new Date(game.start).toISOString() && Date.parse(v.integrated_at)<Date.parse(game.start));
   if(!versions.length)return;
   await recordFinalMarket(db,game,asOf);
@@ -172,6 +250,7 @@ export async function settleStudy(db,game,box,asOf=current()){
   const evalEngine=engine=>evaluateStudyGame({game,box,pair:latest.pair,revisions:versions.map(v=>evaluationGroup(v,engine)).filter(Boolean)});
   const result=evalEngine('variante');
   if(!result)return;
+  result.observed_at=current();
   result.primary_information=evalEngine('principal')?.revisions??[];
   await db.prepare(`INSERT INTO study_results(match_id,tip,box_available,result) VALUES (?,?,?,?)
     ON CONFLICT(match_id) DO UPDATE SET result=excluded.result,box_available=excluded.box_available
@@ -280,8 +359,25 @@ async function bootstrapContext(env,id) {
 }
 export async function handleResearchQueue(batch,env,validateResearch){
   for(const message of batch.messages){
+    if(message.body?.type==='prompt_lab_review'){
+      // This private Queue message wakes the lab only. GET endpoints never activate a proposal.
+      await tickPromptLab(primary(env.MAX_JOURNAL),validateResearch);message.ack();continue;
+    }
     const id=String(message.body?.match_id??''), timestamp=message.body?.generated_at;
     if(!/^\d{5,15}$/.test(id)){message.ack();continue;}
+    if(message.body?.type==='prompt_lab_supplement'){
+      const expId=message.body.experiment_id, cutoff=Date.parse(timestamp);
+      if(typeof expId!=='string'||!Number.isFinite(cutoff)){message.ack();continue;}
+      const db=primary(env.MAX_JOURNAL),exp=await readActiveExperiment(db);
+      if(exp?.id!==expId){message.ack();continue;}
+      const receipt=await db.prepare('SELECT id FROM prompt_lab_supplements WHERE experiment_id=? AND match_id=? AND generated_at=?')
+        .bind(expId,id,new Date(cutoff).toISOString()).first();
+      if(!receipt)throw Error('Missing prompt supplement for '+id);
+      const row=await db.prepare('SELECT context FROM study_context WHERE match_id=?').bind(id).first();
+      const context=row?JSON.parse(row.context):await bootstrapContext(env,id);
+      if(context)await replayPrompt(db,context,validateResearch,'extra:'+receipt.id,exp);
+      message.ack();continue;
+    }
     if(message.body?.type==='start_study'){
       const db=primary(env.MAX_JOURNAL);
       const exists=await db.prepare('SELECT id FROM max_forecast_versions WHERE match_id=? LIMIT 1').bind(id).first();
