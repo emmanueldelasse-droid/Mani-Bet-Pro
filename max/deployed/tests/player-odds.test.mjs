@@ -37,3 +37,12 @@ test('une requête publique bornée par joueur : réponse refusée conservée co
   assert.deepEqual(blocked.quotes,[]);assert.equal(blocked.lookups[0].status,'HTTP_403');
   const late=await fetchPlayerPointQuotes([game],{clock:()=>Date.parse(start),fetcher});assert.equal(late.lookups.length,0);
 });
+
+test('le profil joueur refuse aussi un corps de prix accompagné d’une redirection',async()=>{
+  let calls=0;
+  const result=await fetchPlayerPointQuotes([game],{clock:()=>Date.parse(at),fetcher:async(source,opts)=>{
+    calls++;assert.equal(opts.redirect,'manual');
+    return new Response(html,{status:302,headers:{Location:'https://example.com/autre','Content-Type':'text/html'}});
+  }});
+  assert.equal(calls,1);assert.equal(result.lookups[0].status,'HTTP_302');assert.deepEqual(result.quotes,[]);
+});

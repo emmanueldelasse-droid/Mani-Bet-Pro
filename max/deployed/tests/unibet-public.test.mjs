@@ -42,7 +42,7 @@ test('la règle, les deux boutons actifs, une carte unique et le bon marché son
 });
 test('une requête publique par passage ; 429, cache périmé, contenu trop lourd et échéance respectés',async()=>{
   let requests=0;
-  const fetcher=async (url,opts)=>{requests++;assert.equal(url,UNIBET_BOARD);assert.equal(opts.redirect,'error');
+  const fetcher=async (url,opts)=>{requests++;assert.equal(url,UNIBET_BOARD);assert.equal(opts.redirect,'manual');
     return new Response(html(),{headers:{'Content-Type':'text/html; charset=utf-8','Date':new Date(now).toUTCString()}});};
   const res=await fetchUnibetBoard([game],{clock:()=>now,fetcher});
   assert.equal(res.quotes.length,2);assert.equal(res.lookups[0].matched_games,1);assert.equal(requests,1);
@@ -54,4 +54,13 @@ test('une requête publique par passage ; 429, cache périmé, contenu trop lour
   assert.equal(tooBig.lookups[0].reason,'BOARD_TOO_LARGE');
   assert.deepEqual(await fetchUnibetBoard([game],{clock:()=>game.start,fetcher}),{quotes:[],lookups:[]});
   assert.equal(requests,1);
+});
+
+test('une redirection 302 du bookmaker direct ne devient jamais un prix',async()=>{
+  let count=0;
+  const result=await fetchUnibetBoard([game],{clock:()=>now,fetcher:async(url,opts)=>{
+    count++;assert.equal(url,UNIBET_BOARD);assert.equal(opts.redirect,'manual');
+    return new Response(html(),{status:302,headers:{Location:'https://example.com/autre','Content-Type':'text/html'}});
+  }});
+  assert.equal(count,1);assert.equal(result.lookups[0].http_status,302);assert.deepEqual(result.quotes,[]);
 });

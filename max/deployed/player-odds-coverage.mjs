@@ -84,6 +84,7 @@ async function markIndex(db,w,edition,options){
   if(!complete)for(const p of ranked.slice(0,4))ids.add(String(p.id));
   const mode=complete?'LISTED_POINTS':verified?'PARTIAL_INDEX_PLUS_TOP4':'FALLBACK_TOP_4';
   const {players:unused,...metadata}=index;
+  metadata.transport_revision='workerd-manual-v26';
   metadata.matched_listed_players=(index.players??[]).length;
   const code=index.http_status===429?'HTTP_429':index.status;
   const writes=[
@@ -174,7 +175,7 @@ export async function processPlayerOddsCoverage(env,body,{fetcher=fetch,clock=Da
     }
     const {quotes,lookup}=await (fetchProfile??fetchPlayerOddsProfile)(edition.visible,p,{fetcher,clock});
     const late=Date.parse(lookup.observed_at)>=tip,status=late?'FINISHED_AFTER_TIP':quotes.length?'STAGED':
-      lookup.status==='OBSERVED'?'NOT_RECORDED':lookup.status;
+      lookup.status==='OBSERVED'?'NOT_RECORDED':lookup.status==='SOURCE_UNAVAILABLE'?'PROFILE_FETCH_FAILED':lookup.status;
     // A newer published edition can appear while the HTTP request is in flight.
     // Bind the observation to the latest version already visible at its true observation time.
     const bound=status==='STAGED'?await db.prepare(`SELECT id FROM published_forecasts WHERE match_id=? AND tip=?
@@ -230,4 +231,65 @@ export async function readPlayerOddsCoverage(db,matchId=null){
   const totals=Object.fromEntries(['projected_players','listed_players','planned_players','attempted_players','observed_players','refused_players','unavailable_players','pending_players']
     .map(k=>[k,windows.reduce((n,w)=>n+w[k],0)]));
   return {source:'LineSmart',match_id:id,window_from:windowFrom,backoff_until:gate.results[0]?.backoff_until??null,...totals,windows};
+}
+
+// The exact server registrations of the ten v25 bootstrap windows, verified in MAX_JOURNAL.
+// Neither later fixtures nor newly observed transport failures qualify for this one-time repair.
+const v25Windows=[
+  ['401910036','2026-11-23T22:58:43.061Z'],['401910037','2026-11-23T22:58:43.376Z'],
+  ['401910038','2026-11-23T22:58:43.556Z'],['401910039','2026-11-23T22:58:43.743Z'],
+  ['401910040','2026-11-23T22:58:43.966Z'],['401910041','2026-11-23T22:58:44.199Z'],
+  ['401910042','2026-11-23T22:58:44.397Z'],['401910043','2026-11-23T22:58:44.584Z'],
+  ['401910044','2026-11-23T22:58:44.853Z'],['401910045','2026-11-23T22:58:45.031Z']
+];
+const registration=`EXISTS(SELECT 1 FROM json_each(?1) j WHERE json_extract(j.value,'$[0]')=w.match_id
+  AND json_extract(j.value,'$[1]')=w.created_at)`;
+const v25Failure=`w.mode='FALLBACK_TOP_4' AND w.index_status='UNAVAILABLE' AND w.index_at IS NOT NULL
+  AND json_extract(w.index_json,'$.reason')='INDEX_FETCH_FAILED' AND json_extract(w.index_json,'$.http_status') IS NULL
+  AND json_extract(w.index_json,'$.bytes')=0 AND json_extract(w.index_json,'$.transport_revision') IS NULL`;
+const beforeImage=(alias,names)=>'json_object('+names.split(' ').flatMap(k=>["'"+k+"'",alias+'.'+k]).join(',')+')';
+const snapshotWindow=beforeImage('w','match_id tip edition_id created_at status mode generation sent_generation lease lease_until index_status index_url index_at index_json');
+const snapshotTask=beforeImage('t','match_id tip player_id team_id player_name ranking planned status started_at observed_at recorded_at source_url staged_quotes edition_id');
+const repair='v25-workerd-redirect-error';
+
+export async function resumeUnsentPlayerMarkets(env){
+  const db=dbFor(env),incidents=JSON.stringify(v25Windows),token=crypto.randomUUID();
+  const proof=`EXISTS(SELECT 1 FROM player_odds_transport_repairs r WHERE r.fix=?1 AND r.token=?2 AND
+    r.match_id=player_odds_tasks.match_id AND r.tip=player_odds_tasks.tip)`;
+  // Snapshot, reset only previously unsent/unattempted tasks, and advance the queue
+  // generation in a single transaction. Replaying the message can only dispatch unsent work.
+  const [,,,,open,waiting]=await db.batch([
+    db.prepare(`INSERT INTO player_odds_transport_repairs(fix,match_id,tip,token,window_json,tasks_json)
+      SELECT ?2,w.match_id,w.tip,?3,${snapshotWindow},
+        (SELECT json_group_array(json(s.task)) FROM (SELECT ${snapshotTask} task FROM player_odds_tasks t
+          WHERE t.match_id=w.match_id AND t.tip=w.tip ORDER BY t.ranking,t.player_id) s)
+      FROM player_odds_windows w WHERE ${registration} AND ${v25Failure}
+        AND w.status IN ('OPEN','DONE') AND w.tip>${clockSql} AND coalesce(w.lease_until,'')<=${clockSql}
+        AND NOT EXISTS(SELECT 1 FROM player_odds_transport_repairs a WHERE a.match_id=w.match_id AND a.tip=w.tip AND a.fix=?2)
+      ON CONFLICT DO NOTHING`).bind(incidents,repair,token),
+    db.prepare(`UPDATE player_odds_tasks SET planned=0,status='PROJECTED',started_at=NULL,observed_at=NULL,
+      recorded_at=NULL,source_url=NULL,staged_quotes=NULL,edition_id=NULL WHERE ${proof} AND staged_quotes IS NULL
+      AND (status='SOURCE_UNAVAILABLE' OR (started_at IS NULL AND observed_at IS NULL AND status IN ('QUEUED','NOT_VERIFIED_IN_INDEX','PROJECTED')))
+      AND NOT EXISTS(SELECT 1 FROM odds_study_quotes q WHERE q.match_id=player_odds_tasks.match_id
+        AND q.market='PLAYER_POINTS_OT' AND q.subject=player_odds_tasks.player_id AND json_extract(q.payload,'$.source')='LineSmart')`).bind(repair,token),
+    db.prepare(`UPDATE player_odds_tasks SET status='PREVIOUS_QUOTE_PRESERVED' WHERE ${proof}
+      AND status IN ('QUEUED','PROJECTED','SOURCE_UNAVAILABLE','NOT_VERIFIED_IN_INDEX') AND EXISTS
+      (SELECT 1 FROM odds_study_quotes q WHERE q.match_id=player_odds_tasks.match_id AND q.market='PLAYER_POINTS_OT'
+        AND q.subject=player_odds_tasks.player_id AND json_extract(q.payload,'$.source')='LineSmart')`).bind(repair,token),
+    db.prepare(`UPDATE player_odds_windows AS w SET status='OPEN',mode='AWAITING_INDEX',generation=generation+1,
+      lease=NULL,lease_until=NULL,index_status=NULL,index_url=NULL,index_at=NULL,index_json=NULL
+      WHERE EXISTS(SELECT 1 FROM player_odds_transport_repairs r WHERE r.fix=? AND r.token=? AND r.match_id=w.match_id AND r.tip=w.tip)`).bind(repair,token),
+    db.prepare(`SELECT w.*,r.token AS repair_token FROM player_odds_transport_repairs r JOIN player_odds_windows w USING(match_id,tip)
+      WHERE r.fix=? AND w.status='OPEN' AND w.tip>${clockSql} ORDER BY w.tip,w.match_id`).bind(repair),
+    db.prepare(`SELECT count(*) n FROM player_odds_windows w WHERE ${registration} AND w.status='OPEN'
+      AND w.tip>${clockSql} AND w.lease_until>${clockSql} AND ((${v25Failure}) OR
+        (w.mode='AWAITING_INDEX' AND coalesce(w.index_status,'STARTED')='STARTED'))
+      AND NOT EXISTS(SELECT 1 FROM player_odds_transport_repairs a WHERE a.fix=?2 AND a.match_id=w.match_id AND a.tip=w.tip)`).bind(incidents,repair)
+  ]);
+  const windows=[];
+  for(const [i,w] of open.results.entries()){
+    if(w.repair_token===token)windows.push(w.match_id);
+    await sendCurrent(env,db,w,Date.now()+i*spacing,Date.now);
+  }
+  return {windows,busy:waiting.results[0].n>0,fix:repair};
 }

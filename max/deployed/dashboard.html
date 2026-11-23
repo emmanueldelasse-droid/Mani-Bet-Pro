@@ -1118,6 +1118,20 @@ function playerOddsCoverage(c){
 function oddsOptions(values,labels,selected){
  return (values??[]).filter(v=>typeof v==='string').map(v=>'<option value="'+esc(v)+'"'+(v===selected?' selected':'')+'>'+esc(labels[v]??v)+'</option>').join('');
 }
+function lastSourceChecks(checks){
+ const latest=new Map();
+ for(const s of checks??[]){
+  const previous=latest.get(s.source);
+  if(!previous||Date.parse(s.checked_at)>=Date.parse(previous.checked_at))latest.set(s.source,s);
+ }
+ return [...latest.values()].map(s=>{
+  const lookup=s.lookups?.at(-1),verified=lookup?.status==='OBSERVED'||lookup?.status==='NO_VERIFIED_MARKET';
+  const clock=forecastTime(s.checked_at);
+  if(verified)return '<p class="tiny">Relevé direct sur '+esc(s.source)+' · '+clock+' · '+numberFr(s.games_checked,0)+' matchs vérifiés, '+numberFr(s.games_with_observed_prices,0)+' avec les deux prix observés.</p>';
+  const reason=lookup?.status==='UNAVAILABLE'?'Lecture de la page impossible'+(Number.isInteger(lookup.http_status)?' (HTTP '+numberFr(lookup.http_status,0)+')':''):'Lecture de la page non attestée';
+  return '<p class="tiny">Dernière tentative sur '+esc(s.source)+' · '+clock+' · '+numberFr(s.games_checked,0)+' matchs ciblés. '+reason+'.</p>';
+ }).join('');
+}
 function oddsPanel(d,{compact=false,book='',market=''}={}){
  if(!d)return '<p>Simulation des cotes momentanément indisponible.</p>';
  const quotes=Array.isArray(d.quote_rows)?d.quote_rows:[],rows=d.decision_rows??[],count=n=>numberFr(n,0);
@@ -1146,7 +1160,7 @@ function oddsPanel(d,{compact=false,book='',market=''}={}){
  const scan=playerOddsCoverage(d.player_coverage);
  if(compact)return players+scan+(quotes.length||rows.length?'<p>Relevés pour l’ensemble du match. Chaque décision renvoie à son édition d’avant-match.</p>'+ledger+logs:'<p>Rendement non évaluable · aucune cote exploitable enregistrée pour ce match.</p>')+unpriced+'<a href="#simulation-cotes">Bilan des cotes par tranche</a>';
  const bands=Array.isArray(d.bands)?d.bands:[];
- const recentSources=(d.source_checks??[]).map(s=>'<p class="tiny">Relevé direct sur '+esc(s.source)+' · '+forecastTime(s.checked_at)+' · '+count(s.games_checked)+' matchs vérifiés, '+count(s.games_with_observed_prices)+' avec les deux prix observés.</p>').join('');
+ const recentSources=lastSourceChecks(d.source_checks);
  return filter+'<p>Simulation · '+count(d.analyzed_games)+' matchs analysés · '+count(d.priced_games)+' avec cote exploitable.</p>'+
   recentSources+(rule.description?'<p>'+esc(rule.description)+'</p>':'')+(Number.isFinite(rule.stake_units)?'<p>Mise virtuelle fixe · '+numberFr(rule.stake_units)+' unité par sélection.</p>':'')+tally(d)+
   (d.settled_units>0?'<p><b>'+signed(d.net_units)+' unités cumulées</b> · rendement des mises réglées '+roi(d.roi)+'<br>Rendement sur toutes les unités engagées '+roi(d.roi_on_staked)+

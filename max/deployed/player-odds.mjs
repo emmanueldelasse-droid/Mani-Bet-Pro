@@ -121,7 +121,7 @@ export async function fetchPlayerOddsProfile(game,player,{fetcher=fetch,clock=Da
   const registered=listProjectedOddsPlayers(game).some(p=>String(p.id)===String(player.id)&&p.team_id===String(player.team_id)&&slug(p.name)===slug(player.name));
   if(registered && Date.parse(observed_at)<Date.parse(game.start)){
     try{
-      const r=await fetcher(source_url,{redirect:'error',headers:{Accept:'text/html'},signal:AbortSignal.timeout(5000)});
+      const r=await fetcher(source_url,{redirect:'manual',headers:{Accept:'text/html'},signal:AbortSignal.timeout(5000)});
       if(r.status===429)retry_after=r.headers.get('Retry-After');
       const page=r.ok && (!r.url||r.url===source_url) && /^text\/html\b/i.test(r.headers.get('Content-Type')??'')?await boundedBody(r):null;
       observed_at=iso(clock());

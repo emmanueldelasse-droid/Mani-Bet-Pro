@@ -46,27 +46,52 @@ export async function capturePlayerMarkets(env,games,fetcher){
   return result;
 }
 
+const boardKey='max:odds:unibet:last';
+async function recordBoardCheck(db,check,retryOf=null){
+  await db.prepare('INSERT OR IGNORE INTO odds_first_party_checks(checked_at,retry_of,payload) VALUES(?,?,?)')
+    .bind(check.checked_at,retryOf,JSON.stringify(check)).run();
+}
+async function readFrenchBook(env,upcoming,fetcher,retryOf=null){
+  const {quotes,lookups}=await fetchUnibetBoard(upcoming,{fetcher});
+  const offers=new Map();
+  for(const quote of quotes){
+    const id=String(quote.match_id);
+    if(!offers.has(id))offers.set(id,[]);
+    offers.get(id).push(quote);
+  }
+  for(const [id,rows] of offers){
+    const edition=await readPublishedForecast(env.MAX_JOURNAL,id);
+    if(edition)await recordQuotedDecisions(env.MAX_JOURNAL,edition,rows,now());
+  }
+  const check={source:'Unibet.fr',checked_at:now(),games_checked:upcoming.length,games_with_observed_prices:offers.size,lookups};
+  await recordBoardCheck(env.MAX_JOURNAL,check,retryOf);
+  await env.MAX_STATE.put(boardKey,JSON.stringify(check),{expirationTtl:86400*14});
+}
+
+export async function recoverFrenchBoard(env,failedAt,fetcher){
+  if(typeof failedAt!=='string'||!Number.isFinite(Date.parse(failedAt)))return;
+  const db=env.MAX_JOURNAL.withSession?env.MAX_JOURNAL.withSession('first-primary'):env.MAX_JOURNAL;
+  const current=await env.MAX_STATE.get(boardKey,{type:'json'});
+  if(current?.checked_at!==failedAt || current.games_with_observed_prices!==0 ||
+    !current.lookups?.some(row=>row.reason==='BOARD_FETCH_FAILED' && row.http_status==null && row.bytes===0))return;
+  if(await db.prepare('SELECT 1 AS found FROM odds_first_party_checks WHERE retry_of=?').bind(failedAt).first())return;
+  await recordBoardCheck(db,current);
+  const at=now(),until=new Date(Date.parse(at)+6*3600000).toISOString();
+  const heads=await db.prepare(`SELECT h.match_id FROM published_forecast_heads h JOIN published_forecasts p ON h.edition_id=p.id
+    WHERE p.tip>? AND p.tip<=? ORDER BY p.tip,h.match_id`).bind(at,until).all();
+  const games=[];
+  for(const row of heads.results){
+    const edition=await readPublishedForecast(db,row.match_id);
+    if(edition && edition.tip>now())games.push(edition.visible);
+  }
+  if(games.length)await readFrenchBook(env,games,fetcher,failedAt);
+}
+
 export async function captureScheduledMarkets(env,games,fetcher){
   const upcoming=games.filter(g=>g.status==='STATUS_SCHEDULED' && Date.now()<Date.parse(g.start)
     && Date.parse(g.start)-Date.now()<=6*3600000);
   if(!upcoming.length)return;
-  const readFrenchBook=async()=>{
-    const {quotes,lookups}=await fetchUnibetBoard(upcoming,{fetcher});
-    const offers=new Map();
-    for(const quote of quotes){
-      const id=String(quote.match_id);
-      if(!offers.has(id))offers.set(id,[]);
-      offers.get(id).push(quote);
-    }
-    for(const [id,rows] of offers){
-      const edition=await readPublishedForecast(env.MAX_JOURNAL,id);
-      if(edition)await recordQuotedDecisions(env.MAX_JOURNAL,edition,rows,now());
-    }
-    await env.MAX_STATE.put('max:odds:unibet:last',JSON.stringify({
-      source:'Unibet.fr',checked_at:now(),games_checked:upcoming.length,games_with_observed_prices:offers.size,lookups
-    }),{expirationTtl:86400*14});
-  };
-  const results=await Promise.allSettled([readFrenchBook(),capturePlayerMarkets(env,upcoming,fetcher)]);
+  const results=await Promise.allSettled([readFrenchBook(env,upcoming,fetcher),capturePlayerMarkets(env,upcoming,fetcher)]);
   for(const result of results)if(result.status==='rejected')throw result.reason;
 }
 

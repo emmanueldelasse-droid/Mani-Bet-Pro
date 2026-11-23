@@ -93,7 +93,7 @@ export async function fetchPlayerMarketIndex(game,{fetcher=fetch,clock=Date.now}
   if(!source||game?.status!=='STATUS_SCHEDULED'||Date.parse(started)>=Date.parse(game.start))return result;
   const signal=AbortSignal.timeout(8000);
   try{
-    const response=await fetcher(source,{headers:{Accept:'text/html'},redirect:'error',signal});
+    const response=await fetcher(source,{headers:{Accept:'text/html'},redirect:'manual',signal});
     const observed=new Date(clock()).toISOString();
     result.observed_at=observed;result.http_status=response.status;result.retry_after=response.headers.get('Retry-After');
     if(!response.ok){result.reason='HTTP_'+response.status;return result;}

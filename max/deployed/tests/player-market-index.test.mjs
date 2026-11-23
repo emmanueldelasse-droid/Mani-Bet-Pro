@@ -47,10 +47,19 @@ test('une seule consultation bornée et lecture de Retry-After sans nouvel essai
   const result=await fetchPlayerMarketIndex(game,{fetcher,clock:()=>at});
   assert.equal(result.status,'INDEXED');
   assert.equal(result.bytes,Buffer.byteLength(html()));
-  assert.deepEqual(calls,[[url,'error']]);
+  assert.deepEqual(calls,[[url,'manual']]);
   let n=0;
   const limited=await fetchPlayerMarketIndex(game,{fetcher:async()=>{n++;return new Response('',{status:429,headers:{'Retry-After':'60'}});},clock:()=>at});
   assert.equal(limited.http_status,429);assert.equal(limited.retry_after,'60');assert.equal(n,1);
   const big=await fetchPlayerMarketIndex(game,{fetcher:async()=>new Response('x'.repeat(135000),{headers:{'Content-Type':'text/html'}}),clock:()=>at});
   assert.equal(big.reason,'INDEX_TOO_LARGE');
+});
+
+test('un index redirigé en 302 ne fournit aucun profil',async()=>{
+  let calls=0;
+  const result=await fetchPlayerMarketIndex(game,{clock:()=>at,fetcher:async(source,opts)=>{
+    calls++;assert.equal(source,url);assert.equal(opts.redirect,'manual');
+    return new Response(html(),{status:302,headers:{Location:'https://example.com/autre','Content-Type':'text/html'}});
+  }});
+  assert.equal(calls,1);assert.equal(result.http_status,302);assert.deepEqual(result.players,[]);
 });

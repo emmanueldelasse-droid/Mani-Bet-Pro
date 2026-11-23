@@ -19,3 +19,23 @@ CREATE TABLE IF NOT EXISTS player_odds_source_gate (
   id INTEGER PRIMARY KEY CHECK(id=1), token TEXT, next_at TEXT, backoff_until TEXT
 );
 INSERT OR IGNORE INTO player_odds_source_gate(id) VALUES(1);
+
+-- Immutable before-image of the verified v25 pre-HTTP transport incident.
+CREATE TABLE IF NOT EXISTS player_odds_transport_repairs (
+  fix TEXT NOT NULL CHECK(fix='v25-workerd-redirect-error'),
+  match_id TEXT NOT NULL, tip TEXT NOT NULL, token TEXT NOT NULL,
+  captured_at TEXT NOT NULL DEFAULT(strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  window_json TEXT NOT NULL CHECK(json_valid(window_json)),
+  tasks_json TEXT NOT NULL CHECK(json_type(tasks_json)='array'),
+  PRIMARY KEY(fix,match_id,tip), FOREIGN KEY(match_id,tip) REFERENCES player_odds_windows(match_id,tip)
+);
+CREATE TRIGGER IF NOT EXISTS player_odds_repair_clock BEFORE INSERT ON player_odds_transport_repairs
+WHEN NEW.captured_at IS NOT strftime('%Y-%m-%dT%H:%M:%fZ','now') OR NEW.captured_at>=NEW.tip
+BEGIN SELECT RAISE(ABORT,'INVALID_PLAYER_ODDS_REPAIR_TIME'); END;
+CREATE TRIGGER IF NOT EXISTS player_odds_repair_first BEFORE INSERT ON player_odds_transport_repairs
+WHEN EXISTS(SELECT 1 FROM player_odds_transport_repairs WHERE match_id=NEW.match_id AND tip=NEW.tip AND fix=NEW.fix)
+BEGIN SELECT RAISE(IGNORE); END;
+CREATE TRIGGER IF NOT EXISTS player_odds_repair_keep BEFORE UPDATE ON player_odds_transport_repairs
+BEGIN SELECT RAISE(ABORT,'PLAYER_ODDS_REPAIR_IMMUTABLE'); END;
+CREATE TRIGGER IF NOT EXISTS player_odds_repair_preserve BEFORE DELETE ON player_odds_transport_repairs
+BEGIN SELECT RAISE(ABORT,'PLAYER_ODDS_REPAIR_IMMUTABLE'); END;

@@ -51,3 +51,28 @@ test('la file relance une analyse dont le reçu n’est pas encore visible',asyn
   await worker.queue({messages:[{body:{type:'learning_review',id:'analyse-en-transit'},ack(){calls.push('ack');},retry(opts){calls.push(opts.delaySeconds);}}]},{MAX_JOURNAL:d1()});
   assert.deepEqual(calls,[60]);
 });
+
+test('le rattrapage conserve l’échec avant HTTP, respecte un refus de la source et ne relit rien au second envoi',async t=>{
+  const started=Date.parse(fixture.captured_at);
+  t.mock.timers.enable({apis:['Date'],now:started-20000});
+  const db=d1(),state=new Map();
+  const env={MAX_JOURNAL:db,MAX_STATE:{get:key=>state.get(key),put:(key,v)=>state.set(key,JSON.parse(v))}};
+  const start='2026-11-24T01:00:00.000Z';
+  const g={id:'401910041',start,status:'STATUS_SCHEDULED',home:{id:'4',name:'Chicago Bulls',abbreviation:'CHI'},away:{id:'5',name:'Cleveland Cavaliers',abbreviation:'CLE'}};
+  await savePublishedForecast(db,g,new Date().toISOString(),g);
+  const check={source:'Unibet.fr',checked_at:fixture.captured_at,games_with_observed_prices:0,games_checked:1,
+    lookups:[{reason:'BOARD_FETCH_FAILED',http_status:null,bytes:0}]};
+  state.set('max:odds:unibet:last',check);
+  const {recoverFrenchBoard}=await import('../odds-feed.mjs');
+  t.mock.timers.setTime(started+60000);
+  const fetcher=t.mock.fn(async()=>new Response(null,{status:403}));
+  await recoverFrenchBoard(env,check.checked_at,fetcher);
+  await recoverFrenchBoard(env,check.checked_at,fetcher);
+  assert.equal(fetcher.mock.callCount(),1);
+  const journal=db.prepare('SELECT checked_at,retry_of,payload FROM odds_first_party_checks ORDER BY checked_at').all().results;
+  assert.equal(journal.length,2);
+  assert.deepEqual(JSON.parse(journal[0].payload),check);
+  assert.equal(journal[1].retry_of,check.checked_at);
+  assert.equal(JSON.parse(journal[1].payload).lookups[0].http_status,403);
+  assert.equal(db.prepare('SELECT count(*) n FROM odds_study_decisions').first('n'),0);
+});

@@ -80,3 +80,10 @@ WHEN EXISTS(SELECT 1 FROM odds_study_protocols WHERE rule_id=NEW.rule_id) BEGIN 
 CREATE TRIGGER IF NOT EXISTS odds_parameters_keep_u BEFORE UPDATE ON odds_study_protocols BEGIN SELECT RAISE(ABORT,'ODDS_RULE_FROZEN'); END;
 CREATE TRIGGER IF NOT EXISTS odds_parameters_keep_d BEFORE DELETE ON odds_study_protocols BEGIN SELECT RAISE(ABORT,'ODDS_RULE_FROZEN'); END;
 INSERT OR IGNORE INTO odds_study_protocols(rule_id,parameters) VALUES ('published-sportsbook-markets-v1','{"rule":{"id":"published-sportsbook-markets-v1","stake_units":1,"max_quote_age_minutes":60,"window_minutes":360,"min_odds":1,"band_min_dates":30,"band_min_settled":50,"band_min_wins_and_losses":5,"min_moneyline_return":0.05,"total_edge":3,"spread_edge":2,"player_edge":2,"simulation_only":true,"description":"Premier relevé complet et récent de chaque bookmaker dans les six heures avant le match. Une unité virtuelle. Vainqueur prévu si probabilité × cote ≥ 1,05. Pour un total, un handicap ou les points d’un joueur, il faut respectivement 3, 2 ou 2 points d’écart avec la ligne. Une seule décision par match, bookmaker, marché et joueur. Prolongations incluses."},"bands":[{"id":"1-1.5","label":"1,00 à moins de 1,50","min":1,"max":1.5},{"id":"1.5-2","label":"1,50 à moins de 2,00","min":1.5,"max":2},{"id":"2-3","label":"2,00 à moins de 3,00","min":2,"max":3},{"id":"3+","label":"3,00 et plus","min":3,"max":null}]}');
+
+-- Preserve both failed and successful direct-site observations, including a technical retry.
+CREATE TABLE IF NOT EXISTS odds_first_party_checks(
+ checked_at TEXT PRIMARY KEY, retry_of TEXT UNIQUE REFERENCES odds_first_party_checks(checked_at), payload TEXT NOT NULL CHECK(json_valid(payload))
+);
+CREATE TRIGGER IF NOT EXISTS odds_board_keep_u BEFORE UPDATE ON odds_first_party_checks BEGIN SELECT RAISE(ABORT,'ODDS_OBSERVATION_FROZEN'); END;
+CREATE TRIGGER IF NOT EXISTS odds_board_keep_d BEFORE DELETE ON odds_first_party_checks BEGIN SELECT RAISE(ABORT,'ODDS_OBSERVATION_FROZEN'); END;

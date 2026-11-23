@@ -96,7 +96,7 @@ export async function fetchUnibetBoard(games,{fetcher=fetch,clock=Date.now}={}){
   const record={source_url:UNIBET_BOARD,status:'UNAVAILABLE',http_status:null,retry_after:null,observed_at:null,bytes:0,matched_games:0};
   const failed=reason=>({quotes:[],lookups:[{...record,reason}]});
   try{
-    const response=await fetcher(UNIBET_BOARD,{headers:{Accept:'text/html'},redirect:'error',signal:AbortSignal.timeout(9000)});
+    const response=await fetcher(UNIBET_BOARD,{headers:{Accept:'text/html'},redirect:'manual',signal:AbortSignal.timeout(9000)});
     record.http_status=response.status;record.retry_after=response.headers.get('Retry-After');record.observed_at=utc(now());
     if(!response.ok)return failed('HTTP_'+response.status);
     if((response.url&&response.url!==UNIBET_BOARD)||!/^text\/html(?:\s*;|$)/i.test(response.headers.get('content-type')??''))return failed('UNEXPECTED_DOCUMENT');
