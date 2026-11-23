@@ -20,6 +20,7 @@ test('le premier relevé privé rejoint l’édition, les prix et les décisions
   const edition=await savePublishedForecast(env.MAX_JOURNAL,game,card.checked_at,card);
   t.mock.timers.setTime(Date.parse(fixture.captured_at));
   const fetchSpy=t.mock.method(globalThis,'fetch',async url=>{
+    if(String(url)==='https://www.unibet.fr/paris-basketball/usa/nba')return new Response('Pas de marché affiché',{status:503});
     assert.equal(url,fixture.source_url);
     return Response.json(fixture.scoreboard);
   });
@@ -41,7 +42,7 @@ test('le premier relevé privé rejoint l’édition, les prix et les décisions
   t.mock.timers.setTime(Date.parse(fixture.captured_at)+60000);
   await worker.queue(batch,env);
   assert.deepEqual(await read(),result);
-  assert.equal(fetchSpy.mock.callCount(),1);
+  assert.equal(fetchSpy.mock.callCount(),2);
   assert.equal(ack,2);
 });
 

@@ -77,3 +77,27 @@ test('index 429 suspends all profile lookups, including another match, and pendi
   assert.equal(report.attempted_players,0);assert.ok(report.windows.every(w=>w.status==='EXPIRED'));
   assert.equal(report.windows.find(w=>w.match_id===g.id).index_status,'HTTP_429');
 });
+
+test('an interrupted HTTP reservation is traced once and the delayed retry resumes on a different player',async t=>{
+  const {env,db,messages,dispatch}=await setup(t),opt=options({size:5,failProfile:true});
+  await schedulePlayerOddsCoverage(env,[g]);const first=messages.shift();const calls=[];
+  const interrupted={...opt,fetchProfile:async(game,p)=>{calls.push(p.id);throw Error('PROCESS_STOPPED');}};
+  await assert.rejects(processPlayerOddsCoverage(env,first.body,interrupted),/PROCESS_STOPPED/);
+  await processPlayerOddsCoverage(env,first.body,opt);
+  assert.equal(opt.calls.length,0);assert.equal(messages.length,1);
+  while(messages.length)await dispatch(opt);
+  assert.equal(opt.calls.length,4);assert.ok(!opt.calls.some(c=>c[0]===calls[0]));
+  assert.equal((await readPlayerOddsCoverage(db,g.id)).windows[0].attempts.find(a=>a.player_id===calls[0]).status,'INTERRUPTED');
+});
+
+test('partial names add only ranked fallback; no repeat scans on same window and no opening before the six-hour horizon',async t=>{
+  const {db,env,game,messages,dispatch}=await setup(t,tip-7*h),opt=options({failProfile:true});
+  assert.deepEqual(await schedulePlayerOddsCoverage(env,[g]),[]);assert.equal(messages.length,0);
+  t.mock.timers.setTime(tip-5*h);
+  const roster=game.independent_analysis.advanced.player_points.home.players;
+  opt.fetchIndex=async()=>({status:'INDEXED',players:[roster[8]],all_reported_players_scanned:false,listed_players:3});
+  await schedulePlayerOddsCoverage(env,[g]);while(messages.length)await dispatch(opt);
+  const w=(await readPlayerOddsCoverage(db,g.id)).windows[0];
+  assert.equal(w.mode,'PARTIAL_INDEX_PLUS_TOP4');assert.equal(w.planned_players,5);assert.equal(w.matched_listed_players,1);
+  await schedulePlayerOddsCoverage(env,[g]);assert.equal(messages.length,0);
+});

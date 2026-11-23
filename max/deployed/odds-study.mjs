@@ -17,6 +17,16 @@ const named=s=>typeof s==='string'&&s.trim().length>0&&s.length<=120;
 const ruleId=ODDS_RULE.id;
 function sourceBelongs(q,id){
   if(q.source==='MACFLY')return directPage(q.bookmaker,q.source_url);
+  if(q.source==='Unibet.fr'){
+    if(q.bookmaker!=='Unibet'||q.market!=='MONEYLINE_OT'||q.period!=='FULL_GAME_OT')return false;
+    const league='https://www.unibet.fr/paris-basketball/usa/nba';
+    try{
+      const event=new URL(q.event_url);
+      return event.origin==='https://www.unibet.fr' && !event.username && !event.password && !event.search && !event.hash &&
+        /^\/paris-basketball\/usa\/nba\/\d+\/[a-z0-9-]+\/?$/.test(event.pathname) &&
+        (q.source_url===league||q.source_url===event.href) && q.rules_source_url===league;
+    }catch{return false;}
+  }
   if(q.source==='LineSmart'){
     try{
       const u=new URL(q.source_url);
@@ -103,7 +113,7 @@ function choose(game,edition,offers,at){
   // quote priority follows provenance and URL, never the size of the price.
   if(complete.some(pair=>pair.some((q,i)=>q.line!==complete[0][i].line||q.decimal_odds!==complete[0][i].decimal_odds)))
     return {...base,reason:'CONFLICTING_OFFERS'};
-  const rank={MACFLY:0,ESPN:1,LineSmart:2};
+  const rank={MACFLY:0,'Unibet.fr':0,ESPN:1,LineSmart:2};
   complete.sort(([a],[b])=>rank[a.source]-rank[b.source]||a.source_url.localeCompare(b.source_url));
   const [reference,other]=complete[0];
   if(market==='PLAYER_POINTS_OT' && reference.quoted_team_id!==projection.team_id)return {...base,reason:'PLAYER_TEAM_MISMATCH'};

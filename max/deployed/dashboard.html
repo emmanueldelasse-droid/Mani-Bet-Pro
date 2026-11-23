@@ -1146,8 +1146,9 @@ function oddsPanel(d,{compact=false,book='',market=''}={}){
  const scan=playerOddsCoverage(d.player_coverage);
  if(compact)return players+scan+(quotes.length||rows.length?'<p>Relevés pour l’ensemble du match. Chaque décision renvoie à son édition d’avant-match.</p>'+ledger+logs:'<p>Rendement non évaluable · aucune cote exploitable enregistrée pour ce match.</p>')+unpriced+'<a href="#simulation-cotes">Bilan des cotes par tranche</a>';
  const bands=Array.isArray(d.bands)?d.bands:[];
+ const recentSources=(d.source_checks??[]).map(s=>'<p class="tiny">Relevé direct sur '+esc(s.source)+' · '+forecastTime(s.checked_at)+' · '+count(s.games_checked)+' matchs vérifiés, '+count(s.games_with_observed_prices)+' avec les deux prix observés.</p>').join('');
  return filter+'<p>Simulation · '+count(d.analyzed_games)+' matchs analysés · '+count(d.priced_games)+' avec cote exploitable.</p>'+
-  (rule.description?'<p>'+esc(rule.description)+'</p>':'')+(Number.isFinite(rule.stake_units)?'<p>Mise virtuelle fixe · '+numberFr(rule.stake_units)+' unité par sélection.</p>':'')+tally(d)+
+  recentSources+(rule.description?'<p>'+esc(rule.description)+'</p>':'')+(Number.isFinite(rule.stake_units)?'<p>Mise virtuelle fixe · '+numberFr(rule.stake_units)+' unité par sélection.</p>':'')+tally(d)+
   (d.settled_units>0?'<p><b>'+signed(d.net_units)+' unités cumulées</b> · rendement des mises réglées '+roi(d.roi)+'<br>Rendement sur toutes les unités engagées '+roi(d.roi_on_staked)+
    ' · baisse cumulée maximale '+numberFr(d.max_drawdown_units)+' unités.</p>':'<p>Rendement non évaluable · aucune mise réglée.</p>')+
   '<h2>Rendement par tranche de cote</h2>'+bands.map(b=>'<details><summary>'+esc(b.label)+' · '+roi(b.roi)+'</summary>'+tally(b)+'<p>'+numberFr(b.staked_units)+' unités engagées · résultat '+signed(b.net_units)+' unités</p>'+

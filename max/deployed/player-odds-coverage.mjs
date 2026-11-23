@@ -103,10 +103,13 @@ async function markIndex(db,w,edition,options){
 async function commitStaged(db,w,edition,task,clock){
   const observed=JSON.parse(task.staged_quotes);
   if(clock()<Date.parse(w.tip))await recordQuotedDecisions(db,edition,observed,utc(clock()));
-  const saved=await db.prepare(`SELECT count(DISTINCT side) sides FROM odds_study_quotes WHERE match_id=? AND market='PLAYER_POINTS_OT'
-    AND subject=? AND observed_at=? AND bookmaker='DraftKings' AND json_extract(payload,'$.source')='LineSmart'`).bind(w.match_id,task.player_id,task.observed_at).first();
+  const saved=await db.prepare(`SELECT side,decimal_odds,json_extract(payload,'$.line') line,json_extract(payload,'$.source_url') source_url
+    FROM odds_study_quotes WHERE match_id=? AND market='PLAYER_POINTS_OT' AND subject=? AND observed_at=?
+    AND bookmaker='DraftKings' AND json_extract(payload,'$.source')='LineSmart'`).bind(w.match_id,task.player_id,task.observed_at).all();
+  const verified=['OVER','UNDER'].every(side=>observed.some(q=>q.side===side&&saved.results.some(s=>s.side===side&&
+    s.decimal_odds===q.decimal_odds&&s.line===q.line&&s.source_url===q.source_url)));
   await db.prepare(`UPDATE player_odds_tasks SET status=?,recorded_at=${clockSql},staged_quotes=NULL
-    WHERE match_id=? AND tip=? AND player_id=? AND status='STAGED'`).bind(saved?.sides===2?'OBSERVED':'NOT_RECORDED',...key(w),task.player_id).run();
+    WHERE match_id=? AND tip=? AND player_id=? AND status='STAGED'`).bind(verified?'OBSERVED':'NOT_RECORDED',...key(w),task.player_id).run();
 }
 
 export async function processPlayerOddsCoverage(env,body,{fetcher=fetch,clock=Date.now,fetchIndex,fetchProfile}={}){
@@ -163,9 +166,15 @@ export async function processPlayerOddsCoverage(env,body,{fetcher=fetch,clock=Da
       WHERE match_id=? AND tip=? AND player_id=? AND status='QUEUED' AND ${clockSql}<tip
       AND EXISTS(SELECT 1 FROM player_odds_source_gate WHERE id=1 AND coalesce(backoff_until,'')<=${clockSql})
       RETURNING player_id`).bind(edition.id,...key(w),t.player_id).first();
-    if(!started||clock()>=tip)break;
+    if(!started)break;
+    if(clock()>=tip){
+      await db.prepare("UPDATE player_odds_tasks SET status='EXPIRED_BEFORE_REQUEST',started_at=NULL WHERE match_id=? AND tip=? AND player_id=? AND status='STARTED'")
+        .bind(...key(w),t.player_id).run();
+      break;
+    }
     const {quotes,lookup}=await (fetchProfile??fetchPlayerOddsProfile)(edition.visible,p,{fetcher,clock});
-    const late=Date.parse(lookup.observed_at)>=tip,status=late?'FINISHED_AFTER_TIP':quotes.length?'STAGED':lookup.status;
+    const late=Date.parse(lookup.observed_at)>=tip,status=late?'FINISHED_AFTER_TIP':quotes.length?'STAGED':
+      lookup.status==='OBSERVED'?'NOT_RECORDED':lookup.status;
     // A newer published edition can appear while the HTTP request is in flight.
     // Bind the observation to the latest version already visible at its true observation time.
     const bound=status==='STAGED'?await db.prepare(`SELECT id FROM published_forecasts WHERE match_id=? AND tip=?
@@ -212,7 +221,8 @@ export async function readPlayerOddsCoverage(db,matchId=null){
       all_reported_players_scanned:index.all_reported_players_scanned??null,
       projected_players:tasks.length,listed_players:index.listed_players??0,planned_players:tasks.filter(t=>t.planned).length,
       attempted_players:attempted.length,observed_players:observed.length,refused_players:refused.length,unavailable_players:unavailable.length,
-      pending_players:tasks.filter(t=>['QUEUED','STARTED','STAGED'].includes(t.status)).length,
+      pending_players:w.status==='OPEN'?tasks.filter(t=>['QUEUED','STARTED','STAGED'].includes(t.status)).length:0,
+      expired_unchecked:w.status==='EXPIRED'?tasks.filter(t=>!t.started_at&&!t.observed_at&&['QUEUED','PROJECTED','EXPIRED_BEFORE_REQUEST'].includes(t.status)).length:0,
       not_listed_players:tasks.filter(t=>t.status==='NOT_LISTED').length,
       outside_verified_index:tasks.filter(t=>t.status==='NOT_VERIFIED_IN_INDEX').length,
       attempts:attempted.map(({player_id,player_name,source_url,started_at,observed_at,status})=>({player_id,player_name,source_url,started_at,observed_at,status}))};

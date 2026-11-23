@@ -2,6 +2,7 @@ import {parseObservedEspnOdds,quotesFromResearch} from './observed-odds.mjs';
 import {readPublishedForecast} from './published-forecasts.mjs';
 import {recordQuotedDecisions} from './odds-study.mjs';
 import {schedulePlayerOddsCoverage} from './player-odds-coverage.mjs';
+import {fetchUnibetBoard} from './unibet-public.mjs';
 
 const scoreboard='https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard';
 const now=()=>new Date().toISOString();
@@ -45,6 +46,30 @@ export async function capturePlayerMarkets(env,games,fetcher){
   return result;
 }
 
+export async function captureScheduledMarkets(env,games,fetcher){
+  const upcoming=games.filter(g=>g.status==='STATUS_SCHEDULED' && Date.now()<Date.parse(g.start)
+    && Date.parse(g.start)-Date.now()<=6*3600000);
+  if(!upcoming.length)return;
+  const readFrenchBook=async()=>{
+    const {quotes,lookups}=await fetchUnibetBoard(upcoming,{fetcher});
+    const offers=new Map();
+    for(const quote of quotes){
+      const id=String(quote.match_id);
+      if(!offers.has(id))offers.set(id,[]);
+      offers.get(id).push(quote);
+    }
+    for(const [id,rows] of offers){
+      const edition=await readPublishedForecast(env.MAX_JOURNAL,id);
+      if(edition)await recordQuotedDecisions(env.MAX_JOURNAL,edition,rows,now());
+    }
+    await env.MAX_STATE.put('max:odds:unibet:last',JSON.stringify({
+      source:'Unibet.fr',checked_at:now(),games_checked:upcoming.length,games_with_observed_prices:offers.size,lookups
+    }),{expirationTtl:86400*14});
+  };
+  const results=await Promise.allSettled([readFrenchBook(),capturePlayerMarkets(env,upcoming,fetcher)]);
+  for(const result of results)if(result.status==='rejected')throw result.reason;
+}
+
 // One initial observation on the already published board, through the private Queue.
 // Normal updates are made by the existing six-hour collector.
 export async function bootstrapObservedOdds(env,date,fetcher){
@@ -65,6 +90,6 @@ export async function bootstrapObservedOdds(env,date,fetcher){
     if(!edition || edition.tip<=now())continue;
     await captureOddsForEdition(env,edition,[board]);games.push(edition.visible);
   }
-  await capturePlayerMarkets(env,games,fetcher);
+  await captureScheduledMarkets(env,games,fetcher);
   await env.MAX_STATE.put(key,JSON.stringify({observed_at:board._fetched_at,games:games.length}),{expirationTtl:172800});
 }
