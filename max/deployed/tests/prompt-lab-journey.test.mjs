@@ -6,7 +6,7 @@ import {validateResearch} from '../worker.mjs';
 import {parseBoxscore} from '../advanced.mjs';
 import {insertResearch} from '../research-journal.mjs';
 import {refreshStudy,settleStudy} from '../study-runtime.mjs';
-import {d1,fixture,g,h,iso,players,report,teams,tip} from './study-journey-fixture.mjs';
+import {d1,fixture,fixtureState,g,h,iso,players,report,teams,tip} from './study-journey-fixture.mjs';
 
 const day=24*h;
 const earlier=(id,days)=>({...g,id,start:iso(tip-days*day)});
@@ -33,7 +33,7 @@ test('consigne MacFly : diagnostic, deux collectes isolées, trois prévisions s
   const db=d1(), past=[earlier('910000101',3),earlier('910000102',2)];
   const match=earlier('910000103',0),neutral=earlier('910000104',0);
   const slate={games:[match,neutral]};
-  const env={MAX_JOURNAL:db,MAX_STATE:{get:async key=>key==='max:slate:latest'?structuredClone(slate):null}};
+  const env={MAX_JOURNAL:db,MAX_STATE:fixtureState([...past,match,neutral],slate)};
   const setTime=n=>t.mock.timers.setTime(n);
   const deliver=async body=>{
     let acknowledged=0;
@@ -50,7 +50,10 @@ test('consigne MacFly : diagnostic, deux collectes isolées, trois prévisions s
     db.prepare('INSERT INTO prompt_lab_inbox(payload) VALUES (?)').bind(JSON.stringify(document)).run();
     await deliver({type:'prompt_lab_review',proposal_id:document.id});
   };
-  const capture=game=>refreshStudy(db,fixture(game),validateResearch,{persistContext:true});
+  async function capture(game){
+    await refreshStudy(db,fixture(game),validateResearch,{persistContext:true});
+    await deliver({type:'publish_forecast',match_id:game.id});
+  }
   const evidence=[];
   for(const game of past){
     const gameTip=Date.parse(game.start);

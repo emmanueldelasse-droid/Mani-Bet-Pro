@@ -6,12 +6,13 @@ import {validateResearch} from '../worker.mjs';
 import {insertResearch} from '../research-journal.mjs';
 import {refreshStudy} from '../study-runtime.mjs';
 import {readPromptExecutionTrace} from '../prompt-lab-runner.mjs';
-import {d1,fixture,g,h,iso,players,report,tip} from './study-journey-fixture.mjs';
+import {d1,fixture,fixtureState,g,h,iso,players,report,tip} from './study-journey-fixture.mjs';
 
 test('les faits déjà connus, hors périmètre, antidatés, tardifs et les sources inaccessibles ont des traces distinctes',async t=>{
   t.mock.timers.enable({apis:['Date'],now:tip-7*h});
-  const db=d1(),env={MAX_JOURNAL:db};
+  const db=d1();
   const games=Array.from({length:6},(_,i)=>({...g,id:String(910000310+i)}));
+  const env={MAX_JOURNAL:db,MAX_STATE:fixtureState(games)};
   const plan={id:'read-regression',action:'TEST',prompt:'Vérifier le temps de jeu du joueur ciblé.',target:'MINUTES_LIMIT',
     targets:games.map(game=>({match_id:game.id,tip:game.start,player_ids:['1001']})),metric:'minutes_mae',
     cohort:{start:iso(tip-7*h),end:iso(tip+h)},criterion:{min_games:6,min_dates:1,min_gain:.2}};

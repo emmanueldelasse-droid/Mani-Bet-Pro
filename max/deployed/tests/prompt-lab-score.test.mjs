@@ -10,8 +10,10 @@ function database(){
   const sqlite=new DatabaseSync(':memory:');
   sqlite.function('strftime',{deterministic:true},(_format,value)=>value==='now'?iso(Date.now()):iso(value));
   sqlite.exec('PRAGMA foreign_keys=ON; PRAGMA trusted_schema=ON');
+  sqlite.exec(readFileSync(new URL('../research-journal.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../prompt-lab.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../prompt-lab-score.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('../prompt-lab-supplements.sql',import.meta.url),'utf8'));
   const statement=(sql,args=[])=>({bind(...values){return statement(sql,values);},first(){return sqlite.prepare(sql).get(...args)??null;},
     run(){return sqlite.prepare(sql).run(...args);},all(){return {results:sqlite.prepare(sql).all(...args)};}});
   return {sqlite,prepare:statement,batch(statements){sqlite.exec('BEGIN');try{

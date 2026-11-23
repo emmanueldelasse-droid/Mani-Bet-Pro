@@ -256,7 +256,7 @@ function qualityCounts(attempts){
   return output;
 }
 
-export function summarizePromptScore(experiment,captures=[],outcomes=[],asOf=new Date().toISOString(),attempts=captures){
+export function summarizePromptScore(experiment,captures=[],outcomes=[],asOf=new Date().toISOString(),attempts=captures,receipts=[]){
   const targets=experiment.targets??[],byTarget=new Set(targets.map(t=>String(t.match_id)));
   const byId=new Map(outcomes.filter(r=>byTarget.has(String(r.match_id))).map(r=>[String(r.match_id),r]));
   const captured=new Map(captures.filter(r=>byTarget.has(String(r.match_id))).map(r=>[String(r.match_id),r]));
@@ -268,7 +268,9 @@ export function summarizePromptScore(experiment,captures=[],outcomes=[],asOf=new
   const scored=[...captured.values()];
   const changed=scored.filter(r=>r.changed&&!r.exclusion).length,extra=scored.reduce((n,r)=>n+r.extra_fact_count,0);
   const researched=scored.filter(r=>(r.ever_received??r.receipt_count)>0);
-  const noFinding=researched.filter(r=>(r.ever_had_facts??r.extra_fact_count)===0).length;
+  const submitted=receipts.filter(r=>byTarget.has(String(r.match_id)));
+  const integrated=submitted.filter(r=>r.integrated_count>0);
+  const noFinding=integrated.filter(r=>r.confirmed_no_finding_count>0).length;
   const effects={control_verified:0,variant_verified:0,changed_status:0,changed_minutes:0,changed_points:0};
   for(const row of scored)for(const k of Object.keys(effects))effects[k]+=row.effects?.[k]??0;
   const exclusions={},reference_exclusions={},missing={};
@@ -309,7 +311,7 @@ export function summarizePromptScore(experiment,captures=[],outcomes=[],asOf=new
     decision='NON_CONCLUANTE';conclusion='INCONCLUSIVE';
     if(!all)reason='Échéance atteinte avec des matchs ou observations manquants. Le gain reste indéterminé.';
     else if(games<minGames || dates<minDates)reason='Échantillon insuffisant en matchs ou en dates indépendantes pour conclure.';
-    else if(!changed && researched.length!==targets.length)reason='Aucune révision mesurable et des collectes expérimentales restent sans reçu. L’effet de la consigne est indéterminé.';
+    else if(!changed && integrated.length!==targets.length)reason='Aucune révision mesurable et des collectes expérimentales restent sans reçu intégré. L’effet de la consigne est indéterminé.';
     else if(!changed){
       decision='ABANDONNER';conclusion='NO_BENEFIT';reason='Les projections du critère fixé sont restées identiques sur tous les matchs mesurés.';
     }else if(ci && ci[0]>0 && ci[0]>=minimumGain &&
@@ -328,6 +330,8 @@ export function summarizePromptScore(experiment,captures=[],outcomes=[],asOf=new
     forecast_games:captured.size,eligible_games:eligibleGames,eligible_cases:eligibleCases,
     ineligible_cases:ineligibleCases,paired_games:games,
     researched_games:researched.length,no_finding_games:noFinding,games_without_supplement:targets.length-researched.length,
+    submitted_games:submitted.length,games_without_received_supplement:targets.length-submitted.length,
+    confirmed_no_finding_games:noFinding,integrated_games:integrated.length,unintegrated_games:submitted.length-integrated.length,
     closed_games:byId.size,missing_games:targets.length-games,changed_games:changed,extra_fact_count:extra,player_changes:effects,
     exclusions,reference_exclusions,missing,pair_quality:qualityCounts(quality),matches:byMatch,
     player_scope:playerMetrics.has(experiment.metric)?'Joueurs ciblés effectivement entrés avec les deux projections mesurables. Repère publié évalué sur ses cas disponibles.':null,
@@ -343,7 +347,7 @@ export async function readPromptScore(db,experiment,asOf=new Date().toISOString(
     if(closed?.metric)return closed;
   }
   const store=sessions(db);
-  const [pairs,rows,attempts]=await store.batch([
+  const [pairs,rows,attempts,receipts]=await store.batch([
     store.prepare(`SELECT p.id AS pair_id,p.match_id,p.as_of,p.integrated_at,json_extract(p.payload,'$.changed') AS changed,
       json_extract(p.payload,'$.trace') AS trace,json_extract(p.payload,'$.eligible') AS eligible,
       json_extract(p.payload,'$.reference_issue') AS reference_issue,
@@ -357,7 +361,15 @@ export async function readPromptScore(db,experiment,asOf=new Date().toISOString(
         WHERE q.experiment_id=p.experiment_id AND q.match_id=p.match_id ORDER BY q.as_of DESC,q.id DESC LIMIT 1)`).bind(experiment.id),
     store.prepare('SELECT match_id,tip,observed_at,payload FROM prompt_lab_outcomes WHERE experiment_id=? ORDER BY tip,match_id').bind(experiment.id),
     store.prepare(`SELECT match_id,json_extract(payload,'$.exclusion') AS exclusion,count(*) AS n FROM prompt_lab_pairs
-      WHERE experiment_id=? GROUP BY match_id,json_extract(payload,'$.exclusion')`).bind(experiment.id)]);
+      WHERE experiment_id=? GROUP BY match_id,json_extract(payload,'$.exclusion')`).bind(experiment.id),
+    store.prepare(`WITH integrated AS (
+      SELECT DISTINCT p.match_id,r.value AS receipt_id FROM prompt_lab_pairs p,json_each(p.payload,'$.receipt_ids') r
+      WHERE p.experiment_id=? AND json_extract(p.payload,'$.exclusion') IS NULL
+    )
+    SELECT s.match_id,count(*) AS submitted_count,count(i.receipt_id) AS integrated_count,
+      sum(CASE WHEN i.receipt_id IS NOT NULL AND s.outcome='NO_FINDING' THEN 1 ELSE 0 END) AS confirmed_no_finding_count
+      FROM prompt_lab_supplements s LEFT JOIN integrated i ON i.match_id=s.match_id AND i.receipt_id=s.id
+      WHERE s.experiment_id=? GROUP BY s.match_id`).bind(experiment.id,experiment.id)]);
   const captures=pairs.results.map(r=>{
     const old=r.legacy?JSON.parse(r.legacy):null;
     return {...r,changed:Boolean(r.changed),effects:r.effects?JSON.parse(r.effects):null,
@@ -367,5 +379,5 @@ export async function readPromptScore(db,experiment,asOf=new Date().toISOString(
       eligible:r.eligible?JSON.parse(r.eligible):old&&!old.exclusion?
         projectedCases(experiment.metric,old.control,old.variant,targetIds(targetFor(experiment,r.match_id))):null};
   });
-  return summarizePromptScore(experiment,captures,rows.results.map(r=>({...r,payload:JSON.parse(r.payload)})),asOf,attempts.results);
+  return summarizePromptScore(experiment,captures,rows.results.map(r=>({...r,payload:JSON.parse(r.payload)})),asOf,attempts.results,receipts.results);
 }

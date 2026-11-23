@@ -32,8 +32,10 @@ def main():
         "bindings": [{"name": k["binding"], "type": "kv_namespace", "namespace_id": k["id"]}
                      for k in config["kv_namespaces"]] +
                     [{"name": d["binding"], "type": "d1", "database_id": d["database_id"]}
-                     for d in config["d1_databases"]],
-        "annotations": {"workers/message": "Max versioned MacFly prompt journal, read acknowledgments and matched performance"},
+                     for d in config["d1_databases"]] +
+                    [{"name": q["binding"], "type": "queue", "queue_name": q["queue"]}
+                     for q in config.get("queues", {}).get("producers", [])],
+        "annotations": {"workers/message": "Max archived pregame forecasts, postgame learning and observed market simulation"},
     }
     if args.commit:
         runtime["annotations"]["workers/commit_sha"] = args.commit

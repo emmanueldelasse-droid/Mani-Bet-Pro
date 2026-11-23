@@ -1,0 +1,168 @@
+{
+  "source_url": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=20261123&limit=25",
+  "captured_at": "2026-11-23T22:39:13.254Z",
+  "scoreboard": {
+    "_fetched_at": "2026-11-23T22:39:13.254Z",
+    "leagues": [
+      {
+        "id": "46",
+        "slug": "nba",
+        "uid": "s:40~l:46"
+      }
+    ],
+    "events": [
+      {
+        "id": "401910041",
+        "uid": "s:40~l:46~e:401910041",
+        "date": "2026-11-24T01:00Z",
+        "status": {
+          "clock": 0.0,
+          "displayClock": "0.0",
+          "period": 0,
+          "type": {
+            "id": "1",
+            "name": "STATUS_SCHEDULED",
+            "state": "pre",
+            "completed": false,
+            "description": "Scheduled",
+            "detail": "Mon, November 23rd at 8:00 PM EST",
+            "shortDetail": "11/23 - 8:00 PM EST"
+          }
+        },
+        "competitions": [
+          {
+            "id": "401910041",
+            "uid": "s:40~l:46~e:401910041~c:401910041",
+            "date": "2026-11-24T01:00Z",
+            "status": {
+              "clock": 0.0,
+              "displayClock": "0.0",
+              "period": 0,
+              "type": {
+                "id": "1",
+                "name": "STATUS_SCHEDULED",
+                "state": "pre",
+                "completed": false,
+                "description": "Scheduled",
+                "detail": "Mon, November 23rd at 8:00 PM EST",
+                "shortDetail": "11/23 - 8:00 PM EST"
+              }
+            },
+            "type": {
+              "id": "1",
+              "abbreviation": "STD"
+            },
+            "timeValid": true,
+            "competitors": [
+              {
+                "homeAway": "home",
+                "id": "4",
+                "type": "team",
+                "team": {
+                  "id": "4",
+                  "abbreviation": "CHI"
+                }
+              },
+              {
+                "homeAway": "away",
+                "id": "5",
+                "type": "team",
+                "team": {
+                  "id": "5",
+                  "abbreviation": "CLE"
+                }
+              }
+            ],
+            "odds": [
+              {
+                "provider": {
+                  "id": "100",
+                  "name": "DraftKings",
+                  "priority": 1
+                },
+                "moneyline": {
+                  "displayName": "Moneyline",
+                  "shortDisplayName": "ML",
+                  "home": {
+                    "close": {
+                      "odds": "+282"
+                    },
+                    "open": {
+                      "odds": "+284"
+                    }
+                  },
+                  "away": {
+                    "close": {
+                      "odds": "-352"
+                    },
+                    "open": {
+                      "odds": "-356"
+                    }
+                  }
+                },
+                "pointSpread": {
+                  "displayName": "Spread",
+                  "shortDisplayName": "Spread",
+                  "home": {
+                    "close": {
+                      "line": "+8.5",
+                      "odds": "-104"
+                    },
+                    "open": {
+                      "line": "+9.5",
+                      "odds": "-110"
+                    }
+                  },
+                  "away": {
+                    "close": {
+                      "line": "-8.5",
+                      "odds": "-116"
+                    },
+                    "open": {
+                      "line": "-9.5",
+                      "odds": "-110"
+                    }
+                  }
+                },
+                "total": {
+                  "displayName": "Total",
+                  "shortDisplayName": "Total",
+                  "over": {
+                    "close": {
+                      "line": "o242.5",
+                      "odds": "-107"
+                    },
+                    "open": {
+                      "line": "o241.5",
+                      "odds": "-110"
+                    }
+                  },
+                  "under": {
+                    "close": {
+                      "line": "u242.5",
+                      "odds": "-113"
+                    },
+                    "open": {
+                      "line": "u241.5",
+                      "odds": "-110"
+                    }
+                  }
+                },
+                "homeTeamOdds": {
+                  "team": {
+                    "id": "4"
+                  }
+                },
+                "awayTeamOdds": {
+                  "team": {
+                    "id": "5"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

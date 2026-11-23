@@ -3,11 +3,11 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync,readdirSync} from 'node:fs';
 import {contextForStudy} from '../study-runtime.mjs';
 
-export function d1() {
+export function d1({serverClock=()=>Date.now()}={}) {
   const sqlite=new DatabaseSync(':memory:');
   // Make SQLite's server clock advance with the deterministic Worker clock.
   sqlite.function('strftime',{deterministic:true},(format,value) => {
-    const ms=value==='now'?Date.now():Date.parse(value);
+    const ms=value==='now'?serverClock():Date.parse(value);
     if(!Number.isFinite(ms))return null;
     if(format==='%s')return String(Math.floor(ms/1000));
     if(format==='%Y-%m-%dT%H:%M:%fZ')return new Date(ms).toISOString();
@@ -16,7 +16,7 @@ export function d1() {
   sqlite.exec('PRAGMA foreign_keys=ON; PRAGMA trusted_schema=ON');
   const directory=new URL('../',import.meta.url);
   const schemaFiles=['research-journal.sql','market-study.sql','study-runtime.sql',
-    ...readdirSync(directory).filter(name=>name.startsWith('prompt-lab')&&name.endsWith('.sql')).sort()];
+    ...readdirSync(directory).filter(name=>(name.startsWith('prompt-lab')||name.startsWith('published')||name==='odds-study.sql')&&name.endsWith('.sql')).sort(),'learning.sql','player-odds-coverage.sql','odds-intake.sql'];
   for(const file of schemaFiles) sqlite.exec(readFileSync(new URL(file,directory),'utf8'));
   function statement(sql,args) {
     return {
@@ -66,6 +66,20 @@ export function fixture(game = g) {
     interval_80:{home:[98,132],away:[93,127]}};
   return contextForStudy(game,sourceAt,'test-before-match',forecast,{home:[],away:[]},medical,boxes,rosters,null);
 }
+// The full collection object and the cached slate are independent in the deployed Worker.
+export function fixtureState(games,slate={games}){
+  const cards=new Map(games.map(game=>{
+    const ctx=fixture(game);
+    return [game.id,{...game,checked_at:ctx.sourceAt,official_medical:ctx.medical,injuries:ctx.injuries,
+      independent_analysis:{advanced:{forecast:ctx.forecast,forecast_signature:ctx.signature}}}];
+  }));
+  return {async get(key){
+    if(key==='max:slate:latest')return structuredClone(slate);
+    const card=key.startsWith('max:game:')?cards.get(key.slice('max:game:'.length)):null;
+    return card?structuredClone(card):null;
+  }};
+}
+
 export function report(at,injuries,quote=false,game=g) {
   const checked_at=iso(at-60000);
   return {schema_version:'max-research-v1',match_id:game.id,generated_at:iso(at),summary:'Exemple synthétique de validation locale.',
