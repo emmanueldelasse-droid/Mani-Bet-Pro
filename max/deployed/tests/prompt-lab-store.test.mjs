@@ -74,6 +74,8 @@ test('validation rejects swapped player/match, retroactive targets and fabricate
     ['past-target',{targets:[{match_id:'400004',tip:at}]},'TARGET_OUTSIDE_FUTURE_COHORT'],
     ['invented-date',{targets:[{match_id:'400004',tip:'2027-01-08T20:00:00Z'}]},'TARGET_SCHEDULE_MISMATCH'],
     ['unlisted-game',{targets:[{match_id:'777777',tip}]},'FUTURE_SCHEDULE_REFERENCE_REQUIRED'],
+    ['duplicate-target-player',{targets:[{match_id:'400004',tip,player_ids:['51','51']}]},'INVALID_PREREGISTERED_PLAYERS'],
+    ['empty-player-list',{targets:[{match_id:'400004',tip,player_ids:[]}]},'INVALID_PREREGISTERED_PLAYERS'],
     ['unchanged-arm',{metric:'brier'},'METRIC_UNAFFECTED_BY_AVAILABILITY_BRANCH'],
     ['bad-metric',{criterion:{min_games:1,min_dates:1,min_gain:0}},'INVALID_DECISION_CRITERION']
   ]){
@@ -92,9 +94,9 @@ test('one immutable measured verdict at the predeclared horizon, with grace for 
   assert.equal((await closePromptExperiment(db,proposal.id,'ABANDONNER',missing)).status,'ACTIVE');
   setClock('2027-01-12T00:00:01.000Z');
   const closed=await closePromptExperiment(db,proposal.id,'ABANDONNER',missing);
-  assert.equal(closed.status,'ABANDON');assert.equal(closed.decision.evaluated_games,0);
+  assert.equal(closed.status,'INCONCLUSIVE');assert.equal(closed.decision.evaluated_games,0);
   assert.equal(await readActiveExperiment(db),null);
-  assert.equal((await closePromptExperiment(db,proposal.id,'ABANDONNER',{...missing,reason:'late change'})).decision.reason,missing.reason);
+  assert.equal((await closePromptExperiment(db,proposal.id,'ABANDONNER',{...missing,reason:'late change'})).decision.reason,closed.decision.reason);
 });
 
 test('an older role capture without a cutoff-time inventory is inconclusive; a linked published minutes cap is already used',async()=>{
@@ -129,4 +131,59 @@ test('an isolated collection defect needs a separate official pre-cutoff publica
   assert.equal(exp.status,'ACTIVE');assert.equal(exp.evidence[0].missed_source.status,'OUT');
   assert.equal(exp.evidence[0].missed_source.published_at,'2027-01-03T08:00:00.000Z');
   assert.equal(exp.evidence[0].classification,'MISSING');
+});
+
+test('revision before the first game stays queued, starts after review, retains server-clock history and scopes players',async()=>{
+  const {db,raw,proposal,send,setClock}=setup();
+  send(proposal);const [v1]=await processPromptInbox(db);
+  const review_at='2027-01-21T01:00:00.000Z';
+  const successor={...proposal,id:'macfly-02',parent_id:proposal.id,change_reason:'Vérifier uniquement le joueur visé, avec un objectif plus exigeant.',
+    prompt:'Nouvelle consigne avec\nsaut de ligne.',criterion:{...proposal.criterion,min_gain:0.5},
+    targets:[{match_id:'400005',tip:'2027-01-18T20:00:00.000Z',player_ids:['51'],source_url:'https://www.espn.com/nba/game/_/gameId/400005'}],
+    cohort:{start:'2027-01-18T00:00:00Z',end:'2027-01-19T00:00:00Z'},review_at};
+  setClock('2027-01-07T00:00:00.000Z');
+  send(successor);const [queued]=await processPromptInbox(db);
+  assert.equal(queued.status,'QUEUED');assert.equal(queued.version,2);assert.equal(queued.family_id,v1.id);
+  assert.deepEqual(queued.targets[0].player_ids,['51']);assert.equal(queued.prompt,successor.prompt);assert.equal(queued.review_at,review_at);
+  assert.deepEqual(queued.status_history.map(x=>x.status),['REGISTERED','QUEUED']);
+  assert.equal(queued.registered_at,'2027-01-07T00:00:00.000Z');assert.equal(queued.activated_at,null);
+  assert.equal((await readActiveExperiment(db)).id,v1.id);
+  send({...successor,id:'racing-fork'});assert.equal((await processPromptInbox(db))[0].reason,'PARENT_NOT_LATEST_VERSION');
+  setClock('2027-01-13T10:00:00.000Z');
+  const terminal=await closePromptExperiment(db,v1.id,'NON_CONCLUANTE',{decision:'NON_CONCLUANTE',metric:proposal.metric,target_count:1,evaluated_games:0,evaluated_cases:0,reason:'La feuille de match manque.'});
+  assert.equal(terminal.status,'INCONCLUSIVE');assert.equal(terminal.prompt,proposal.prompt);
+  const [event]=terminal.status_history.slice(-1);assert.equal(event.reason,'La feuille de match manque.');assert.equal(event.at,'2027-01-13T10:00:00.000Z');
+  const newlyActive=await processPromptInbox(db);const active=await readActiveExperiment(db);
+  assert.deepEqual(newlyActive,[active]);
+  assert.deepEqual(await processPromptInbox(db),[]);
+  assert.equal(active.id,successor.id);assert.equal(active.activated_at,event.at);
+  assert.deepEqual(active.status_history.map(x=>x.status),['REGISTERED','QUEUED','ACTIVE']);
+  assert.throws(()=>raw.prepare("UPDATE prompt_lab_versions SET version=4 WHERE id=?").run(proposal.id),/IMMUTABLE/);
+  assert.throws(()=>raw.prepare("DELETE FROM prompt_lab_status_history WHERE experiment_id=?").run(proposal.id),/IMMUTABLE/);
+});
+
+test('a queued version whose target tipped is inconclusive and will never be retroactivated',async()=>{
+  const {db,proposal,send,setClock}=setup();
+  send(proposal);await processPromptInbox(db);
+  const next={...proposal,id:'expired-cohort',parent_id:proposal.id,change_reason:'Préciser la recherche de disponibilité.',prompt:'Vérifier le statut précis.',
+    targets:[{match_id:'400006',tip,source_url:'https://www.espn.com/nba/game/_/gameId/400006'}]};
+  send(next);await processPromptInbox(db);
+  setClock('2027-01-09T00:00:00.000Z');await processPromptInbox(db);
+  const expired=(await readLabExperiments(db)).find(e=>e.id===next.id);
+  assert.equal(expired.status,'INCONCLUSIVE');assert.equal(expired.activated_at,null);
+  assert.equal(expired.decision.evaluated_games,0);assert.equal(expired.decision.decision,'NON_CONCLUANTE');
+});
+
+test('schema migration keeps historic server instants and is idempotent',async()=>{
+  const raw=new DatabaseSync(':memory:'); const full=readFileSync(new URL('../prompt-lab.sql',import.meta.url),'utf8');
+  let clock=at;raw.function('strftime',{deterministic:true},(_fmt,x)=>x==='now'?clock:new Date(x).toISOString());
+  raw.exec('PRAGMA trusted_schema=ON; PRAGMA foreign_keys=ON');
+  raw.exec(full.split('-- The immutable registry')[0]);
+  const no={id:'history-1',action:'NO_PROMPT',reason:'Statut déjà connu.'};const json=JSON.stringify(no);
+  raw.prepare('INSERT INTO prompt_lab_inbox(payload) VALUES(?)').run(json);
+  raw.prepare('INSERT INTO prompt_lab_experiments(id,status,received_at,plan_json) VALUES(?,?,?,?)').run(no.id,'NO_PROMPT',at,json);
+  clock='2027-01-10T00:00:00.000Z';raw.exec(full);raw.exec(full);
+  const v=raw.prepare('SELECT * FROM prompt_lab_versions').get(),events=raw.prepare('SELECT * FROM prompt_lab_status_history').all();
+  assert.equal(v.version,1);assert.equal(v.registered_at,at);assert.equal(v.plan_json,json);
+  assert.equal(events.length,1);assert.equal(events[0].at,at);assert.equal(events[0].reason,no.reason);
 });

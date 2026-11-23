@@ -66,6 +66,18 @@ body{font-size:16px}.btn,.go,.filter,.tab{min-height:44px}.tabs{gap:8px;overflow
 .lab-numbers{margin:6px 0}.lab-numbers div{display:flex;justify-content:space-between;gap:12px;border-top:1px solid var(--line);padding:4px 0}.lab-numbers dd{margin:0;font-weight:700}
 .lab-detail ul{padding-left:1.3em;margin:2px 0 10px}.lab-detail li{padding:3px 0}.lab-review{border-top:1px solid var(--line);padding:10px 0}
 .lab-match-result{display:block;color:var(--muted)}
+.lab-target-player{width:100%;margin:.65em 0;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.lab-target-player caption{text-align:left;font-weight:700;padding:3px 0}
+.lab-target-player th,.lab-target-player td{padding:3px 4px;border-bottom:1px solid var(--line);text-align:right}
+.lab-target-player th:first-child{text-align:left}.lab-target-player thead th{font-size:.86em;color:var(--muted)}.lab-target-player tbody th{font-weight:500}
+.lab-entry,.lab-impact-link,.lab-back,.lab-perf-link a,#lab-page nav a{display:inline-flex;align-items:center;min-height:44px;font-weight:650}
+.lab-entry{justify-content:space-between;width:100%;padding:0 14px;margin:0 0 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel);text-decoration:none}
+#lab-page{max-width:760px;margin:auto}#lab-page h1{line-height:1.15;font-size:clamp(25px,4vw,36px);letter-spacing:-.035em;margin:14px 0 20px}
+#lab-page h2{font-size:18px;line-height:1.3;margin:6px 0 10px}#lab-page nav{display:flex;align-items:center;gap:9px}
+#lab-page #prompt-lab-content{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:8px 14px}
+.lab-group ul{padding:0;list-style:none;margin:0}.lab-group{margin:12px 0}.lab-index-row{display:flex;align-items:center;justify-content:space-between;min-height:52px;padding:8px 0;gap:12px;border-top:1px solid var(--line);text-decoration:none}
+.lab-index-row b{color:var(--txt)}.lab-index-row small,.lab-perf-link small{display:block;color:var(--muted)}.lab-reading{border:0}
+.lab-impact-link{border-top:1px solid var(--line);margin-top:6px}
 </style></head>
 <body><div class="shell">
 <header class="top"><div class="brand"><div class="mark">M</div><div><b>ManiBetProMax</b><small>NBA INTELLIGENCE</small></div></div><button class="btn" id="refresh">Actualiser</button></header>
@@ -73,10 +85,11 @@ body{font-size:16px}.btn,.go,.filter,.tab{min-height:44px}.tabs{gap:8px;overflow
  <div class="headline"><div class="eyebrow">MacFly + moteur statistique indépendant</div><h1>Qui est favori ? Combien de points ?</h1><p class="subtitle">Le favori estimé, les points attendus et les informations qui peuvent changer le match.</p><div class="quick"><span id="lastCollect">Collecte : —</span><span id="coverage">Données joueurs : —</span><span id="research">MacFly : —</span></div></div>
  <div class="sectionhead"><div><h2>Matchs NBA</h2><div class="tiny" id="gameCount">Chargement…</div></div></div>
  <details class="study-wrap" id="study-wrap"><summary>Bilan sportif et simulation Winamax</summary><div id="study-content" aria-live="polite"></div></details>
- <details class="study-wrap" id="prompt-lab-wrap"><summary>Expériences de recherche MacFly</summary><div id="prompt-lab-content" aria-live="polite"></div></details>
+ <a class="lab-entry" href="#experiences-macfly">Expériences MacFly <span aria-hidden="true">→</span></a>
  <div class="filters" role="group" aria-label="Filtrer les matchs"><button class="filter" data-filter="upcoming">À venir</button><button class="filter" data-filter="today">Aujourd’hui</button><button class="filter" data-filter="tomorrow">Demain</button><button class="filter" data-filter="all">Tous</button></div>
  <main id="games" class="games" aria-live="polite"><div class="empty">Chargement des rencontres NBA…</div></main>
 </section>
+<section id="lab-page" hidden><nav aria-label="Navigation des expériences"><a href="#">← Matchs NBA</a> · <a href="#bilan-max">Bilan sportif</a></nav><h1>Expériences MacFly</h1><div id="prompt-lab-content" aria-live="polite"></div></section>
 <section id="detail" hidden><button class="back" id="back">← Tous les matchs</button><div id="matchView"></div></section>
 <details class="metricsDetails" id="metricsWrap"><summary>Fiabilité des prévisions et état des données</summary><div id="metrics" class="tiny">Chargement des contrôles…</div></details>
 <footer class="footer">Analyse NBA expérimentale. Les prévisions ne sont pas des certitudes. Sources horodatées, aucune API payante, aucun lien de données avec ManiBetPro.</footer>
@@ -256,7 +269,7 @@ function gameCard(g,asDetail=false){
   '<div class="mb-meta"><time datetime="'+esc(g.start)+'">'+esc(local(g.start))+'</time><span class="mb-pill">'+esc(statStatus(g))+'</span></div>'+
   '<h2 class="mb-title">'+esc(away.name)+' <span>–</span> '+esc(home.name)+'</h2>'+top+
   '<div class="mb-projection">'+scoreLine+'</div>'+result+'<h3 class="mb-label">Marqueurs attendus <small>si participation</small></h3>'+
-  (rows||'<p class="mb-muted">Projections joueurs indisponibles.</p>')+conditional+impactView(g)+
+  (rows||'<p class="mb-muted">Projections joueurs indisponibles.</p>')+conditional+impactView(g)+labCardLinks(g.study?.prompt_experiments)+
   '<details class="mb-details"><summary>Sources et détail de la prévision</summary>'+
   (usable?'<p>Principal · estimation '+(eligible?'figée ':'')+'du '+esc(local(at))+'. Probabilités en cours d’évaluation.</p>':'')+
   (g.study?.revision?revisionDetails(g.study.revision,g):'')+journalSources(g)+marketLine(g)+links+'</details></div></article>';
@@ -442,9 +455,12 @@ function renderDetail(g){
  if(state.tab==='expert')loadTimeline(g.id);
 }
 function render(){
+ if(showLabPage())return;
+ $('metricsWrap').hidden=false;
+ if(location.hash==='#bilan-max'){$('study-wrap').open=true;$('study-wrap').scrollIntoView({block:'start'});}
  const id=matchId(),g=id?state.games.find(x=>String(x.id)===id):null;
- $('overview').hidden=!!g;$('detail').hidden=!g;
- if(g)renderDetail(g);else renderOverview();
+ $('overview').hidden=!!id;$('detail').hidden=!id;
+ if(g)renderDetail(g);else if(id)renderArchive(id);else renderOverview();
  $('lastCollect').textContent='Collecte : '+local(state.health?.last_success||state.updated_at);
  $('coverage').textContent='Boxscores : '+(state.health?.sources?.player_boxes?.cached??0);
  $('research').textContent='Rapports : '+state.games.filter(g=>g.status==='STATUS_SCHEDULED'&&g.automatic_report).length+' · MacFly : '+(state.research_coverage?.available??state.research_count??0)+' / '+(state.research_coverage?.eligible??state.research_agenda?.eligible??0)+' · passage toutes les 6 h';
@@ -456,7 +472,7 @@ function render(){
  '<p>Recherche ciblée : '+esc(state.research_agenda?.due_count??'—')+' sujet(s) pour le prochain passage groupé. Collecte et MacFly toutes les 6 heures ; contrôle de santé quotidien.</p>'+
  '<p>Statut : NON CALIBRÉ. Évaluation fondée sur des projections réellement enregistrées avant le début des matchs. Historique archivé : '+esc(state.health?.sources?.archive?.days??0)+' / '+esc(state.health?.sources?.archive?.target??'—')+' journées.</p>';
 }
-function timelineHtml(data){
+function timelineHtml(data,archivedGame=null,hasPair=false){
  const lines=(data.timeline||[]).filter(x=>x.at).map(x=>{
   const f=x.forecast,p=x.player_points;
   return '<div class="rowInfo"><span>'+esc(x.checkpoint)+' · '+esc(local(x.at))+'</span><b>'+
@@ -465,7 +481,7 @@ function timelineHtml(data){
  }).join('');
  const e=data.evaluation,pe=data.player_evaluation;
  const journal=(data.study?.revisions??[]).map(item=>item.revision??item).sort((a,b)=>Date.parse(b.integrated_at??b.at)-Date.parse(a.integrated_at??a.at));
- const game=state.games.find(g=>String(g.id)===String(data.game?.id??matchId()));
+ const game=state.games.find(g=>String(g.id)===String(data.game?.id??matchId()))??archivedGame;
  const history=game&&journal.length?'<h3>Versions MacFly</h3>'+journal.map(r=>revisionDetails(r,game)).join(''):'';
  const deliveries=Array.isArray(data.study?.deliveries)?data.study.deliveries:[];
  const deliveryLabels={INTEGRATED:'Pris en compte par Max',AFTER_TIP:'Reçu après le coup d’envoi · hors prévision',RECEIVED:'Reçu · prise en compte en attente'};
@@ -476,7 +492,7 @@ function timelineHtml(data){
    ' · Reçu le '+checkedTime(d.received_at)+applied+'</li>';
  }).join('');
  const receiptSection=receipts?'<h3>Réception des rapports MacFly</h3><ul class="factList">'+receipts+'</ul>':'';
- return receiptSection+history+(lines||'<div class="scarce">Aucun relevé pré-match disponible pour cette rencontre.</div>')+
+ return receiptSection+history+(lines||(hasPair?'':'<div class="scarce">Aucun relevé pré-match disponible pour cette rencontre.</div>'))+
  (e?'<div class="risk">Évaluation du vainqueur : Brier '+esc(e.brier)+' · Log Loss '+esc(e.log_loss)+'</div>':'')+
  (pe?'<div class="risk">Prédictions individuelles : MAE '+esc(pe.mae)+' points · '+esc(pe.matched)+' joueurs vérifiés.</div>':'')+
  '<p class="tiny" style="margin-top:10px">Les anciens relevés ne sont jamais recalculés après le résultat.</p>';
@@ -516,7 +532,7 @@ document.addEventListener('click',event=>{
  if(tab){state.tab=tab.dataset.tab;render();return}
 });
 $('back').addEventListener('click',()=>{location.hash='';state.tab='resume';render();window.scrollTo({top:0,behavior:'instant'})});
-$('refresh').addEventListener('click',load);
+$('refresh').addEventListener('click',()=>{if(!showLabPage(true))load();});
 window.addEventListener('hashchange',render);
 const impactNames={injury:'absence ou disponibilité',availability:'disponibilité',role:'rôle du joueur',rotation:'rotation',minutes_limit:'limite de minutes',research:'rapport',context:'contexte'};
 const impactKind=k=>impactNames[String(k).toLowerCase()]??String(k).replace(/_/g,' ').toLowerCase();
@@ -590,7 +606,7 @@ async function loadStudy(){
   const data=await response.json();
   const legacy=data.legacy_audit;
   const quality=legacy?'<p>Contrôle du '+esc(legacy.date)+' · '+numberFr(legacy.over_15_minutes)+' paires sur '+numberFr(legacy.compared_checkpoints)+' espacées de plus de 15 minutes, '+numberFr(legacy.unpaired)+' captures sans paire. Le bilan prospectif commence avec les nouvelles captures synchronisées.</p>':'';
-  target.innerHTML=sportStudy(data.sport)+quality+marketStudy(data.market);
+  target.innerHTML=labPerfLink(data.prompt_lab)+sportStudy(data.sport)+quality+marketStudy(data.market);
  }catch{
   target.textContent='Bilan momentanément indisponible. Referme puis ouvre le bilan pour réessayer.';
  }
@@ -610,7 +626,7 @@ const labMetrics={
  minutes_mae:{label:'Erreur moyenne du temps de jeu',unit:' min',digits:2},
  production_mae:{label:'Erreur de production à temps de jeu comparable',unit:' pts',digits:2}
 };
-const labDecisions={POURSUIVRE:'poursuivre',PROPOSER_ADOPTION:'proposer l’adoption',ABANDONNER:'abandonner'};
+const labDecisions={POURSUIVRE:'poursuivre',PROPOSER_ADOPTION:'proposer l’adoption',ABANDONNER:'abandonner',NON_CONCLUANTE:'non concluante'};
 function labCount(count,one,many){
  return numberFr(count,0)+' '+(count===1?one:many);
 }
@@ -620,7 +636,39 @@ function labMatch(matchId,entry={}){
  const away=entry.away_name??g?.away?.name,home=entry.home_name??g?.home?.name;
  const name=away&&home?away+' – '+home:'Match '+id;
  if(!/^\d{5,15}$/.test(id))return esc(name);
- return '<a href="'+(g?'#match-'+id:'/api/game?id='+id)+'">'+esc(name)+'</a>';
+ return '<a href="#match-'+id+'">'+esc(name)+'</a>';
+}
+function archivedGameHtml(id,data){
+ const team=side=>data.teams?.[side]?.name??(typeof data.teams?.[side]==='string'?data.teams[side]:null);
+ const away=team('away'),home=team('home'),start=data.start;
+ const g={id,away:{name:away??'Extérieur'},home:{name:home??'Domicile'}};
+ const title=home&&away?away+' – '+home:'Match '+id;
+ const rows=[['Principal',data.study?.pair?.primary],['Variante rotations',data.study?.pair?.variant]].filter(([,snap])=>snap&&Date.parse(snap.at)<Date.parse(start));
+ const pairs=rows.map(([label,s])=>{
+  const f=s.forecast??{},p=f.probability_home,sc=f.projected_score;
+  const win=Number.isFinite(p)?'<p>'+esc(g.away.name)+' '+percent(1-p)+' · '+esc(g.home.name)+' '+percent(p)+'</p>':'';
+  const points=Number.isFinite(sc?.home)&&Number.isFinite(sc?.away)?'<p>Score projeté · '+numberFr(sc.away)+' – '+numberFr(sc.home)+' · total '+numberFr(sc.away+sc.home)+' pts</p>':'';
+  return '<section><h3>'+esc(label)+'</h3>'+labTimeString(s.at)+win+points+'</section>';
+ }).join('');
+ return '<article class="panel lab-archive"><h1>'+esc(title)+'</h1>'+(start?'<p>Coup d’envoi · '+labTimeString(start)+'</p>':'')+
+  labCardLinks(data.study?.prompt_experiments)+'<h2>Prévisions archivées</h2>'+pairs+timelineHtml(data,g,rows.length>0)+'</article>';
+}
+const archiveBack='<a class="lab-back" href="#experiences-macfly">← Expériences MacFly</a>';
+let pendingArchive=null;
+function renderArchive(id){
+ const host=$('matchView'),cached=state.historyCache[id];
+ if(cached){host.innerHTML=archiveBack+archivedGameHtml(id,cached);return;}
+ if(pendingArchive?.id===id&&pendingArchive.target.isConnected)return;
+ host.innerHTML=archiveBack+'<div id="archive-content" class="panel" aria-live="polite">Chargement du match archivé…</div>';
+ const target=$('archive-content'),request={id,target};
+ pendingArchive=request;
+ const stillHere=()=>pendingArchive===request&&target.isConnected&&matchId()===id&&!state.games.some(g=>String(g.id)===id);
+ fetch('/api/game?id='+encodeURIComponent(id),{cache:'no-store'}).then(async res=>{
+  if(!res.ok){if(stillHere())target.textContent=res.status===404?'Match introuvable dans les archives.':'Historique momentanément indisponible.';return;}
+  const data=await res.json();
+  if(stillHere()){state.historyCache[id]=data;host.innerHTML=archiveBack+archivedGameHtml(id,data);}
+ }).catch(()=>{if(stillHere())target.textContent='Historique momentanément indisponible.';})
+ .finally(()=>{if(pendingArchive===request)pendingArchive=null;});
 }
 function labEvidence(records){
  if(!Array.isArray(records)||!records.length)return '';
@@ -658,16 +706,24 @@ function labPlayerEffects(matches){
 function labEffects(exp,metric){
  const s=exp.score;
  if(!s)return '<p>Le bilan de cette expérience est indisponible.</p>';
- const coverage=[labCount(s.evaluated_cases,'cas évalué','cas évalués'),labCount(s.evaluated_games,'match évalué','matchs évalués')];
- if(Number.isInteger(s.forecast_games)&&Number.isInteger(s.target_count))
-  coverage.push(s.forecast_games+' / '+s.target_count+' matchs avec une prévision appariée');
+ const coverage=[labCount(s.evaluated_cases,'cas comparé après résultat','cas comparés après résultat'),labCount(s.evaluated_games,'match évalué','matchs évalués')];
+ if(Number.isInteger(s.target_count))coverage.push(labCount(s.target_count,'match prévu','matchs prévus'));
+ if(Number.isInteger(s.eligible_games))coverage.push(labCount(s.eligible_games,'match éligible','matchs éligibles'));
+ if(Number.isInteger(s.eligible_cases))coverage.push(labCount(s.eligible_cases,'cas éligible','cas éligibles'));
+ if(Number.isInteger(s.forecast_games))coverage.push(labCount(s.forecast_games,'match avec capture','matchs avec capture'));
  if(Number.isInteger(s.evaluated_dates)&&s.evaluated_dates>0)coverage.push(labCount(s.evaluated_dates,'date de match','dates de match'));
- if(Number.isInteger(s.researched_games))coverage.push(labCount(s.researched_games,'match avec une recherche reçue','matchs avec une recherche reçue')+
-   ' ('+numberFr(s.no_finding_games,0)+' sans renseignement trouvé) · '+numberFr(s.games_without_supplement,0)+' sans supplément reçu');
+ if(Array.isArray(exp.trace)){
+  const received=new Set(exp.trace.filter(t=>t.report_id!=null&&t.received_at).map(t=>String(t.match_id))).size;
+  coverage.push(labCount(received,'match avec un supplément reçu','matchs avec un supplément reçu'));
+ }
+ if(Number.isInteger(s.researched_games))coverage.push(labCount(s.researched_games,'match avec un supplément dans la paire','matchs avec un supplément dans la paire')+
+   ' ('+numberFr(s.no_finding_games,0)+' sans renseignement trouvé) · '+numberFr(s.games_without_supplement,0)+' sans supplément dans la paire');
  const inputs=Number.isInteger(s.extra_fact_count)&&Number.isInteger(s.changed_games)
   ?'<p>'+esc(labCount(s.extra_fact_count,'fait supplémentaire','faits supplémentaires')+' · '+labCount(s.changed_games,'match dont la projection a changé','matchs dont la projection a changé'))+'</p>':'';
- const lead=inputs+labPlayerEffects(s.matches)+'<p>'+esc(coverage.join(' · '))+'</p>';
- if(!s.evaluated_cases)return lead+'<p class="lab-note">'+(s.decision==='ABANDONNER'?'Aucun gain mesurable sur les matchs ciblés.':'Les erreurs seront calculées après les résultats des matchs appariés.')+'</p>';
+ const quality=s.pair_quality;
+ const excluded=quality?.incompatible_captures>0?'<p class="lab-note">'+esc(labCount(quality.incompatible_captures,'paire de captures incompatible écartée','paires de captures incompatibles écartées'))+' avant le bilan.</p>':'';
+ const lead=inputs+labPlayerEffects(s.matches)+'<p>'+esc(coverage.join(' · '))+'</p>'+excluded;
+ if(!s.evaluated_cases)return lead+'<p class="lab-note">'+(s.conclusion==='INCONCLUSIVE'?'Données insuffisantes pour conclure.':s.decision==='ABANDONNER'?'Aucun gain mesurable sur les matchs ciblés.':'Résultat en attente. Les erreurs seront calculées après les résultats des matchs appariés.')+'</p>';
  const value=n=>Number.isFinite(n)?numberFr(n,metric.digits)+metric.unit:'Indisponible';
  const row=(label,n)=>'<div><dt>'+esc(label)+'</dt><dd>'+esc(value(n))+'</dd></div>';
  const interval=Array.isArray(s.interval_95)&&s.interval_95.length===2&&s.interval_95.every(Number.isFinite)
@@ -676,7 +732,11 @@ function labEffects(exp,metric){
  return lead+'<p>'+metricName+' · plus bas = meilleur.</p><dl class="lab-numbers">'+
   row('Moteur principal',s.primary)+row('Même moteur sans la consigne',s.control)+row('Avec la consigne',s.variant)+'</dl>'+
   (Number.isFinite(s.gain)?'<p><b>'+esc((s.gain<0?'Hausse de l’erreur':s.gain>0?'Réduction de l’erreur':'Écart d’erreur')+
-   ' avec la consigne · '+value(Math.abs(s.gain)))+'</b></p>':'')+interval;
+   ' avec la consigne · '+value(Math.abs(s.gain)))+'</b></p>':'')+interval+
+  (Number.isInteger(s.reference_cases)?'<p class="lab-note">Comparaison au moteur principal · '+esc(labCount(s.reference_cases,'cas évalué','cas évalués'))+
+    (Number.isFinite(s.variant_vs_primary)?' · sur ces mêmes cas, erreur avec la consigne '+esc(value(s.variant_vs_primary)):'')+'</p>':'')+
+  (s.secondary&&Number.isFinite(s.secondary.variant)?'<p>Points joueur · erreur secondaire sur '+esc(labCount(s.secondary.evaluated_cases,'cas','cas'))+
+    ' · '+numberFr(s.secondary.control,2)+' pts sans la consigne et '+numberFr(s.secondary.variant,2)+' pts avec.</p>':'');
 }
 const labExclusions={
  AWAITING_BOXSCORE:'Feuille de match en attente',NO_COMMON_PLAYER_OBSERVATIONS:'Aucune projection joueur commune réglable',
@@ -684,6 +744,22 @@ const labExclusions={
  DIFFERENT_INPUTS:'Entrées différentes',OVER_15_MINUTES:'Captures décalées de plus de 15 minutes',
  INVALID_OR_LATE_CAPTURE:'Capture invalide ou tardive',UNVERIFIED_INPUTS:'Données de prévision non vérifiées'
 };
+function labTime(value){
+ return value&&Number.isFinite(Date.parse(value))?local(value):null;
+}
+function labTimeString(at){
+ if(!at)return '';
+ return '<time datetime="'+esc(at)+'" title="'+esc(at)+'">'+esc(labTime(at)??'Heure inconnue')+'</time>';
+}
+function labTargetPlayers(match){
+ if(!match?.player_comparisons?.length)return '';
+ const line=(label,values,missing)=>'<tr><th scope="row">'+esc(label)+'</th>'+
+  (values?'<td>'+numberFr(values.minutes)+'</td><td>'+numberFr(values.points)+'</td>':'<td colspan="2">'+esc(missing)+'</td>')+'</tr>';
+ return match.player_comparisons.map(p=>'<table class="lab-target-player"><caption>'+esc(p.name||'Joueur ESPN '+p.player_id)+'</caption>'+
+  '<thead><tr><th scope="col">Projection</th><th scope="col">Minutes</th><th scope="col">Points</th></tr></thead><tbody>'+
+  line('Sans consigne',p.control,'Indisponible')+line('Avec consigne',p.variant,'Indisponible')+
+  line('Observé',p.actual,match.result_observed_at?'Non documenté':'Résultat en attente')+'</tbody></table>').join('');
+}
 function labTargets(targets,matches=[]){
  if(!Array.isArray(targets)||!targets.length)return '';
  return '<details class="lab-detail"><summary>Matchs prévus ('+targets.length+')</summary><ul>'+
@@ -691,53 +767,139 @@ function labTargets(targets,matches=[]){
    const row=matches.find(r=>String(r.match_id)===String(g.match_id));
    const evidence=row?.exclusion?(labExclusions[row.exclusion]??'Comparaison écartée ('+row.exclusion+')'):
     row?.evaluated_cases>0?labCount(row.evaluated_cases,'cas évalué','cas évalués'):
-    row?.captured_at?(row.changed?'Projection modifiée':'Projection identique'):'';
-   return '<li>'+labMatch(g.match_id,g)+(g.tip?' · '+esc(local(g.tip)):'')+(evidence?'<small class="lab-match-result">'+esc(evidence)+'</small>':'')+'</li>';
+    row?.captured_at?(row.changed?'Projection modifiée · résultat en attente':'Projection identique · résultat en attente'):'Capture en attente';
+   const clocks=[['Principal',row?.primary_at],['Sans consigne',row?.control_at],['Avec consigne',row?.variant_at]].filter(pair=>pair[1]);
+   const run=clocks.map(([label,at])=>esc(label)+' · '+labTimeString(at)).join(' / ');
+   const engines=[['Principal',row?.primary_engine],['Sans consigne',row?.control_engine],['Avec consigne',row?.variant_engine]].filter(pair=>pair[1]);
+   const versions=engines.map(([label,ver])=>esc(label)+' · '+esc(ver)).join(' / ');
+   const actual=row?.final_score;
+   const scoreText=Number.isFinite(actual?.away)&&Number.isFinite(actual?.home)?' · score final '+numberFr(actual.away,0)+' – '+numberFr(actual.home,0):'';
+   return '<li>'+labMatch(g.match_id,g)+(g.tip?' · '+labTimeString(g.tip):'')+
+    (Array.isArray(g.player_ids)&&g.player_ids.length&&!row?.player_comparisons?.length?'<small class="lab-match-result">Joueurs ciblés (ESPN) · '+esc(g.player_ids.join(', '))+'</small>':'')+
+    '<small class="lab-match-result">'+esc(evidence+scoreText)+'</small>'+
+    labTargetPlayers(row)+(row?.pair_id!=null?'<small class="lab-match-result">Paire de prévisions · '+esc(row.pair_id)+'</small>':'')+
+    (run?'<small class="lab-match-result">'+run+'</small>':'')+(versions?'<small class="lab-match-result">'+versions+'</small>':'')+
+    (row?.common_input_id?'<small class="lab-match-result">Entrées communes · '+esc(row.common_input_id)+'</small>':'')+
+    (row?.result_observed_at?'<small class="lab-match-result">Résultat vérifié · '+labTimeString(row.result_observed_at)+'</small>':'')+
+    (row?.result_source?sourceLink(row.result_source,'Source du résultat'):'')+'</li>';
   }).join('')+'</ul></details>';
 }
-function labExperiment(exp,active){
+const labStatus={ACTIVE:'En cours',QUEUED:'En attente',NO_PROMPT:'Sans nouvelle consigne',ABANDON:'Abandonnée',
+ PROPOSE_ADOPTION:'Adoption proposée',INCONCLUSIVE:'Non concluante'};
+const labTraceStates={NOT_READ:'Lecture en attente',READ_PENDING:'Lecture à confirmer',READ:'Consigne lue',FOUND:'Information trouvée',
+ NO_FINDING:'Recherche sans information trouvée',ALREADY_KNOWN:'Information déjà connue',NOT_INTEGRATED:'Information non intégrée',LEGACY_UNATTESTED:'Édition antérieure sans preuve de lecture'};
+function labTrace(rows){
+ if(!Array.isArray(rows)||!rows.length)return '';
+ const items=rows.map(t=>{
+  const times=[['Lecture',t.read_at],['Lecture confirmée',t.confirmed_at],['Rapport préparé',t.generated_at],
+    ['Rapport reçu',t.received_at],['Rapport habituel intégré dans Max',t.standard_integrated_at],
+    ['Supplément intégré dans la variante',t.integrated_at]].filter(pair=>pair[1]);
+  const stages=times.map(([name,at])=>'<div><dt>'+esc(name)+'</dt><dd>'+labTimeString(at)+'</dd></div>').join('');
+  const refs=[['Lecture',t.read_id],['Passage MacFly',t.run_id],['Rapport habituel',t.baseline_receipt_id],['Version Max',t.standard_version_id],['Supplément',t.report_id],['Version expérimentale',t.version_id],['Paire évaluée',t.outcome_pair_id]].filter(pair=>pair[1]!=null);
+  const sources=(t.sources??[]).map(src=>{
+   const link=sourceLink(src.url,src.title||'Source');
+   return link?'<li>'+link+(src.published_at?' · publié '+labTimeString(src.published_at):'')+(src.checked_at?' · vérifié '+labTimeString(src.checked_at):'')+'</li>':'';
+  }).join('');
+  return '<li>'+labMatch(t.match_id,t)+' · <b>'+esc(labTraceStates[t.state]??'État inconnu')+'</b>'+
+   (stages?'<dl class="lab-numbers">'+stages+'</dl>':'')+
+   (t.reason?'<p>'+esc(t.reason)+'</p>':'')+
+   (t.outcome_used?'<p>Reçu lié au bilan · '+esc(labCount(t.evaluated_cases,'cas évalué','cas évalués'))+
+    (t.outcome_at?' · '+labTimeString(t.outcome_at):'')+'</p>':'')+
+   (refs.length?'<small>'+refs.map(([label,id])=>esc(label)+' '+esc(id)).join(' · ')+'</small>':'')+(sources?'<ul>'+sources+'</ul>':'')+'</li>';
+ }).join('');
+ return '<details class="lab-detail"><summary>Collecte et transmission ('+rows.length+')</summary><ul>'+items+'</ul></details>';
+}
+function labHistory(exp){
+ const list=exp.status_history??exp.history??[];
+ if(!Array.isArray(list)||!list.length)return '';
+ return '<details class="lab-detail"><summary>Historique des décisions</summary><ol>'+list.map(h=>'<li>'+
+  (h.at?labTimeString(h.at)+' · ':'')+'<b>'+esc(labStatus[h.status]??h.status)+'</b>'+(h.reason?'<p>'+esc(h.reason)+'</p>':'')+'</li>').join('')+'</ol></details>';
+}
+function labHref(id){return typeof id==='string'&&/^[A-Za-z0-9._-]{3,96}$/.test(id)?'#experience-macfly-'+id:null;}
+function labCardLinks(experiments){
+ return (experiments??[]).filter(e=>e.changed===true&&labHref(e.id)).map(e=>'<a class="lab-impact-link" href="'+labHref(e.id)+'">Projection expérimentale modifiée · '+esc(e.problem??'Voir l’expérience MacFly')+'</a>').join('');
+}
+function labPerfLink(summary){
+ const n=summary?.evaluated_matches,p=summary?.paired_matches;
+ return '<p class="lab-perf-link"><a href="#experiences-macfly">Voir les expériences MacFly</a>'+
+  (Number.isInteger(n)&&Number.isInteger(p)?'<small>'+esc(labCount(n,'match évalué','matchs évalués')+' · '+labCount(p,'match apparié','matchs appariés'))+'</small>':'')+'</p>';
+}
+const labVerdict=(exp)=>exp.score?.decision??({ACTIVE:'POURSUIVRE',PROPOSE_ADOPTION:'PROPOSER_ADOPTION',ABANDON:'ABANDONNER',INCONCLUSIVE:'NON_CONCLUANTE'}[exp.status]);
+function labExperiment(exp){
  const scoreData=exp.score??{},metric=labMetrics[exp.metric??scoreData.metric]??{label:'Métrique indisponible',unit:'',digits:2};
- const fallback={ACTIVE:'POURSUIVRE',PROPOSE_ADOPTION:'PROPOSER_ADOPTION',ABANDON:'ABANDONNER'};
- const verdict=scoreData.decision??fallback[exp.status];
- const label=labDecisions[verdict]??'en attente de mesure';
- const date=exp.created_at?esc(local(exp.created_at)):'Date indisponible';
- return '<details class="lab-card"'+(active?' open':'')+'><summary><b>'+esc(exp.problem)+'</b><small>'+date+' · '+esc(label)+'</small></summary>'+
+ const verdict=labVerdict(exp);
+ const label=exp.status==='QUEUED'?'en attente du test':labDecisions[verdict]??'en attente de mesure';
+ const meta=[Number.isInteger(exp.version)?'Version '+exp.version:'',labStatus[exp.status]??'',
+  labTime(exp.registered_at??exp.created_at)].filter(Boolean).join(' · ');
+ const parent=labHref(exp.parent_id);
+ return '<article class="lab-card lab-reading"><header><small>'+esc(meta)+'</small><h2>'+esc(exp.problem)+'</h2></header>'+
   '<section><h3>Ce que MacFly a remarqué</h3><p>'+esc(exp.problem)+'</p>'+
   (exp.diagnosis?'<p class="lab-note">'+esc(labDiagnoses[exp.diagnosis]??exp.diagnosis)+'</p>':'')+
   (exp.hypothesis?'<p><b>Hypothèse</b> · '+esc(exp.hypothesis)+'</p>':'')+labEvidence(exp.evidence)+'</section>'+
   '<section><h3>La consigne qu’il s’est donnée</h3><blockquote class="lab-prompt">'+esc(exp.prompt)+'</blockquote>'+
-  '<p><b>Mesure retenue</b> · '+esc(metric.label)+'</p>'+labCriteria(exp.criterion,metric)+(exp.exploratory?'<p class="lab-note">Test exploratoire. Une proposition d’adoption demande au moins 20 dates de match.</p>':'')+labTargets(exp.targets,scoreData.matches)+'</section>'+
-  '<section><h3>Ce que cela a changé</h3>'+labEffects(exp,metric)+'</section>'+
+  (exp.change_reason?'<p>Motif de cette version · '+esc(exp.change_reason)+'</p>':'')+
+  (parent?'<a href="'+parent+'">Ouvrir la version précédente</a>':'')+
+  '<p><b>Mesure retenue</b> · '+esc(metric.label)+'</p>'+labCriteria(exp.criterion,metric)+
+  (exp.exploratory?'<p class="lab-note">Test exploratoire. Une proposition d’adoption demande au moins 20 dates de match.</p>':'')+
+  labTargets(exp.targets,scoreData.matches)+'</section>'+
+  '<section><h3>Ce que cela a changé</h3>'+labEffects(exp,metric)+labTrace(exp.trace)+
+  (scoreData.pair_quality?'<p class="lab-note">'+numberFr(scoreData.pair_quality.eligible_captures,0)+' captures comparables · '+
+   numberFr(scoreData.pair_quality.incompatible_captures,0)+' incompatibles.</p>':'')+'</section>'+
   '<section><h3>Décision : '+esc(label)+'</h3>'+(scoreData.reason?'<p>'+esc(scoreData.reason)+'</p>':'')+
-  (verdict==='POURSUIVRE'&&scoreData.assessment_after?'<p class="lab-note">Évaluation finale après le '+esc(local(scoreData.assessment_after))+' (heure de Paris).</p>':'')+
-  (verdict==='PROPOSER_ADOPTION'?'<p class="lab-note">L’adoption par le moteur principal fait l’objet d’une décision séparée.</p>':'')+'</section></details>';
+  (scoreData.conclusion==='INCONCLUSIVE'?'<p>Données insuffisantes pour conclure.</p>':'')+
+  ((exp.review_at??scoreData.assessment_after)?'<p class="lab-note">Revue prévue le '+labTimeString(exp.review_at??scoreData.assessment_after)+'.</p>':'')+
+  (exp.review_condition?'<p class="lab-note">'+esc(exp.review_condition)+'</p>':'')+
+  (verdict==='PROPOSER_ADOPTION'?'<p class="lab-note">L’adoption par le moteur principal fait l’objet d’une décision séparée.</p>':'')+labHistory(exp)+'</section></article>';
 }
 function labReview(review){
- return '<article class="lab-review"><h4>'+esc(review.problem)+'</h4>'+
+ return '<article class="lab-review"><h2>'+esc(review.problem)+'</h2>'+
   (review.created_at?'<small>'+esc(local(review.created_at))+'</small>':'')+
   (review.diagnosis?'<p>'+esc(labDiagnoses[review.diagnosis]??review.diagnosis)+'</p>':'')+
-  (review.reason?'<p>'+esc(review.reason)+'</p>':'')+labEvidence(review.evidence)+'</article>';
+  (review.reason?'<p>'+esc(review.reason)+'</p>':'')+labEvidence(review.evidence)+labHistory(review)+'</article>';
 }
-function labResults(data){
+function labIndexRow(exp){
+ const score=exp.score??{};
+ const n=score.evaluated_cases;
+ const label=labStatus[exp.status]??(exp.action==='NO_PROMPT'?'Sans nouvelle consigne':'En cours');
+ const counts=Number.isInteger(n)?' · '+labCount(n,'cas comparé','cas comparés'):'';
+ return '<li><a class="lab-index-row" href="'+labHref(exp.id)+'"><span><b>'+esc(exp.problem)+'</b><small>'+
+  esc((Number.isInteger(exp.version)?'Version '+exp.version+' · ':'')+label+counts)+'</small></span><span aria-hidden="true">→</span></a></li>';
+}
+function labResults(data,id=null){
  if(!Array.isArray(data?.experiments)||!Array.isArray(data?.reviews))throw Error('LAB_RESPONSE_INVALID');
- const experiments=data.experiments, reviews=data.reviews;
- const experimentsHtml=experiments.length?experiments.map(e=>labExperiment(e,e.id===data.active_id)).join('')
-  :'<p>Aucune consigne de recherche en test.</p>';
- return experimentsHtml+(reviews.length?'<details class="lab-detail"><summary>Examens conclus sans nouvelle consigne ('+
-  reviews.length+')</summary>'+reviews.map(labReview).join('')+'</details>':'');
-}
-async function loadPromptLab(){
- const target=$('prompt-lab-content');
- target.textContent='Chargement des expériences…';
- try{
-  const response=await fetch('/api/research-experiments',{cache:'no-store'});
-  if(!response.ok)throw Error('HTTP '+response.status);
-  target.innerHTML=labResults(await response.json());
- }catch{
-  target.textContent='Expériences momentanément indisponibles. Referme puis rouvre la rubrique pour réessayer.';
+ const experiments=data.experiments,reviews=data.reviews;
+ if(id){
+  const exp=experiments.find(item=>item.id===id),review=reviews.find(item=>item.id===id);
+  return (exp?labExperiment(exp):review?labReview(review):'<p>Cette expérience est introuvable.</p>')+
+   '<a class="lab-back" href="#experiences-macfly">← Toutes les expériences</a>';
  }
+ const groups=[['En cours',experiments.filter(e=>e.status==='ACTIVE')],['En attente',experiments.filter(e=>e.status==='QUEUED')],
+  ['Terminées',experiments.filter(e=>!['ACTIVE','QUEUED'].includes(e.status))],['Examens sans nouvelle consigne',reviews]];
+ const rows=groups.filter(([,items])=>items.length).map(([label,items])=>'<section class="lab-group"><h2>'+esc(label)+'</h2><ul>'+
+  items.filter(e=>labHref(e.id)).map(labIndexRow).join('')+'</ul></section>').join('');
+ return (!experiments.length?'<p>Aucune consigne de recherche en test.</p>':'')+rows;
 }
-$('prompt-lab-wrap').addEventListener('toggle',()=>{if($('prompt-lab-wrap').open)loadPromptLab()});
+let labRequest=0,labRendered=null;
+function labRoute(hash){
+ if(hash==='#experiences-macfly')return {id:null};
+ const found=/^#experience-macfly-([A-Za-z0-9._-]{3,96})$/.exec(hash);return found?{id:found[1]}:null;
+}
+function showLabPage(force=false){
+ const route=labRoute(location.hash);
+ $('lab-page').hidden=!route;
+ if(!route){labRendered=null;++labRequest;return false;}
+ $('overview').hidden=true;$('detail').hidden=true;$('metricsWrap').hidden=true;
+ if(!force&&labRendered===location.hash)return true;
+ labRendered=location.hash;
+ const token=++labRequest,target=$('prompt-lab-content');
+ target.textContent='Chargement des expériences…';
+ fetch('/api/research-experiments'+(route.id?'?id='+encodeURIComponent(route.id):''),{cache:'no-store'})
+ .then(response=>{if(!response.ok)throw Error('HTTP '+response.status);return response.json();})
+ .then(data=>{if(token===labRequest)target.innerHTML=labResults(data,route.id);})
+ .catch(()=>{if(token===labRequest){labRendered=null;target.textContent='Expériences momentanément indisponibles. Utilise Actualiser pour réessayer.';}});
+ return true;
+}
 
+if(typeof location!=='undefined' && (labRoute(location.hash)||matchId()))render();
 load();setInterval(load,60000);
 </script></body></html>

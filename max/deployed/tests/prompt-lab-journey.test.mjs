@@ -75,7 +75,7 @@ test('consigne MacFly : diagnostic, deux collectes isolées, trois prévisions s
   const plan={id:'local-minutes-limit',author:'MacFly',action:'TEST',target:'MINUTES_LIMIT',
     problem:'Projection de vingt minutes sur deux rencontres où le joueur en a disputé dix.',
     diagnosis:'MISSING',hypothesis:'Un plafond vérifié avant la rencontre peut réduire l’écart de minutes.',prompt:promptText,evidence,
-    targets:[match,neutral].map(game=>({match_id:game.id,tip:game.start})),
+    targets:[match,neutral].map(game=>({match_id:game.id,tip:game.start,player_ids:['1001']})),
     cohort:{start:iso(tip-6*h),end:iso(tip+day)},metric:'minutes_mae',criterion:{min_games:2,min_dates:1,min_gain:.2}};
   await propose(plan);await propose(plan);
   const before=await readLab();
@@ -83,10 +83,35 @@ test('consigne MacFly : diagnostic, deux collectes isolées, trois prévisions s
   assert.equal(before.experiments.length,1);
   assert.equal(before.experiments[0].prompt,promptText);
   setTime(tip-5*h);
-  const normal=report(tip-5*h-1000,[],false,match);
+  const runId='synthetic-2030-11-23T20';
+  const normal={...report(tip-5*h-1000,[],false,match),collection_run_id:runId};
   const receipt=await insertResearch(db,normal);
   await deliver({match_id:match.id,generated_at:receipt.generated_at});
+  const other=await insertResearch(db,{...report(tip-5*h-1000,[],false,neutral),collection_run_id:runId});
+  await deliver({match_id:neutral.id,generated_at:other.generated_at});
   const savedMain=(await card()).study;
+  assert.equal((await readLab()).experiments[0].trace[0].state,'NOT_READ');
+  assert.equal(db.prepare('SELECT count(*) n FROM prompt_lab_reads').first('n'),0);
+  setTime(tip-4*h-10*60000);
+  const canonical=db.prepare("SELECT json_extract(plan_json,'$.prompt') AS prompt FROM prompt_lab_experiments WHERE status='ACTIVE'").first('prompt');
+  const submitRead=(base,text=canonical,run=runId)=>db.prepare('INSERT INTO prompt_lab_reads(experiment_id,baseline_receipt_id,prompt_text,run_id) VALUES(?,?,?,?)')
+    .bind(plan.id,base.id,text,run).run();
+  assert.throws(()=>submitRead(receipt,'Autre consigne'),/INVALID_EXPERIMENT_READ/);
+  assert.throws(()=>submitRead(receipt,canonical,'other-run'),/INVALID_EXPERIMENT_READ/);
+  submitRead(receipt);submitRead(other);
+  const readOf=base=>db.prepare('SELECT id,received_at,prompt_text FROM prompt_lab_reads WHERE experiment_id=? AND baseline_receipt_id=? AND run_id=?')
+    .bind(plan.id,base.id,runId).first();
+  const read=readOf(receipt),otherRead=readOf(other);
+  assert.equal(read.prompt_text,canonical);
+  assert.equal((await readLab()).experiments[0].trace[0].state,'READ_PENDING');
+  const notifyRead=base=>deliver({type:'prompt_lab_read',experiment_id:plan.id,baseline_receipt_id:base.id});
+  setTime(tip-4*h-5*60000);
+  await notifyRead(receipt);await notifyRead(other);
+  const checked=db.prepare('SELECT confirmed_at FROM prompt_lab_read_confirmations WHERE read_id=?').bind(read.id).first('confirmed_at');
+  assert.equal(checked,iso(tip-4*h-5*60000));
+  assert.equal((await readLab()).experiments[0].trace[0].state,'READ');
+  submitRead(receipt);await notifyRead(receipt);
+  assert.throws(()=>submitRead(receipt,canonical+' autre'),/PROMPT_READ_CONFLICT/);
   const source='https://www.nba.com/pacers/news/local-integration-example';
   const generatedAt=iso(tip-4*h-1000),checkedAt=iso(tip-4*h-60000);
   const extra={schema_version:'max-research-v1',experiment_id:plan.id,match_id:match.id,generated_at:generatedAt,
@@ -96,12 +121,28 @@ test('consigne MacFly : diagnostic, deux collectes isolées, trois prévisions s
       minutes_limit:10,source_url:source,checked_at:checkedAt}]};
   setTime(tip-4*h);
   await assert.rejects(insertResearch(db,extra),/USE_PROMPT_LAB_SUPPLEMENT_INGRESS/);
-  const envelope={experiment_id:plan.id,baseline_receipt_id:receipt.id,outcome:'FOUND',report:extra};
+  const envelope={experiment_id:plan.id,baseline_receipt_id:receipt.id,read_id:read.id,outcome:'FOUND',report:extra};
   const signal={type:'prompt_lab_supplement',match_id:match.id,experiment_id:plan.id,generated_at:extra.generated_at};
-  const write=()=>db.prepare('INSERT INTO prompt_lab_supplements(envelope) VALUES (?)').bind(JSON.stringify(envelope)).run();
+  const write=(payload=envelope)=>db.prepare('INSERT INTO prompt_lab_supplements(envelope) VALUES (?)').bind(JSON.stringify(payload)).run();
+  assert.throws(()=>write({...envelope,read_id:otherRead.id}),/CONFIRMED_PROMPT_READ_REQUIRED/);
+  assert.throws(()=>write({...envelope,read_id:null}),/CONFIRMED_PROMPT_READ_REQUIRED/);
   write();await deliver(signal);
-  assert.deepEqual((await card()).study,savedMain,'les entrées expérimentales doivent rester privées au test');
+  const link={id:plan.id,problem:plan.problem,changed:true,branch:'experimental'};
+  assert.deepEqual((await card()).study,{...savedMain,prompt_experiments:[link]},'seul le lien de lecture figure sur la carte principale');
+  assert.deepEqual((await api('/api/slate')).games.find(g=>g.id===match.id).study.prompt_experiments,[link]);
   const snapshot=await readLab();
+  const applied=snapshot.experiments[0].trace.find(r=>r.match_id===match.id);
+  assert.equal(applied.read_id,read.id);
+  assert.equal(applied.baseline_receipt_id,receipt.id);
+  assert.equal(applied.standard_integrated_at,iso(tip-5*h));
+  assert.ok(applied.standard_version_id);
+  assert.equal(applied.state,'FOUND');
+  assert.equal(applied.changed,true);
+  assert.equal(applied.confirmed_at,checked);
+  assert.equal(applied.sources[0].checked_at,checkedAt);
+  assert.equal(applied.integrated_at,iso(tip-4*h));
+  assert.equal(applied.as_of,iso(tip-4*h));
+  assert.ok(applied.version_id);
   const readPair=id=>JSON.parse(db.prepare('SELECT payload FROM prompt_lab_pairs WHERE experiment_id=? AND match_id=? ORDER BY as_of DESC,id DESC LIMIT 1')
     .bind(plan.id,id).first('payload'));
   const pair=readPair(match.id);
@@ -115,10 +156,16 @@ test('consigne MacFly : diagnostic, deux collectes isolées, trois prévisions s
   assert.equal(pair.facts.length,1);
   write();await deliver(signal);
   assert.deepEqual((await readLab()).experiments[0].score,snapshot.experiments[0].score);
-  assert.equal(db.prepare('SELECT count(*) n FROM macfly_inbox').first('n'),1);
+  assert.equal(db.prepare('SELECT count(*) n FROM macfly_inbox').first('n'),2);
   assert.equal(db.prepare('SELECT count(*) n FROM prompt_lab_supplements').first('n'),1);
   setTime(tip-3*h);
-  await capture(neutral); // eligible match even though the extra prompt finds nothing
+  const miss={...extra,match_id:neutral.id,generated_at:iso(tip-3*h-1000),summary:'Aucun plafond annoncé dans le bulletin consulté.',verified_role_facts:[]};
+  write({experiment_id:plan.id,baseline_receipt_id:other.id,read_id:otherRead.id,outcome:'NO_FINDING',report:miss});
+  await deliver({...signal,match_id:neutral.id,generated_at:miss.generated_at});
+  await capture(neutral);
+  const noFinding=(await readLab()).experiments[0].trace.find(r=>r.match_id===neutral.id);
+  assert.equal(noFinding.state,'NO_FINDING');
+  assert.equal(noFinding.changed,false);
   assert.deepEqual(readPair(neutral.id).control,readPair(neutral.id).variant);
   setTime(tip+3*h);
   for(const game of [match,neutral]){
@@ -128,7 +175,8 @@ test('consigne MacFly : diagnostic, deux collectes isolées, trois prévisions s
   }
   const latest=await readLab(), score=latest.experiments[0].score;
   assert.equal(score.evaluated_games,2);
-  assert.ok(score.evaluated_cases>0);
+  assert.equal(score.evaluated_cases,2,'un seul joueur ciblé par match');
+  assert.ok(latest.experiments[0].trace.every(r=>r.outcome_used && r.outcome_pair_id && r.evaluated_cases===1));
   assert.ok(score.control>score.variant,'le nouveau plafond doit améliorer la prévision de temps de jeu');
   assert.equal(score.changed_games,1);
   assert.equal(score.adoption_applied,false);
@@ -141,10 +189,20 @@ test('consigne MacFly : diagnostic, deux collectes isolées, trois prévisions s
   assert.equal(db.prepare('SELECT status FROM prompt_lab_experiments WHERE id=?').bind(plan.id).first('status'),'ACTIVE');
   await deliver({type:'prompt_lab_review',proposal_id:plan.id});
   const closed=await readLab();
+  const {prompt_lab}=await api('/api/study');
+  assert.equal(prompt_lab.evaluated_matches,2);
+  assert.equal(prompt_lab.projection_changes,1);
+  slate.games=[];
+  const archived=await card();
+  assert.equal(archived.match_id,match.id);
+  assert.equal(archived.start,match.start);
+  assert.deepEqual(archived.study.prompt_experiments,[link]);
   assert.equal(closed.active_id,null);
-  assert.equal(closed.experiments[0].score.decision,'ABANDONNER');
+  assert.equal(closed.experiments[0].score.decision,'NON_CONCLUANTE');
   assert.equal(closed.experiments[0].score.evaluated_games,2);
   assert.equal(closed.auto_adoption,false);
+  assert.equal(closed.experiments[0].status_history.at(-1).status,'INCONCLUSIVE');
+  assert.deepEqual((await api('/api/research-experiments?id='+plan.id)).experiments,[closed.experiments[0]]);
   await deliver(signal);
   assert.deepEqual(await readLab(),closed);
 });
