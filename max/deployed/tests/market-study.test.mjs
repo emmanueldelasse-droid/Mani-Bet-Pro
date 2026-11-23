@@ -81,6 +81,7 @@ test("settles in observation order, calculates drawdown and compares the market 
   assert.equal(s.settledUnits,4);
   assert.equal(s.netUnits,0.7);
   assert.equal(s.roi,0.175);
+  assert.equal(s.roiOnStaked,Number((s.netUnits/s.stakedUnits).toFixed(10)));
   assert.equal(s.maxDrawdownUnits,2);
   assert.deepEqual(s.comparedWithFavorite,{games:4,maxCorrect:1,favoriteCorrect:2,maxAccuracy:0.25,favoriteAccuracy:0.5});
   assert.deepEqual(s.sport,{games:6,correct:3,accuracy:0.5});

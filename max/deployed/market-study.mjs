@@ -169,6 +169,7 @@ export function summarizeMarket(decisions = [], finals = []) {
     rule: MARKET_RULE, analyzedGames: freezes.byId.size, pricedGames, selections, settledSelections,
     pendingSelections: selections - settledSelections, stakedUnits: selections * MARKET_RULE.stakeUnits, settledUnits,
     netUnits: settledUnits ? rounded(total) : null, roi: settledUnits ? rounded(total / settledUnits) : null,
+    roiOnStaked: settledUnits ? rounded(total / (selections * MARKET_RULE.stakeUnits)) : null,
     maxDrawdownUnits: settledUnits ? rounded(deepest) : null, yieldLabel: settledUnits ? "Rendement simulé" : noYield,
     sport: { games: sportGames, correct: sportCorrect, accuracy: sportGames ? sportCorrect / sportGames : null },
     comparedWithFavorite: {

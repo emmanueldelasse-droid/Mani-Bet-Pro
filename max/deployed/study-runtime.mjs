@@ -179,7 +179,11 @@ export async function settleStudy(db,game,box,asOf=current()){
 }
 
 export async function studySummary(db) {
-  const [rows,market]=await Promise.all([db.prepare('SELECT result FROM study_results ORDER BY tip,match_id').all(),readMarket(db)]);
+  const [rows,market,coverage]=await Promise.all([db.prepare('SELECT result FROM study_results ORDER BY tip,match_id').all(),readMarket(db),
+    db.prepare(`SELECT count(DISTINCT match_id) AS games FROM max_forecast_versions
+      WHERE json_type(payload,'$.pair.primary.forecast.probability_home') IN ('real','integer')`).first()]);
+  market.decisionGames=market.analyzedGames;
+  market.analyzedGames=coverage.games;
   const records=rows.results.map(r=>JSON.parse(r.result));
   const sport=summarizeStudy(records);
   sport.primary_macfly=summarizeStudy(records.map(r=>({...r,revisions:r.primary_information}))).macfly;
