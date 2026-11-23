@@ -5,6 +5,7 @@ import { reportTimestamp, rosterFilteredBoxes } from './collectors.mjs';
 import { playerIdentity } from './identity.mjs';
 import { classifyFacts, forecastView, readJournalVersions, readInboxRows, readResearchInbox, saveJournalVersion } from './research-journal.mjs';
 import { studyPair, evaluateStudyGame, summarizeStudy } from './evaluation-study.mjs';
+import {agendaFromGames,researchPriority,RESEARCH_MAX_AGE_MS} from './scheduler.mjs';
 import { MARKET_RULE, recordMarket, recordFinalMarket, readMarket, readDecisions } from './market-study.mjs';
 
 const sides = ['home','away'];
@@ -65,7 +66,7 @@ function model(ctx, rosters, inputs, at){
   return {points:pp,trial,view:forecastView(ctx.forecast,pp,trial)};
 }
 function compactPair(game,at,token,forecast,points,trial){
-  const pair=studyPair(game,at,token,forecast,points,trial);
+  const pair=studyPair(game,at,token,{...forecast,engine_version:ADVANCED_VERSION},points,trial);
   for(const snap of [pair.primary,pair.variant].filter(Boolean)){
     snap.forecast={probability_home:snap.forecast?.probability_home,projected_score:snap.forecast?.projected_score,
       engine_version:snap.forecast?.engine_version??snap.forecast?.model??null};
@@ -99,6 +100,13 @@ function publicCard(versions,decision){
     integrated_at:latest?.integrated_at??null};
 }
 
+async function publishCard(db,game,versions,decision,report){
+  const latest=versions.at(-1),card=publicCard(versions,decision);
+  await db.prepare(`INSERT INTO study_display(match_id,version_id,card,report) VALUES(?,?,?,?)
+    ON CONFLICT(match_id) DO UPDATE SET version_id=excluded.version_id,card=excluded.card,report=excluded.report
+    WHERE excluded.version_id>=study_display.version_id`).bind(String(game.id),latest.id,JSON.stringify(card),report?JSON.stringify(report):null).run();
+  return card;
+}
 export async function refreshStudy(db, ctx, validateResearch, {persistContext=false, delivery=false}={}) {
   db=primary(db);
   const at=current(), game=ctx.game;
@@ -112,7 +120,7 @@ export async function refreshStudy(db, ctx, validateResearch, {persistContext=fa
   const fresh=ids.filter(id=>!previousIds.has(id));
   if(delivery && prior && fresh.length===0 && prior.as_of>=ctx.sourceAt){
     const decision=await recordMarket(db,game,prior,current());
-    return {card:publicCard(versions,decision)};
+    return {card:await publishCard(db,game,versions,decision,inbox.verified)};
   }
   const legacy=validateResearch(ctx.legacy,game,at);
   const inputs=selectInputs(ctx,inbox.verified,legacy,at);
@@ -125,7 +133,7 @@ export async function refreshStudy(db, ctx, validateResearch, {persistContext=fa
     const previous=await readResearchInbox(db,game,at,validateResearch,rosters,previousIds,rows);
     previousModel=model(ctx,rosters,selectInputs(ctx,previous.verified,legacy,at),at);
   }else if(!fresh.length)previousModel=full;
-  const contextId=await digest([ctx.sourceAt,ctx.signature,ctx.forecast,ctx.medical,ctx.rosters,
+  const contextId=await digest([ctx.signature,ctx.forecast?.projected_score,ctx.forecast?.probability_home,baseInputs.official.map(f=>[rosterKey(f),f.status]),ctx.rosters.map(([id,r])=>[id,r.players.map(p=>[p.id,p.name])]),
     ctx.boxes.map(b=>[b.game_id,b.fetched_at]),ctx.injuries,legacy?.generated_at??null]);
   const evidenceId=await digest([contextId,inbox.facts,ids]);
   const pair=compactPair(game,at,evidenceId,ctx.forecast,full.points,full.trial);
@@ -135,10 +143,11 @@ export async function refreshStudy(db, ctx, validateResearch, {persistContext=fa
   const known=baseInputs.official;
   const facts=classifyFacts(inbox.facts,{official:inputs.official,direct:known,roles:inputs.roles});
   const saved=await saveJournalVersion(db,{game,asOf:at,receipts:inbox.receipts,facts,baseline:base.view,
-    after:full.view,pair,inputSignature:contextId});
+    after:full.view,pair,inputSignature:contextId,deliveryKey:delivery?evidenceId:null});
   if(!saved)return null;
   const decision=await recordMarket(db,game,saved,current());
-  return {card:publicCard([...versions,saved],decision),research:inbox.verified,raw:inbox.raw,
+  const currentVersions=versions.some(v=>v.id===saved.id)?versions:[...versions,saved];
+  return {card:await publishCard(db,game,currentVersions,decision,inbox.verified),research:inbox.verified,raw:inbox.raw,
     points:full.points,trial:full.trial,official:inputs.official,roles:inputs.roles};
 }
 
@@ -152,6 +161,9 @@ function evaluationGroup(v,engine) {
 }
 export async function settleStudy(db,game,box,asOf=current()){
   db=primary(db);
+  const cutoff=Date.parse(asOf),tip=Date.parse(game.start),observed=Date.parse(game.fetched_at??asOf);
+  if(![cutoff,tip,observed].every(Number.isFinite) || cutoff>Date.now()+1000 || observed<=tip || observed>cutoff || !String(game.status).includes('FINAL'))return;
+  if(box && (String(box.game_id)!==String(game.id) || !Number.isFinite(Date.parse(box.fetched_at)) || Date.parse(box.fetched_at)>cutoff || Date.parse(box.fetched_at)<=tip))box=null;
   const versions=(await readJournalVersions(db,String(game.id))).filter(v=>v.tip===new Date(game.start).toISOString() && Date.parse(v.integrated_at)<Date.parse(game.start));
   if(!versions.length)return;
   await recordFinalMarket(db,game,asOf);
@@ -175,20 +187,44 @@ export async function studySummary(db) {
     legacy_audit:{date:'2026-11-23',compared_checkpoints:301,over_15_minutes:15,unpaired:4,prospective:false},
     capture_rule:'Dernière capture publiée avant le coup d’envoi. Même heure et mêmes entrées pour les deux moteurs.'};
 }
-export async function gameStudy(db,id){
-  const [versions,decisions,record]=await Promise.all([readJournalVersions(db,id),readDecisions(db,[id]),
-    db.prepare('SELECT result FROM study_results WHERE match_id=?').bind(id).first()]);
-  return {...publicCard(versions,decisions.get(id)),revisions:versions.map(v=>({id:v.id,integrated_at:v.integrated_at,
+export async function gameStudy(db,id,knownTip=null){
+  const [versions,decisions,record,receipts,context]=await Promise.all([readJournalVersions(db,id),readDecisions(db,[id]),
+    db.prepare('SELECT result FROM study_results WHERE match_id=?').bind(id).first(),
+    db.prepare('SELECT id,generated_at,received_at FROM macfly_inbox WHERE match_id=? ORDER BY id').bind(id).all(),
+    db.prepare('SELECT tip FROM study_context WHERE match_id=?').bind(id).first()]);
+  const used=new Map();
+  for(const v of versions)for(const r of v.receipts)if(!used.has(r.id))used.set(r.id,v.integrated_at);
+  const tip=context?.tip??versions.at(-1)?.tip??knownTip;
+  const deliveries=receipts.results.map(r=>({...r,integrated_at:used.get(r.id)??null,state:used.has(r.id)?'INTEGRATED':
+    Date.parse(r.received_at)>=Date.parse(tip)?'AFTER_TIP':'RECEIVED'}));
+  return {...publicCard(versions,decisions.get(id)),deliveries,revisions:versions.map(v=>({id:v.id,integrated_at:v.integrated_at,
     as_of:v.as_of,revision:publicRevision(v)})),evaluation:record?JSON.parse(record.result):null};
 }
 export async function overlaySlate(db,slate){
   if(!slate?.games?.length)return slate;
   const ids=slate.games.map(g=>String(g.id));
   const placeholders=ids.map(()=>'?').join(',');
-  const [rows,decisions]=await Promise.all([db.prepare(`SELECT match_id,payload,integrated_at FROM max_forecast_versions
-    WHERE id IN (SELECT max(id) FROM max_forecast_versions WHERE match_id IN (${placeholders}) GROUP BY match_id)`).bind(...ids).all(),readDecisions(db,ids)]);
+  const cache=await db.prepare(`SELECT match_id,card,report FROM study_display WHERE match_id IN (${placeholders})`).bind(...ids).all();
+  const cards=new Map(cache.results.map(row=>[row.match_id,row]));
+  const missing=ids.filter(id=>!cards.has(id));
+  const [rows,decisions]=!missing.length?[{results:[]},new Map()]:await Promise.all([db.prepare(`SELECT match_id,payload,integrated_at FROM max_forecast_versions
+    WHERE id IN (SELECT max(id) FROM max_forecast_versions WHERE match_id IN (${missing.map(()=>'?').join(',')}) GROUP BY match_id)`).bind(...missing).all(),readDecisions(db,missing)]);
   const latest=new Map(rows.results.map(row=>[row.match_id,row]));
   for(const g of slate.games){
+    const cached=cards.get(String(g.id));
+    if(cached){
+      g.study=JSON.parse(cached.card);
+      const report=cached.report?JSON.parse(cached.report):null;
+      if(report && Date.now()-Date.parse(report.generated_at)<=RESEARCH_MAX_AGE_MS && validAt(g,current())){
+        g.research=report;
+        g.research_fingerprint=report.generated_at;
+        g.ai_review={...report,model:'MacFly · ChatGPT',web_search_enabled:true};
+        g.research_diagnostics={...g.research_diagnostics,state:'AVAILABLE',generated_at:report.generated_at,age_minutes:Math.floor((Date.now()-Date.parse(report.generated_at))/60000),
+          expires_at:new Date(Date.parse(report.generated_at)+RESEARCH_MAX_AGE_MS).toISOString(),official_injuries_accepted:report.verified_injuries.length};
+        g.research_priority=researchPriority(g,report,current(),Date.parse(g.source_signal_at)>Date.parse(report.generated_at)?['RAPPORT_BLESSURES']:[]);
+      }
+      continue;
+    }
     const row=latest.get(String(g.id));if(!row)continue;
     const data=JSON.parse(row.payload);
     let revision=g.study?.revision??null, lastImpact=g.study?.last_impact??null;
@@ -199,6 +235,18 @@ export async function overlaySlate(db,slate){
     }
     g.study={pair:{primary:data.pair.primary,variant:data.pair.variant},revision,last_impact:lastImpact,integrated_at:row.integrated_at,
       decision:decisions.get(String(g.id))??null};
+  }
+  if(cards.size){
+    const agenda=agendaFromGames(slate.games,current());
+    const inScope=new Set(agenda.all.map(g=>g.match_id));
+    const eligible=slate.games.filter(g=>inScope.has(String(g.id)));
+    slate.research_agenda=agenda;
+    slate.research_count=slate.games.filter(g=>g.research).length;
+    slate.research_coverage={eligible:eligible.length,available:eligible.filter(g=>g.research).length,
+      missing:eligible.filter(g=>g.research_diagnostics?.state==='MISSING').length,
+      expired:eligible.filter(g=>g.research_diagnostics?.state==='EXPIRED').length,
+      invalid:eligible.filter(g=>['INVALID','POST_TIP'].includes(g.research_diagnostics?.state)).length,
+      non_eligible:slate.games.length-eligible.length,due:agenda.due_count};
   }
   return slate;
 }

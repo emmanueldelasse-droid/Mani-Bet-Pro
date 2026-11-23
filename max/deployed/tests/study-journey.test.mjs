@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
 import worker,{validateResearch} from '../worker.mjs';
+import {parseBoxscore} from '../advanced.mjs';
 import {contextForStudy,refreshStudy,settleStudy} from '../study-runtime.mjs';
 import {insertResearch} from '../research-journal.mjs';
 
@@ -48,7 +49,7 @@ function fixture() {
   return contextForStudy(g,sourceAt,'test-before-match',forecast,{home:[],away:[]},medical,boxes,rosters,null);
 }
 function report(at,injuries,quote=false) {
-  const checked_at=iso(at-60000), item=players['10'][0];
+  const checked_at=iso(at-60000);
   return {schema_version:'max-research-v1',match_id:g.id,generated_at:iso(at),summary:'Exemple synthétique de validation locale.',
     sources:[{url:source,title:'Bulletin fictif du test',kind:'OFFICIAL',published_at:iso(at-120000),checked_at},
       ...(quote?[{url:oddsSource,title:'Cote fictive du test',kind:'BOOKMAKER',checked_at}]:[])],
@@ -105,15 +106,39 @@ test('D1 → queue réelle → carte et sources → final → bilan sportif et f
   t.mock.timers.setTime(tip-h+60000);
   assert.equal((await insertResearch(db,incoming)).id,rec.id);await deliver(rec);
   assert.equal((await card()).revisions.length,2);
+  const studyBeforeLate=await api('/api/study');
   const future=report(tip-30000,[{n:0,status:'AVAILABLE'}]);
   t.mock.timers.setTime(tip+60000);
   const late=await insertResearch(db,future);await deliver(late);
   assert.ok(late.received_at>g.start);
-  assert.deepEqual(await card(),second);
+  const archived=await card();
+  for(const key of ['pair','revision','revisions','evaluation','decision','integrated_at'])
+    assert.deepEqual(archived[key],second[key]);
+  assert.deepEqual(await api('/api/study'),studyBeforeLate);
+  assert.deepEqual([...new Set(archived.revisions.flatMap(v=>v.revision.changes.map(f=>f.receipt_id)))],[rec.id]);
+  assert.equal(archived.deliveries.length,2);
+  const lateDelivery=archived.deliveries.find(d=>d.received_at===late.received_at);
+  assert.equal(lateDelivery.state,'AFTER_TIP');
+  assert.equal(lateDelivery.generated_at,late.generated_at);
+  assert.equal(lateDelivery.integrated_at,null);
+  const onTime=archived.deliveries.find(d=>d.generated_at===rec.generated_at);
+  assert.equal(onTime.state,'INTEGRATED');
+  assert.equal(onTime.integrated_at,delta.integrated_at);
   t.mock.timers.setTime(tip+3*h);
   const final={...g,status:'STATUS_FINAL',fetched_at:iso(tip+3*h),home:{...g.home,score:108},away:{...g.away,score:104}};
-  const box={game_id:g.id,teams:Object.fromEntries(teams.map(t=>[t.id,{players:players[t.id].map(p=>
-    t.id==='10'&&['1001','1002'].includes(p.id)?{...p,minutes:0,points:0}:p)}]))};
+  // A coherent synthetic ESPN box, decoded by the same parser used after real finals.
+  const rawBox={_fetched_at:final.fetched_at,boxscore:{players:teams.map(team=>({team:{id:team.id},statistics:[{
+    names:['MIN','PTS'],athletes:players[team.id].map((p,i)=>{
+      const out=team.id==='10' && i<2;
+      const minutes=out?0:team.id==='10'?24:20;
+      const points=out?0:team.id==='10'?(i<6?12:10):(i<4?10:8);
+      return {athlete:{id:p.id,displayName:p.name},didNotPlay:out,stats:[String(minutes),String(points)]};
+    })
+  }]}))}};
+  const box=parseBoxscore(rawBox,final);
+  assert.equal(box.teams['10'].minutes,240);
+  assert.equal(box.teams['10'].totals.points,final.home.score);
+  assert.equal(box.teams['20'].totals.points,final.away.score);
   assert.ok(fixture().boxes.every(b=>b.game_id!==g.id&&b.fetched_at<fixture().sourceAt));
   await settleStudy(db,final,box);
   await settleStudy(db,final,box);

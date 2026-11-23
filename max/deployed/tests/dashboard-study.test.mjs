@@ -10,7 +10,7 @@ const html = JSON.parse(literal);
 const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
 const listener = { addEventListener(){} };
 const context = { document:{getElementById:()=>listener,addEventListener(){}},window:listener,URL,Date,Intl };
-const ui = runInNewContext(script.replace('load();setInterval(load,60000);','')+';({gameCard,sportStudy,marketStudy})',context);
+const ui = runInNewContext(script.replace('load();setInterval(load,60000);','')+';({gameCard,sportStudy,marketStudy,timelineHtml})',context);
 
 test('une projection publiée avant match reste identifiable en direct et après la finale',()=>{
  const now=Date.now(),iso=m=>new Date(now+m*60000).toISOString();
@@ -47,4 +47,18 @@ test('une décision sans cote conserve le verdict sportif dans le registre',()=>
  assert.match(output,/Extérieur – Domicile/);
  assert.match(output,/Pronostic juste/);
  assert.match(output,/Rendement non évaluable/);
+});
+
+test('le journal distingue réception tardive, intégration et attente',()=>{
+ const at='2026-11-23T20:00:00Z';
+ const received=(state,integrated_at)=>({generated_at:at,received_at:at,state,integrated_at});
+ const html=ui.timelineHtml({game:{id:'900000004'},study:{deliveries:[
+   received('INTEGRATED',at),received('AFTER_TIP',null),received('RECEIVED',null)
+ ]}});
+ assert.match(html,/Réception des rapports MacFly/);
+ assert.match(html,/Pris en compte par Max/);
+ assert.match(html,/Reçu après le coup d’envoi · hors prévision/);
+ assert.match(html,/Reçu · prise en compte en attente/);
+ assert.equal(html.match(/Intégré le/g).length,1);
+ assert.doesNotMatch(ui.timelineHtml({game:{id:'900000004'}}),/Réception des rapports MacFly/);
 });

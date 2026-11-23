@@ -39,3 +39,5 @@ BEGIN SELECT RAISE(ABORT, 'FORECAST_IMMUTABLE'); END;
 CREATE TRIGGER IF NOT EXISTS max_forecast_version_duplicate BEFORE INSERT ON max_forecast_versions
 WHEN EXISTS (SELECT 1 FROM max_forecast_versions WHERE match_id=NEW.match_id AND as_of=NEW.as_of)
 BEGIN SELECT RAISE(IGNORE); END;
+CREATE UNIQUE INDEX IF NOT EXISTS max_forecast_one_delivery ON max_forecast_versions
+(match_id,json_extract(payload,'$.deliveryKey')) WHERE json_extract(payload,'$.deliveryKey') IS NOT NULL;

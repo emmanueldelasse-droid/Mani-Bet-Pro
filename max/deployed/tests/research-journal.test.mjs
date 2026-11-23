@@ -116,3 +116,16 @@ test('a future D1 integration never appears in a previous forecast even if recei
   const receipt=await insertResearch(db,report(g,t-180000,[{player:'A. Player',status:'OUT'}]));
   await assert.rejects(saveJournalVersion(db,{game:g,asOf:iso(t-150000),receipts:[receipt],baseline:view(18),after:view(0)}),/INVALID_INPUT_CUTOFF/);
 });
+
+test('two concurrent deliveries, including an out-of-order cutoff, reread the same committed publication', async () => {
+  const {db}=database(),t=Date.now(),g=game(t);
+  const options={game:g,baseline:view(18),after:view(0),deliveryKey:'same-context-and-receipts'};
+  const [first,retry]=await Promise.all([
+    saveJournalVersion(db,{...options,asOf:iso(t-10)}),saveJournalVersion(db,{...options,asOf:iso(t-50)})
+  ]);
+  assert.equal(first.id,retry.id);
+  assert.equal(first.integrated_at,retry.integrated_at);
+  assert.equal((await readJournalVersions(db,g.id)).length,1);
+  const next=await saveJournalVersion(db,{...options,deliveryKey:'new-data',asOf:iso(t-1)});
+  assert.notEqual(next.id,first.id);
+});

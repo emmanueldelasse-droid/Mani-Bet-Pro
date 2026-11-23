@@ -217,23 +217,37 @@ export async function readJournalVersions(db, matchId) {
   return decodeVersions(rows.results);
 }
 
-export async function saveJournalVersion(db, {game, asOf, receipts=[], facts=[], baseline, after, pair=null, inputSignature=null}) {
+export async function saveJournalVersion(db, {game, asOf, receipts=[], facts=[], baseline, after, pair=null, inputSignature=null, deliveryKey=null}) {
   const tip=clock(game?.start), cutoff=clock(asOf);
   if (!tip || !cutoff || cutoff >= tip || game.status !== 'STATUS_SCHEDULED') return null;
   if (!baseline || !after || receipts.some(r => r.match_id !== String(game.id) || !clock(r.received_at) || clock(r.received_at)>cutoff) ||
     facts.some(f => f.match_id !== String(game.id) || !receipts.some(r => r.id === f.receipt_id))) throw Error('JOURNAL_INVALID_INPUT_CUTOFF');
   const session=primary(db), id=String(game.id);
-  const body=JSON.stringify({receipts,facts,baseline,after,pair,inputSignature});
+  if (deliveryKey!==null && (typeof deliveryKey!=='string' || !deliveryKey || deliveryKey.length>256))
+    throw Error('JOURNAL_INVALID_DELIVERY_KEY');
+  const body=JSON.stringify({receipts,facts,baseline,after,pair,inputSignature,...(deliveryKey ? {deliveryKey} : {})});
   // Both the deadline and the order are checked on the primary in the same transaction as the write.
   const [,read]=await session.batch([
     session.prepare(`INSERT INTO max_forecast_versions (match_id,as_of,tip,payload)
       SELECT ?,?,?,? WHERE strftime('%Y-%m-%dT%H:%M:%fZ','now') < ? AND NOT EXISTS
         (SELECT 1 FROM max_forecast_versions WHERE match_id=? AND as_of>?)
-      ON CONFLICT(match_id,as_of) DO NOTHING`).bind(id,cutoff,tip,body,tip,id,cutoff),
+      ON CONFLICT DO NOTHING`).bind(id,cutoff,tip,body,tip,id,cutoff),
     session.prepare('SELECT * FROM max_forecast_versions WHERE match_id=? AND as_of<=? ORDER BY as_of,id').bind(id,cutoff)
   ]);
   const exact = read.results.at(-1);
-  if (!exact || exact.as_of !== cutoff) return null;
-  if (canonical(JSON.parse(exact.payload)) !== canonical(JSON.parse(body))) throw Error('JOURNAL_VERSION_CONTENT_CONFLICT');
+  if (!exact || exact.as_of !== cutoff) {
+    if (!deliveryKey) return null;
+    let versions=decodeVersions(read.results);
+    let found=versions.find(v=>v.deliveryKey===deliveryKey);
+    if (!found) {
+      // A racing consumer could have used a later cut-off and committed first.
+      versions=await readJournalVersions(session,id);
+      found=versions.find(v=>v.deliveryKey===deliveryKey);
+    }
+    return found ?? null;
+  }
+  const stored=JSON.parse(exact.payload);
+  if ((!deliveryKey || stored.deliveryKey!==deliveryKey) && canonical(stored)!==canonical(JSON.parse(body)))
+    throw Error('JOURNAL_VERSION_CONTENT_CONFLICT');
   return decodeVersions(read.results).at(-1);
 }
