@@ -1,0 +1,203 @@
+{
+  "kind": "Read-only historical example. Excluded from the new prospective cohort.",
+  "worker": "manibetpromax-shadow",
+  "sources": {
+    "nba_official_boxscore": "https://statsdmz.nba.com/pdfs/20261122/20261122_INDNYK.pdf",
+    "nba_game": "https://www.nba.com/game/ind-vs-nyk-0022600285",
+    "espn_box": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=401910034"
+  },
+  "game": {
+    "keys": [
+      "max:vpre:max-quant-0.4.0:401910034:H6",
+      "max:trial:pre:max-rotation-shadow-0.1.0:401910034:H6",
+      "max:eval:401910034",
+      "max:trial:eval:max-rotation-shadow-0.1.0:401910034",
+      "max:box:401910034",
+      "max:game:401910034"
+    ],
+    "id": "401910034",
+    "tip": "2026-11-23T01:00:00.000Z",
+    "checkpoint": "H6",
+    "selected_primary_at": "2026-11-23T00:00:52.003Z",
+    "selected_variant_at": "2026-11-23T00:00:52.327Z",
+    "primary_at": "2026-11-23T00:00:52.003Z",
+    "variant_at": "2026-11-23T00:00:52.327Z",
+    "home": "New York Knicks",
+    "away": "Indiana Pacers",
+    "primary_probability_home": 0.6985,
+    "variant_probability_home": 0.5905,
+    "p1": {
+      "home": 113.5,
+      "away": 106
+    },
+    "p2": {
+      "home": 107.68,
+      "away": 104.29
+    },
+    "final_score": {
+      "home": 113,
+      "away": 106
+    },
+    "source": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=401910034",
+    "collected_at": "2026-11-23T06:01:07.394Z",
+    "player": {
+      "side": "away",
+      "id": "5106060",
+      "name": "Jarace Walker",
+      "primary_minutes": 14,
+      "variant_minutes": 17.63,
+      "actual_minutes": 1,
+      "primary_points": 4.2,
+      "variant_points": 5.63,
+      "actual_points": 0
+    }
+  },
+  "official_player": {
+    "id": "5106060",
+    "name": "Jarace Walker",
+    "minutes_seconds": "01:24",
+    "points": 0,
+    "note": "The stored ESPN box supplied rounded whole minutes."
+  },
+  "archive_comparison": {
+    "historical_final_pairs_within_15_minutes": {
+      "games": 92,
+      "utc_game_dates": 13,
+      "primary_correct": 57,
+      "variant_correct": 54,
+      "primary_brier": 0.224185,
+      "variant_brier": 0.237259,
+      "primary_total_mae": 16.334783,
+      "variant_total_mae": 16.124457,
+      "paired_player_points": 1765,
+      "cohort_rules": "Latest recorded evaluations from max:eval and max:trial:eval for the same game, with pregame times within 15 minutes. Descriptive history. A common identical input signature was not archived."
+    },
+    "as_of": "2026-11-23T08:00:00Z",
+    "pairs": 301,
+    "gap_over_15_minutes": 15,
+    "source_prefixes": [
+      "max:vpre:max-quant-0.4.0:",
+      "max:trial:pre:max-rotation-shadow-0.1.0:"
+    ],
+    "delayed": [
+      {
+        "game_and_checkpoint": "401909299:EARLIEST",
+        "primary_at": "2026-11-12T00:03:04.866Z",
+        "variant_at": "2026-11-12T06:03:47.898Z",
+        "gap_minutes": 360.717
+      },
+      {
+        "game_and_checkpoint": "401909974:H24",
+        "primary_at": "2026-11-11T06:02:53.900Z",
+        "variant_at": "2026-11-11T12:02:47.356Z",
+        "gap_minutes": 359.891
+      },
+      {
+        "game_and_checkpoint": "401909986:EARLIEST",
+        "primary_at": "2026-11-14T00:02:35.404Z",
+        "variant_at": "2026-11-14T06:03:22.412Z",
+        "gap_minutes": 360.783
+      },
+      {
+        "game_and_checkpoint": "401909987:EARLIEST",
+        "primary_at": "2026-11-14T00:02:39.289Z",
+        "variant_at": "2026-11-14T06:03:25.668Z",
+        "gap_minutes": 360.773
+      },
+      {
+        "game_and_checkpoint": "401909978:EARLIEST",
+        "primary_at": "2026-11-11T00:01:34.918Z",
+        "variant_at": "2026-11-11T12:03:04.940Z",
+        "gap_minutes": 721.5
+      },
+      {
+        "game_and_checkpoint": "401909989:EARLIEST",
+        "primary_at": "2026-11-14T00:02:48.201Z",
+        "variant_at": "2026-11-14T12:01:55.965Z",
+        "gap_minutes": 719.129
+      },
+      {
+        "game_and_checkpoint": "401909990:EARLIEST",
+        "primary_at": "2026-11-14T00:02:52.031Z",
+        "variant_at": "2026-11-14T12:01:58.715Z",
+        "gap_minutes": 719.111
+      },
+      {
+        "game_and_checkpoint": "401909991:EARLIEST",
+        "primary_at": "2026-11-14T00:02:56.435Z",
+        "variant_at": "2026-11-14T12:02:01.340Z",
+        "gap_minutes": 719.082
+      },
+      {
+        "game_and_checkpoint": "401910000:EARLIEST",
+        "primary_at": "2026-11-15T00:01:37.632Z",
+        "variant_at": "2026-11-15T12:01:20.478Z",
+        "gap_minutes": 719.714
+      },
+      {
+        "game_and_checkpoint": "401910014:EARLIEST",
+        "primary_at": "2026-11-17T00:02:28.621Z",
+        "variant_at": "2026-11-17T12:01:58.833Z",
+        "gap_minutes": 719.504
+      },
+      {
+        "game_and_checkpoint": "401910016:EARLIEST",
+        "primary_at": "2026-11-17T00:02:32.569Z",
+        "variant_at": "2026-11-17T12:02:01.542Z",
+        "gap_minutes": 719.483
+      },
+      {
+        "game_and_checkpoint": "401910025:EARLIEST",
+        "primary_at": "2026-11-20T00:02:08.026Z",
+        "variant_at": "2026-11-20T06:01:29.936Z",
+        "gap_minutes": 359.365
+      },
+      {
+        "game_and_checkpoint": "401910043:EARLIEST",
+        "primary_at": "2026-11-22T00:02:56.528Z",
+        "variant_at": "2026-11-22T12:01:09.250Z",
+        "gap_minutes": 718.212
+      },
+      {
+        "game_and_checkpoint": "401910044:EARLIEST",
+        "primary_at": "2026-11-22T00:02:59.514Z",
+        "variant_at": "2026-11-22T18:01:16.822Z",
+        "gap_minutes": 1078.288
+      },
+      {
+        "game_and_checkpoint": "401910035:EARLIEST",
+        "primary_at": "2026-11-21T00:01:25.472Z",
+        "variant_at": "2026-11-21T06:03:54.082Z",
+        "gap_minutes": 362.477
+      }
+    ],
+    "final_exclusions": [
+      {
+        "id": "401909981",
+        "primary_key": "max:vpre:max-quant-0.4.0:401909981:H6",
+        "variant_key": "max:trial:pre:max-rotation-shadow-0.1.0:401909981:H24",
+        "primary_at": "2026-11-15T00:00:53.751Z",
+        "variant_at": "2026-11-14T06:02:51.906Z",
+        "gap_minutes": 1078.031,
+        "evaluation_keys": [
+          "max:eval:401909981",
+          "max:trial:eval:max-rotation-shadow-0.1.0:401909981"
+        ]
+      },
+      {
+        "id": "401910014",
+        "primary_key": "max:vpre:max-quant-0.4.0:401910014:H6",
+        "variant_key": "max:trial:pre:max-rotation-shadow-0.1.0:401910014:EARLIEST",
+        "primary_at": "2026-11-19T00:01:35.198Z",
+        "variant_at": "2026-11-17T12:01:58.833Z",
+        "gap_minutes": 2159.606,
+        "evaluation_keys": [
+          "max:eval:401910014",
+          "max:trial:eval:max-rotation-shadow-0.1.0:401910014"
+        ]
+      }
+    ]
+  },
+  "macfly_attribution": null,
+  "winamax_odds": null
+}

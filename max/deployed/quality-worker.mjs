@@ -60,6 +60,7 @@ export default {
   }
   return result;
  },
+ async queue(batch,env,ctx){return core.queue(batch,env,ctx);},
  async scheduled(controller,env,ctx){
   await core.scheduled(controller,env,ctx);
   try{console.log('[MAX_PLAYER_VALIDATION]',JSON.stringify(await refreshPlayerValidation(env.MAX_STATE)));}

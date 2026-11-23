@@ -1,0 +1,252 @@
+import { ADVANCED_VERSION } from './advanced.mjs';
+import { projectPlayerPoints } from './points.mjs';
+import { rotationTrial } from './experiments.mjs';
+import { reportTimestamp, rosterFilteredBoxes } from './collectors.mjs';
+import { playerIdentity } from './identity.mjs';
+import { classifyFacts, forecastView, readJournalVersions, readInboxRows, readResearchInbox, saveJournalVersion } from './research-journal.mjs';
+import { studyPair, evaluateStudyGame, summarizeStudy } from './evaluation-study.mjs';
+import { MARKET_RULE, recordMarket, recordFinalMarket, readMarket, readDecisions } from './market-study.mjs';
+
+const sides = ['home','away'];
+const current = () => new Date().toISOString();
+const primary = db => db.withSession ? db.withSession('first-primary') : db;
+const validAt = (g,at) => g.status === 'STATUS_SCHEDULED' && Date.parse(at) < Date.parse(g.start);
+const rosterKey = (f) => String(f.team_id) + ':' + playerIdentity(f.player);
+const dateOfFact = f => Date.parse(f.published_at ?? reportTimestamp(f.source_url) ?? f.checked_at);
+
+// Keep up to twenty recent team boxes for the existing player windows and rotations.
+export function contextForStudy(game, sourceAt, signature, forecast, injuries, medical, boxes, rosters, legacy) {
+  const ids = sides.map(s => String(game[s].id));
+  const selected = new Map();
+  for (const id of ids) {
+    const teamBoxes = boxes.filter(b => b.teams?.[id] && Date.parse(b.start) < Date.parse(sourceAt))
+      .sort((a,b)=>b.start.localeCompare(a.start)).slice(0,20);
+    for (const b of teamBoxes) {
+      let box = selected.get(b.game_id);
+      if (!box) { box = {...b, teams:{}}; selected.set(b.game_id,box); }
+      box.teams[id] = b.teams[id];
+    }
+  }
+  return {game:{id:String(game.id),start:game.start,status:game.status,home:game.home,away:game.away},
+    sourceAt, signature, forecast, injuries, medical, boxes:[...selected.values()],
+    rosters:ids.flatMap(id=>rosters.has(id)?[[id,rosters.get(id)]]:[]), legacy:legacy??null};
+}
+async function saveContext(db, ctx) {
+  await db.prepare(`INSERT INTO study_context(match_id,source_at,tip,context) VALUES (?,?,?,?)
+    ON CONFLICT(match_id) DO UPDATE SET source_at=excluded.source_at, tip=excluded.tip,context=excluded.context
+    WHERE excluded.source_at > study_context.source_at`).bind(ctx.game.id,ctx.sourceAt,ctx.game.start,JSON.stringify(ctx)).run();
+}
+
+function selectInputs(ctx, editorial, legacy, at) {
+  const roles = new Map(), injuries = new Map();
+  const medical = ctx.medical && Date.parse(at) - Date.parse(ctx.medical.published_at) <= 12*3600000 ? ctx.medical : null;
+  const direct = sides.flatMap(s=>medical?.teams?.[s]?.players??[]);
+  for (const f of direct) injuries.set(rosterKey(f),f);
+  for (const report of [legacy,editorial]) {
+    for (const f of report?.verified_injuries??[]) {
+      const side=sides.find(s=>String(ctx.game[s].id)===String(f.team_id));
+      const directTeam=medical?.teams?.[side];
+      if (directTeam?.status==='SUBMITTED' && Date.parse(medical.published_at)>=dateOfFact(f)) continue;
+      const key=rosterKey(f), previous=injuries.get(key);
+      if (!previous || dateOfFact(f)>=dateOfFact(previous)) injuries.set(key,f);
+    }
+    for (const f of report?.verified_role_facts??[]) {
+      const key=rosterKey(f), previous=roles.get(key);
+      if (!previous || dateOfFact(f)>=dateOfFact(previous)) roles.set(key,f);
+    }
+  }
+  return {direct,official:[...injuries.values()],roles:[...roles.values()],medical};
+}
+
+function model(ctx, rosters, inputs, at){
+  const pp=projectPlayerPoints(ctx.game,ctx.boxes,ctx.injuries,inputs.official,ctx.forecast,at);
+  const trial=rotationTrial(ctx.game,ctx.boxes,rosters,inputs.official,inputs.roles,
+    {...ctx.forecast,engine_version:ADVANCED_VERSION},at,inputs.medical);
+  return {points:pp,trial,view:forecastView(ctx.forecast,pp,trial)};
+}
+function compactPair(game,at,token,forecast,points,trial){
+  const pair=studyPair(game,at,token,forecast,points,trial);
+  for(const snap of [pair.primary,pair.variant].filter(Boolean)){
+    snap.forecast={probability_home:snap.forecast?.probability_home,projected_score:snap.forecast?.projected_score,
+      engine_version:snap.forecast?.engine_version??snap.forecast?.model??null};
+    snap.player_points=Object.fromEntries(sides.map(s=>[s,{players:(snap.player_points?.[s]?.players??[]).map(p=>({
+      id:p.id,team_id:game[s].id,name:p.name,availability:p.availability,status:p.status??p.reported_status,
+      predicted_points_if_active:p.predicted_points_if_active??p.points_if_active,
+      projected_minutes_if_active:p.projected_minutes_if_active??p.minutes_if_active,scenarios:p.scenarios
+    }))}]));
+  }
+  return pair;
+}
+async function digest(value){
+  const bytes=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(value))));
+  return [...bytes].map(x=>x.toString(16).padStart(2,'0')).join('');
+}
+function publicRevision(version) {
+  const r=version?.revision;
+  if(!r)return null;
+  const control=version.pair?.incremental_before??r.without_macfly;
+  const numbers=view=>['primary','challenger'].map(key=>{
+    const f=view?.[key];return f?[f.probability_home,f.total,...f.players.map(p=>[p.team_id,p.player_id,p.minutes,p.points])]:null;
+  });
+  return {...r,changed:JSON.stringify(numbers(control))!==JSON.stringify(numbers(r.after)),without_macfly:control,
+    at:version.integrated_at,group_id:String(version.id)};
+}
+const changedVersion = v => v.revision?.changes?.length>0;
+function publicCard(versions,decision){
+  const latest=versions.at(-1);
+  return {pair:latest?{primary:latest.pair?.primary,variant:latest.pair?.variant}:null,
+    revision:publicRevision(versions.filter(changedVersion).at(-1)),last_impact:versions.filter(changedVersion).map(publicRevision).filter(r=>r.changed && r.changes.some(f=>f.effect==='APPLIED')).at(-1)??null,decision:decision??null,
+    integrated_at:latest?.integrated_at??null};
+}
+
+export async function refreshStudy(db, ctx, validateResearch, {persistContext=false, delivery=false}={}) {
+  db=primary(db);
+  const at=current(), game=ctx.game;
+  if(!validAt(game,at))return null;
+  if(persistContext)await saveContext(db,ctx);
+  const rosters=new Map(ctx.rosters);
+  const [versions,rows]=await Promise.all([readJournalVersions(db,game.id),readInboxRows(db,game,at)]);
+  const inbox=await readResearchInbox(db,game,at,validateResearch,rosters,null,rows);
+  const prior=versions.at(-1), ids=inbox.receipts.map(r=>r.id);
+  const previousIds=new Set(prior?.receipts.map(r=>r.id)??[]);
+  const fresh=ids.filter(id=>!previousIds.has(id));
+  if(delivery && prior && fresh.length===0 && prior.as_of>=ctx.sourceAt){
+    const decision=await recordMarket(db,game,prior,current());
+    return {card:publicCard(versions,decision)};
+  }
+  const legacy=validateResearch(ctx.legacy,game,at);
+  const inputs=selectInputs(ctx,inbox.verified,legacy,at);
+  const baseInputs=selectInputs(ctx,null,legacy,at);
+  const full=model(ctx,rosters,inputs,at);
+  const base=inbox.facts.length?model(ctx,rosters,baseInputs,at):full;
+  // At the same instant retain previous MacFly reports, remove only the newly received group.
+  let previousModel=base;
+  if(fresh.length && previousIds.size){
+    const previous=await readResearchInbox(db,game,at,validateResearch,rosters,previousIds,rows);
+    previousModel=model(ctx,rosters,selectInputs(ctx,previous.verified,legacy,at),at);
+  }else if(!fresh.length)previousModel=full;
+  const contextId=await digest([ctx.sourceAt,ctx.signature,ctx.forecast,ctx.medical,ctx.rosters,
+    ctx.boxes.map(b=>[b.game_id,b.fetched_at]),ctx.injuries,legacy?.generated_at??null]);
+  const evidenceId=await digest([contextId,inbox.facts,ids]);
+  const pair=compactPair(game,at,evidenceId,ctx.forecast,full.points,full.trial);
+  pair.control=compactPair(game,at,evidenceId,ctx.forecast,previousModel.points,previousModel.trial);
+  pair.incremental_before=previousModel.view;
+  pair.new_receipt_ids=fresh;
+  const known=baseInputs.official;
+  const facts=classifyFacts(inbox.facts,{official:inputs.official,direct:known,roles:inputs.roles});
+  const saved=await saveJournalVersion(db,{game,asOf:at,receipts:inbox.receipts,facts,baseline:base.view,
+    after:full.view,pair,inputSignature:contextId});
+  if(!saved)return null;
+  const decision=await recordMarket(db,game,saved,current());
+  return {card:publicCard([...versions,saved],decision),research:inbox.verified,raw:inbox.raw,
+    points:full.points,trial:full.trial,official:inputs.official,roles:inputs.roles};
+}
+
+function evaluationGroup(v,engine) {
+  const changes=v.revision.changes.filter(f=>v.pair?.new_receipt_ids?.includes(f.receipt_id));
+  if(!changes.length)return null;
+  const key=engine==='principal'?'primary':'variant';
+  return {at:v.as_of,group_id:String(v.id)+'-'+key,kinds:[...new Set(changes.map(f=>f.kind))],
+    player_ids:changes.map(f=>f.player_id).filter(Boolean),controlled:true,
+    already_known:changes.every(f=>f.effect==='ALREADY_KNOWN'),before:v.pair.control?.[key],after:v.pair[key]};
+}
+export async function settleStudy(db,game,box,asOf=current()){
+  db=primary(db);
+  const versions=(await readJournalVersions(db,String(game.id))).filter(v=>v.tip===new Date(game.start).toISOString() && Date.parse(v.integrated_at)<Date.parse(game.start));
+  if(!versions.length)return;
+  await recordFinalMarket(db,game,asOf);
+  // Pre-specified: last published capture before tip, even when the challenger is unavailable.
+  const latest=versions.at(-1);
+  const evalEngine=engine=>evaluateStudyGame({game,box,pair:latest.pair,revisions:versions.map(v=>evaluationGroup(v,engine)).filter(Boolean)});
+  const result=evalEngine('variante');
+  if(!result)return;
+  result.primary_information=evalEngine('principal')?.revisions??[];
+  await db.prepare(`INSERT INTO study_results(match_id,tip,box_available,result) VALUES (?,?,?,?)
+    ON CONFLICT(match_id) DO UPDATE SET result=excluded.result,box_available=excluded.box_available
+    WHERE excluded.box_available>=study_results.box_available`).bind(String(game.id),game.start,Number(Boolean(box)),JSON.stringify(result)).run();
+}
+
+export async function studySummary(db) {
+  const [rows,market]=await Promise.all([db.prepare('SELECT result FROM study_results ORDER BY tip,match_id').all(),readMarket(db)]);
+  const records=rows.results.map(r=>JSON.parse(r.result));
+  const sport=summarizeStudy(records);
+  sport.primary_macfly=summarizeStudy(records.map(r=>({...r,revisions:r.primary_information}))).macfly;
+  return {sport,market,rule:MARKET_RULE,
+    legacy_audit:{date:'2026-11-23',compared_checkpoints:301,over_15_minutes:15,unpaired:4,prospective:false},
+    capture_rule:'Dernière capture publiée avant le coup d’envoi. Même heure et mêmes entrées pour les deux moteurs.'};
+}
+export async function gameStudy(db,id){
+  const [versions,decisions,record]=await Promise.all([readJournalVersions(db,id),readDecisions(db,[id]),
+    db.prepare('SELECT result FROM study_results WHERE match_id=?').bind(id).first()]);
+  return {...publicCard(versions,decisions.get(id)),revisions:versions.map(v=>({id:v.id,integrated_at:v.integrated_at,
+    as_of:v.as_of,revision:publicRevision(v)})),evaluation:record?JSON.parse(record.result):null};
+}
+export async function overlaySlate(db,slate){
+  if(!slate?.games?.length)return slate;
+  const ids=slate.games.map(g=>String(g.id));
+  const placeholders=ids.map(()=>'?').join(',');
+  const [rows,decisions]=await Promise.all([db.prepare(`SELECT match_id,payload,integrated_at FROM max_forecast_versions
+    WHERE id IN (SELECT max(id) FROM max_forecast_versions WHERE match_id IN (${placeholders}) GROUP BY match_id)`).bind(...ids).all(),readDecisions(db,ids)]);
+  const latest=new Map(rows.results.map(row=>[row.match_id,row]));
+  for(const g of slate.games){
+    const row=latest.get(String(g.id));if(!row)continue;
+    const data=JSON.parse(row.payload);
+    let revision=g.study?.revision??null, lastImpact=g.study?.last_impact??null;
+    if(data.facts.length && (!g.study || g.study.integrated_at!==row.integrated_at)){
+      const versions=await readJournalVersions(db,String(g.id));
+      const card=publicCard(versions,decisions.get(String(g.id)));
+      revision=card.revision;lastImpact=card.last_impact;
+    }
+    g.study={pair:{primary:data.pair.primary,variant:data.pair.variant},revision,last_impact:lastImpact,integrated_at:row.integrated_at,
+      decision:decisions.get(String(g.id))??null};
+  }
+  return slate;
+}
+
+async function bootstrapContext(env,id) {
+  const kv=env.MAX_STATE, g=await kv.get('max:game:'+id,{type:'json'});
+  if(!g || !validAt(g,current()))return null;
+  const adv=g.independent_analysis?.advanced;
+  if(!adv?.forecast)return null;
+  const rosterRows=await Promise.all(sides.map(s=>kv.get('max:roster:'+g[s].id,{type:'json'})));
+  const rosters=new Map(rosterRows.filter(Boolean).map(r=>[String(r.team_id),r]));
+  // Migration only: read cached ESPN final boxes. No network collection during an editorial delivery.
+  let cursor; const keys=[];
+  do{
+    const list=await kv.list({prefix:'max:box:',limit:1000,...(cursor?{cursor}:{})});
+    keys.push(...list.keys.map(x=>x.name).filter(k=>/^max:box:\d+$/.test(k)));
+    cursor=list.list_complete?null:list.cursor;
+  }while(cursor);
+  const selected=keys.sort().slice(-150), boxes=[];
+  for(let i=0;i<selected.length;i+=50){
+    const batch=await kv.get(selected.slice(i,i+50),{type:'json'});
+    for(const b of batch.values())if(b?.schema_version==='max-box-v1')boxes.push(b);
+  }
+  const legacy=await kv.get('max:research:'+id,{type:'json'});
+  return contextForStudy(g,g.checked_at,adv.forecast_signature,adv.forecast,g.injuries,g.official_medical,
+    rosterFilteredBoxes(boxes,rosters),rosters,legacy??g.research);
+}
+export async function handleResearchQueue(batch,env,validateResearch){
+  for(const message of batch.messages){
+    const id=String(message.body?.match_id??''), timestamp=message.body?.generated_at;
+    if(!/^\d{5,15}$/.test(id)){message.ack();continue;}
+    if(message.body?.type==='start_study'){
+      const db=primary(env.MAX_JOURNAL);
+      const exists=await db.prepare('SELECT id FROM max_forecast_versions WHERE match_id=? LIMIT 1').bind(id).first();
+      if(!exists){
+        const context=await bootstrapContext(env,id);
+        if(context)await refreshStudy(db,context,validateResearch,{persistContext:true});
+      }
+      message.ack();continue;
+    }
+    if(!Number.isFinite(Date.parse(timestamp))){message.ack();continue;}
+    const db=primary(env.MAX_JOURNAL);
+    const receipt=await db.prepare('SELECT received_at FROM macfly_inbox WHERE match_id=? AND generated_at=?')
+      .bind(id,new Date(timestamp).toISOString()).first();
+    if(!receipt)throw Error('Editorial receipt missing: '+id);
+    const row=await db.prepare('SELECT context FROM study_context WHERE match_id=?').bind(id).first();
+    const ctx=row?JSON.parse(row.context):await bootstrapContext(env,id);
+    if(ctx)await refreshStudy(db,ctx,validateResearch,{persistContext:!row,delivery:true});
+    message.ack();
+  }
+}

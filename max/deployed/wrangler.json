@@ -1,0 +1,19 @@
+{
+  "name": "manibetpromax-shadow",
+  "account_id": "a44ec708d7642c774dc1f8c63f653c6b",
+  "main": "quality-worker.mjs",
+  "compatibility_date": "2026-11-02",
+  "no_bundle": true,
+  "find_additional_modules": true,
+  "rules": [{"type": "ESModule", "globs": ["*.mjs"], "fallthrough": true}],
+  "kv_namespaces": [{"binding": "MAX_STATE", "id": "4bd994e0a9344db0a3e1764c3bf59a26"}],
+  "d1_databases": [{"binding": "MAX_JOURNAL", "database_name": "manibetpromax-journal", "database_id": "6b320ed0-c2a9-4b15-8b19-872103e05cd3"}],
+  "queues": {"consumers": [{"queue": "manibetpromax-research-ready", "max_batch_size": 1, "max_retries": 3}]},
+  "triggers": {"crons": ["0 */6 * * *"]},
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {"enabled": true, "head_sampling_rate": 1, "persist": true, "invocation_logs": true},
+    "traces": {"enabled": false, "head_sampling_rate": 1}
+  }
+}
