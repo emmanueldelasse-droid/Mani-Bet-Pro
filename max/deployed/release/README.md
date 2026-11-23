@@ -14,7 +14,7 @@ python3 max/deployed/release/cloudflare-upload.py max/deployed > /tmp/verify-max
 
 ## Publier une version
 
-Utiliser la base `manibetpromax-journal`. Y appliquer dans l’ordre les schémas `research-journal.sql`, `market-study.sql`, `study-runtime.sql`, puis `prompt-lab.sql`, `prompt-lab-score.sql` et `prompt-lab-supplements.sql` du même commit. Le binding D1 porte le nom `MAX_JOURNAL`. Les données préexistantes restent dans le KV `MAX_STATE`. La configuration du Worker est dans `max/deployed/wrangler.json`.
+Utiliser la base `manibetpromax-journal`. Y appliquer dans l’ordre les schémas `research-journal.sql`, `market-study.sql`, `study-runtime.sql`, puis `prompt-lab.sql`, `prompt-lab-score.sql`, `prompt-lab-supplements.sql`, `published-forecasts.sql`, `published-assessment.sql`, `odds-study.sql`, `learning.sql` et `player-odds-coverage.sql` du même commit. Le binding D1 porte le nom `MAX_JOURNAL`. Les données préexistantes restent dans le KV `MAX_STATE`. La configuration du Worker est dans `max/deployed/wrangler.json`.
 
 La commande suivante génère le programme d’envoi pour le connecteur. Remplacer `COMMIT_SHA` par le commit de la copie de travail propre.
 
@@ -28,4 +28,10 @@ Exécuter le programme sur le compte indiqué dans `wrangler.json`. Il appelle `
 {"strategy":"percentage","versions":[{"version_id":"VERSION_ID","percentage":100}]}
 ```
 
-Vérifier le déploiement actif par relecture. L’observabilité et le cron existants sont des réglages distincts des versions. La cadence attendue est `0 */6 * * *` UTC, avec collecte MacFly à la minute 20. Rattacher le Worker en tant que consommateur de la file `manibetpromax-research-ready` et relire la liste de ses consommateurs. La file livre les notifications de reçus D1 entre deux collectes. Le contrôle quotidien reste en lecture seule.
+Vérifier le déploiement actif par relecture. L’observabilité et le cron existants sont des réglages distincts des versions. La cadence attendue est `0 */6 * * *` UTC, avec collecte MacFly à la minute 20. Le Worker publie ses lectures des marchés joueurs avec le binding producteur `MAX_RESEARCH_QUEUE`. Rattacher le Worker en tant que consommateur de la file `manibetpromax-research-ready` et relire la liste de ses consommateurs. La file livre les notifications de reçus D1 entre deux collectes. Le contrôle quotidien reste en lecture seule.
+
+## Amorcer les éditions d’avant-match
+
+Après activation du Worker, lire les rencontres à venir dans `/api/slate`. Pour chacune, envoyer une notification privée `{"type":"publish_forecast","match_id":"IDENTIFIANT_ESPN"}` dans la file existante. Vérifier `published_at < tip` dans `published_forecasts` et retrouver l’édition dans `/api/game?id=IDENTIFIANT_ESPN`. L’horodatage de publication provient de D1.
+
+Après vérification des éditions, la notification unique `{"type":"bootstrap_observed_odds","date":"AAAAMMJJ"}` relève le tableau ESPN de la journée et les offres joueurs disponibles. La cadence normale reprend ensuite les deux opérations. Les observations portant sur un match déjà commencé sont exclues.

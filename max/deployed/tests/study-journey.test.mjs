@@ -6,11 +6,11 @@ import {parseBoxscore} from '../advanced.mjs';
 import {refreshStudy,settleStudy} from '../study-runtime.mjs';
 import {insertResearch} from '../research-journal.mjs';
 
-import {d1,h,tip,iso,g,teams,players,source,fixture,report} from './study-journey-fixture.mjs';
+import {d1,h,tip,iso,g,teams,players,source,fixture,fixtureState,report} from './study-journey-fixture.mjs';
 
 test('D1 → queue réelle → carte et sources → final → bilan sportif et financier, sans fuite temporelle',async t=>{
   t.mock.timers.enable({apis:['Date'],now:tip-8*h});
-  const db=d1(), slate={games:[g]}, kv={get:async key=>key==='max:slate:latest' ? structuredClone(slate) : null};
+  const db=d1(), slate={games:[g]}, kv=fixtureState([g],slate);
   const env={MAX_JOURNAL:db,MAX_STATE:kv};
   const api=async path=>{
     const response=await worker.fetch(new Request('https://example.test'+path),env);
@@ -24,6 +24,8 @@ test('D1 → queue réelle → carte et sources → final → bilan sportif et f
   const card=async()=>(await api('/api/game?id='+g.id)).study;
   t.mock.timers.setTime(tip-7*h);
   await refreshStudy(db,fixture(),validateResearch,{persistContext:true});
+  await worker.queue({messages:[{body:{type:'publish_forecast',match_id:g.id},ack(){}}]},env);
+  assert.ok((await api('/api/game?id='+g.id)).publication?.id);
   const first=await card();
   assert.equal(first.revisions.length,1);assert.equal(first.decision,null);
   assert.equal(first.pair.primary.at,first.pair.variant.at);

@@ -71,6 +71,8 @@ function playerScore(proj, actual) {
     production_error: minutesPoints === null ? null : error - minutesPoints, predicted_absent: proj.out };
 }
 
+export {gameScore as scoreObservedGame,playerScore as scorePlayedProjection};
+
 function playerComparison(game, box, a, b, filterIds) {
   const result = { box_available: false, rows: [], absent_or_missing: 0, unmatched_projections: 0 };
   if (String(box?.game_id) !== String(game.id) ||

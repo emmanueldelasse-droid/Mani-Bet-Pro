@@ -1,6 +1,11 @@
 import {captureForPrompt,confirmPromptRead,reviewPromptLab,promptLabSummary} from './prompt-lab-runner.mjs';
 import {settlePromptGame} from './prompt-lab-score.mjs';
 import {eligibleForExperiment,readActiveExperiment} from './prompt-lab-store.mjs';
+import {publishQueuedEdition} from './publication-runtime.mjs';
+import {assessPublished} from './published-evaluation.mjs';
+import {processLearningReview} from './learning.mjs';
+import {settleQuotedDecisions} from './odds-study.mjs';
+import {captureReportOdds} from './odds-feed.mjs';
 export {promptLabSummary};
 import { ADVANCED_VERSION } from './advanced.mjs';
 import { POINTS_VERSION, projectPlayerPoints } from './points.mjs';
@@ -139,6 +144,22 @@ async function publishCard(db,game,versions,decision,report){
     WHERE excluded.version_id>=study_display.version_id`).bind(String(game.id),latest.id,JSON.stringify(card),report?JSON.stringify(report):null).run();
   return card;
 }
+// Replay only the accepted inputs of this precise edition. A newer context is never
+// allowed to fill an older edition's intervals, scenarios or written report.
+export async function readStudyProjection(db,ctx,validateResearch,card){
+  if(!card?.integrated_at || !ctx?.game)return null;
+  const row=await db.prepare(`SELECT id,as_of,tip,payload FROM max_forecast_versions
+    WHERE match_id=? AND integrated_at=? ORDER BY id DESC LIMIT 1`).bind(String(ctx.game.id),card.integrated_at).first();
+  if(!row||ctx.sourceAt>row.as_of||row.tip!==ctx.game.start||row.as_of>=row.tip)return null;
+  const saved=JSON.parse(row.payload),allowed=new Set(saved.receipts.map(r=>r.id)),rosters=new Map(ctx.rosters);
+  const inbox=await readResearchInbox(db,ctx.game,row.as_of,validateResearch,rosters,allowed);
+  const legacy=validateResearch(ctx.legacy,ctx.game,row.as_of);
+  const inputs=selectInputs(ctx,inbox.verified,legacy,row.as_of);
+  const full=model(ctx,rosters,inputs,row.as_of);
+  if(JSON.stringify(full.view)!==JSON.stringify(saved.after))return null;
+  return {card,version_id:row.id,source_at:ctx.sourceAt,as_of:row.as_of,context:ctx,
+    points:full.points,trial:full.trial,official:inputs.official,roles:inputs.roles,research:inbox.verified,raw:inbox.raw};
+}
 // Isolated research replay: the standard cards, NBA research inbox and Winamax freeze are read-only here.
 async function replayPrompt(db,ctx,validateResearch,trigger,active=null,known=null){
   const at=known?.at??current(), exp=active??await readActiveExperiment(db);
@@ -241,6 +262,8 @@ export async function settleStudy(db,game,box,asOf=current()){
   const cutoff=Date.parse(asOf),tip=Date.parse(game.start),observed=Date.parse(game.fetched_at??asOf);
   if(![cutoff,tip,observed].every(Number.isFinite) || cutoff>Date.now()+1000 || observed<=tip || observed>cutoff || !String(game.status).includes('FINAL'))return;
   if(box && (String(box.game_id)!==String(game.id) || !Number.isFinite(Date.parse(box.fetched_at)) || Date.parse(box.fetched_at)>cutoff || Date.parse(box.fetched_at)<=tip))box=null;
+  await assessPublished(db,game,box,asOf);
+  await settleQuotedDecisions(db,game,box,asOf);
   try{await settlePromptGame(db,game,box,asOf);}
   catch(err){console.error('[PROMPT_LAB_FINAL]',game.id,String(err.message).slice(0,180));}
   const versions=(await readJournalVersions(db,String(game.id))).filter(v=>v.tip===new Date(game.start).toISOString() && Date.parse(v.integrated_at)<Date.parse(game.start));
@@ -426,6 +449,14 @@ async function bootstrapContext(env,id) {
 }
 export async function handleResearchQueue(batch,env,validateResearch){
   for(const message of batch.messages){
+    if(message.body?.type==='learning_review'){
+      const id=message.body.id;
+      if(typeof id==='string' && id.length>0 && id.length<=200){
+        const review=await processLearningReview(primary(env.MAX_JOURNAL),id);
+        if(review.status==='NOT_RECEIVED'){message.retry({delaySeconds:60});continue;}
+      }
+      message.ack();continue;
+    }
     if(message.body?.type==='prompt_lab_read'){
       const {experiment_id,baseline_receipt_id}=message.body;
       if(typeof experiment_id==='string' && Number.isSafeInteger(baseline_receipt_id) && baseline_receipt_id>0){
@@ -442,6 +473,9 @@ export async function handleResearchQueue(batch,env,validateResearch){
     }
     const id=String(message.body?.match_id??''), timestamp=message.body?.generated_at;
     if(!/^\d{5,15}$/.test(id)){message.ack();continue;}
+    if(message.body?.type==='publish_forecast'){
+      await publishQueuedEdition(env,id,validateResearch);message.ack();continue;
+    }
     if(message.body?.type==='prompt_lab_supplement'){
       const expId=message.body.experiment_id, cutoff=Date.parse(timestamp);
       if(typeof expId!=='string'||!Number.isFinite(cutoff)){message.ack();continue;}
@@ -466,12 +500,18 @@ export async function handleResearchQueue(batch,env,validateResearch){
     }
     if(!Number.isFinite(Date.parse(timestamp))){message.ack();continue;}
     const db=primary(env.MAX_JOURNAL);
-    const receipt=await db.prepare('SELECT received_at FROM macfly_inbox WHERE match_id=? AND generated_at=?')
+    const receipt=await db.prepare('SELECT received_at,report_json FROM macfly_inbox WHERE match_id=? AND generated_at=?')
       .bind(id,new Date(timestamp).toISOString()).first();
     if(!receipt)throw Error('Editorial receipt missing: '+id);
     const row=await db.prepare('SELECT context FROM study_context WHERE match_id=?').bind(id).first();
     const ctx=row?JSON.parse(row.context):await bootstrapContext(env,id);
-    if(ctx)await refreshStudy(db,ctx,validateResearch,{persistContext:!row,delivery:true});
+    if(ctx){
+      const update=await refreshStudy(db,ctx,validateResearch,{persistContext:!row,delivery:true});
+      if(update){
+        await publishQueuedEdition(env,id,validateResearch,update);
+        await captureReportOdds(env,id,receipt,ctx);
+      }
+    }
     message.ack();
   }
 }

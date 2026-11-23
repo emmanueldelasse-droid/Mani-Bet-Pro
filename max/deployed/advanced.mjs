@@ -25,11 +25,16 @@ export function parseBoxscore(data,game){
  for(const b of data.boxscore.players){
   const team=String(b.team?.id??'');
   if(!ids.includes(team))continue;
-  const rows=[];
+  const rows=[],didNotPlay=[];
   for(const group of b.statistics??[]){
    const labels=(group.names??group.labels??[]).map(x=>String(x).toUpperCase());
-   if(!labels.includes('MIN'))continue;
    for(const line of group.athletes??[]){
+    if(line.didNotPlay===true && line.athlete?.id && line.athlete?.displayName){
+     didNotPlay.push({id:String(line.athlete.id),name:String(line.athlete.displayName).slice(0,90),
+      team_id:team,reason:typeof line.reason==='string'?line.reason.slice(0,240):null});
+     continue;
+    }
+    if(!labels.includes('MIN'))continue;
     const stats=Array.isArray(line.stats)?line.stats:[];
     const get=k=>{const idx=labels.indexOf(k);return idx>=0?stats[idx]:null;};
     const mins=minute(get('MIN')),id=String(line.athlete?.id??'');
@@ -56,7 +61,7 @@ export function parseBoxscore(data,game){
    round(100*(total.fgm+0.5*total.three_made)/total.fga,2):null;
   total.tov_pct=total.possessions!==null&&total.turnovers!==null?round(100*total.turnovers/total.possessions,2):null;
   total.ft_rate=total.fga>0&&total.fta!==null?round(total.fta/total.fga,3):null;
-  groups[team]={players:rows,totals:total,minutes:round(mins,1)};
+  groups[team]={players:rows,did_not_play:didNotPlay.filter(p=>!rows.some(a=>a.id===p.id)),totals:total,minutes:round(mins,1)};
  }
  if(!ids.every(id=>groups[id]))return null;
  for(const [id,score] of [[ids[0],game.home.score],[ids[1],game.away.score]]){
