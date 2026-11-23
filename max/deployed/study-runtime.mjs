@@ -1,10 +1,10 @@
-import {captureForPrompt,reviewPromptLab,promptLabSummary} from './prompt-lab-runner.mjs';
+import {captureForPrompt,confirmPromptRead,reviewPromptLab,promptLabSummary} from './prompt-lab-runner.mjs';
 import {settlePromptGame} from './prompt-lab-score.mjs';
 import {eligibleForExperiment,readActiveExperiment} from './prompt-lab-store.mjs';
 export {promptLabSummary};
 import { ADVANCED_VERSION } from './advanced.mjs';
-import { projectPlayerPoints } from './points.mjs';
-import { rotationTrial } from './experiments.mjs';
+import { POINTS_VERSION, projectPlayerPoints } from './points.mjs';
+import { TRIAL_VERSION, rotationTrial } from './experiments.mjs';
 import { reportTimestamp, rosterFilteredBoxes } from './collectors.mjs';
 import { playerIdentity } from './identity.mjs';
 import { classifyFacts, forecastView, readJournalVersions, readInboxRows, readResearchInbox, saveJournalVersion } from './research-journal.mjs';
@@ -99,6 +99,7 @@ function model(ctx, rosters, inputs, at){
 function compactPair(game,at,token,forecast,points,trial){
   const pair=studyPair(game,at,token,{...forecast,engine_version:ADVANCED_VERSION},points,trial);
   for(const snap of [pair.primary,pair.variant].filter(Boolean)){
+    snap.model_version=[ADVANCED_VERSION,POINTS_VERSION,snap===pair.variant?TRIAL_VERSION:'primary'].join('|');
     snap.forecast={probability_home:snap.forecast?.probability_home,projected_score:snap.forecast?.projected_score,
       engine_version:snap.forecast?.engine_version??snap.forecast?.model??null};
     snap.player_points=Object.fromEntries(sides.map(s=>[s,{players:(snap.player_points?.[s]?.players??[]).map(p=>({
@@ -150,7 +151,7 @@ async function replayPrompt(db,ctx,validateResearch,trigger,active=null,known=nu
   const legacy=validateResearch(ctx.legacy,ctx.game,at);
   const inputs=known?.inputs??selectInputs(ctx,inbox.verified,legacy,at);
   const standard=known?.full??model(ctx,rosters,inputs,at);
-  const signature=known?.signature??await digest([ctx, inbox.receipts.map(r=>r.id),inbox.facts]);
+  const signature=await digest([ctx,inbox.receipts.map(r=>r.id),inbox.facts]);
   const pair=(m)=>compactPair(ctx.game,at,signature,ctx.forecast,m.points,m.trial);
   return captureForPrompt(db,{ctx,trigger,at,active:exp,standardInbox:inbox,normalInputs:inputs,normalPair:pair(standard),
     validateResearch,baseSignature:signature,makeExperimental:(extra,extraFacts)=>{
@@ -221,7 +222,7 @@ export async function refreshStudy(db, ctx, validateResearch, {persistContext=fa
     after:full.view,pair,inputSignature:contextId,deliveryKey:delivery?evidenceId:null});
   if(!saved)return null;
   const decision=await recordMarket(db,game,saved,current());
-  await baselinePromptCapture(db,ctx,validateResearch,saved,{at,inbox,inputs,full,signature:evidenceId});
+  await baselinePromptCapture(db,ctx,validateResearch,saved,{at,inbox,inputs,full});
   const currentVersions=versions.some(v=>v.id===saved.id)?versions:[...versions,saved];
   return {card:await publishCard(db,game,currentVersions,decision,inbox.verified),research:inbox.verified,raw:inbox.raw,
     points:full.points,trial:full.trial,official:inputs.official,roles:inputs.roles};
@@ -257,37 +258,100 @@ export async function settleStudy(db,game,box,asOf=current()){
     WHERE excluded.box_available>=study_results.box_available`).bind(String(game.id),game.start,Number(Boolean(box)),JSON.stringify(result)).run();
 }
 
+const promptMetricsKey='max:metrics:macfly-research:v1';
+// Keep links to changed editions even when a later injury update made both arms agree.
+const changedProjectionSQL=`json_extract(p.payload,'$.exclusion') IS NULL
+  AND json_array_length(p.payload,'$.receipt_ids')>0
+  AND (json_extract(p.payload,'$.changed')=1 OR json_extract(p.payload,'$.effects.changed_minutes')>0
+       OR json_extract(p.payload,'$.effects.changed_points')>0)`;
+
+async function experimentLinks(db,ids){
+  const links=new Map();
+  for(let i=0;i<ids.length;i+=75){
+    const batch=ids.slice(i,i+75);
+    const rows=await db.prepare(`SELECT p.match_id,e.id,json_extract(e.plan_json,'$.problem') problem
+      FROM prompt_lab_pairs p JOIN prompt_lab_experiments e ON e.id=p.experiment_id
+      WHERE p.match_id IN (${batch.map(()=>'?').join(',')}) AND ${changedProjectionSQL}
+      GROUP BY p.match_id,e.id ORDER BY p.match_id,MAX(p.as_of) DESC,e.id`).bind(...batch).all();
+    for(const {match_id,id,problem} of rows.results){
+      if(!links.has(match_id))links.set(match_id,[]);
+      links.get(match_id).push({id,problem,changed:true,branch:'experimental'});
+    }
+  }
+  return links;
+}
+
+export async function readPromptPerformance(db){
+  const row=await db.prepare(`WITH latest AS (
+      SELECT p.* FROM prompt_lab_pairs p WHERE p.id=(SELECT q.id FROM prompt_lab_pairs q
+        WHERE q.match_id=p.match_id AND q.experiment_id=p.experiment_id ORDER BY q.as_of DESC,q.id DESC LIMIT 1)
+    ), counts AS (
+      SELECT count(*) experiments,coalesce(sum(e.status='ACTIVE'),0) active,
+        coalesce(sum(json_array_length(v.plan_json,'$.targets')),0) eligible_matches
+      FROM prompt_lab_versions v LEFT JOIN prompt_lab_experiments e ON e.id=v.id
+      WHERE json_extract(v.plan_json,'$.action')='TEST'
+    )
+    SELECT counts.*,
+      (SELECT count(*) FROM latest WHERE json_extract(payload,'$.exclusion') IS NULL) paired_matches,
+      (SELECT count(*) FROM prompt_lab_outcomes WHERE json_extract(payload,'$.issue') IS NULL
+        AND json_extract(payload,'$.cases')>0) evaluated_matches,
+      (SELECT count(*) FROM (SELECT p.match_id,p.experiment_id FROM prompt_lab_pairs p
+        WHERE ${changedProjectionSQL} GROUP BY p.match_id,p.experiment_id)) projection_changes,
+      (SELECT max(stamp) FROM (SELECT max(at) stamp FROM prompt_lab_status_history
+        UNION ALL SELECT max(integrated_at) FROM prompt_lab_pairs
+        UNION ALL SELECT max(observed_at) FROM prompt_lab_outcomes)) as_of FROM counts`).first();
+  return {...row,href:'#experiences-macfly',unit:'match_per_experiment_version'};
+}
+
+// The six-hour writer mirrors this compact view to the existing performance store. D1
+// is authoritative between passes, including after an editorial Queue delivery.
+export async function publishPromptPerformance(env){
+  const snapshot=await readPromptPerformance(primary(env.MAX_JOURNAL));
+  await env.MAX_STATE.put(promptMetricsKey,JSON.stringify({...snapshot,published_at:current()}));
+  return snapshot;
+}
+
+export async function performanceWithResearch(env,metrics){
+  const [latest,cached]=await Promise.all([
+    env.MAX_JOURNAL?readPromptPerformance(env.MAX_JOURNAL):null,
+    env.MAX_STATE.get(promptMetricsKey,{type:'json'})
+  ]);
+  return {...metrics,prompt_lab:latest?{...latest,last_metrics_publication:cached?.published_at??null}:cached};
+}
+
 export async function studySummary(db) {
-  const [rows,market,coverage]=await Promise.all([db.prepare('SELECT result FROM study_results ORDER BY tip,match_id').all(),readMarket(db),
+  const [rows,market,coverage,prompt_lab]=await Promise.all([db.prepare('SELECT result FROM study_results ORDER BY tip,match_id').all(),readMarket(db),
     db.prepare(`SELECT count(DISTINCT match_id) AS games FROM max_forecast_versions
-      WHERE json_type(payload,'$.pair.primary.forecast.probability_home') IN ('real','integer')`).first()]);
+      WHERE json_type(payload,'$.pair.primary.forecast.probability_home') IN ('real','integer')`).first(),readPromptPerformance(db)]);
   market.decisionGames=market.analyzedGames;
   market.analyzedGames=coverage.games;
   const records=rows.results.map(r=>JSON.parse(r.result));
   const sport=summarizeStudy(records);
   sport.primary_macfly=summarizeStudy(records.map(r=>({...r,revisions:r.primary_information}))).macfly;
-  return {sport,market,rule:MARKET_RULE,
+  return {sport,market,rule:MARKET_RULE,prompt_lab,
     legacy_audit:{date:'2026-11-23',compared_checkpoints:301,over_15_minutes:15,unpaired:4,prospective:false},
     capture_rule:'Dernière capture publiée avant le coup d’envoi. Même heure et mêmes entrées pour les deux moteurs.'};
 }
 export async function gameStudy(db,id,knownTip=null){
-  const [versions,decisions,record,receipts,context]=await Promise.all([readJournalVersions(db,id),readDecisions(db,[id]),
+  const [versions,decisions,record,receipts,context,links]=await Promise.all([readJournalVersions(db,id),readDecisions(db,[id]),
     db.prepare('SELECT result FROM study_results WHERE match_id=?').bind(id).first(),
     db.prepare('SELECT id,generated_at,received_at FROM macfly_inbox WHERE match_id=? ORDER BY id').bind(id).all(),
-    db.prepare('SELECT tip FROM study_context WHERE match_id=?').bind(id).first()]);
+    db.prepare(`SELECT tip,json_extract(context,'$.game.home.name') AS home_name,
+      json_extract(context,'$.game.away.name') AS away_name FROM study_context WHERE match_id=?`).bind(id).first(),experimentLinks(db,[id])]);
   const used=new Map();
   for(const v of versions)for(const r of v.receipts)if(!used.has(r.id))used.set(r.id,v.integrated_at);
   const tip=context?.tip??versions.at(-1)?.tip??knownTip;
   const deliveries=receipts.results.map(r=>({...r,integrated_at:used.get(r.id)??null,state:used.has(r.id)?'INTEGRATED':
     Date.parse(r.received_at)>=Date.parse(tip)?'AFTER_TIP':'RECEIVED'}));
-  return {...publicCard(versions,decisions.get(id)),deliveries,revisions:versions.map(v=>({id:v.id,integrated_at:v.integrated_at,
+  return {...publicCard(versions,decisions.get(id)),game:{start:tip??null,teams:{home:context?.home_name??null,away:context?.away_name??null}},
+    prompt_experiments:links.get(id)??[],deliveries,revisions:versions.map(v=>({id:v.id,integrated_at:v.integrated_at,
     as_of:v.as_of,revision:publicRevision(v)})),evaluation:record?JSON.parse(record.result):null};
 }
 export async function overlaySlate(db,slate){
   if(!slate?.games?.length)return slate;
   const ids=slate.games.map(g=>String(g.id));
   const placeholders=ids.map(()=>'?').join(',');
-  const cache=await db.prepare(`SELECT match_id,card,report FROM study_display WHERE match_id IN (${placeholders})`).bind(...ids).all();
+  const [cache,links]=await Promise.all([db.prepare(`SELECT match_id,card,report FROM study_display WHERE match_id IN (${placeholders})`).bind(...ids).all(),experimentLinks(db,ids)]);
   const cards=new Map(cache.results.map(row=>[row.match_id,row]));
   const missing=ids.filter(id=>!cards.has(id));
   const [rows,decisions]=!missing.length?[{results:[]},new Map()]:await Promise.all([db.prepare(`SELECT match_id,payload,integrated_at FROM max_forecast_versions
@@ -331,6 +395,9 @@ export async function overlaySlate(db,slate){
       invalid:eligible.filter(g=>['INVALID','POST_TIP'].includes(g.research_diagnostics?.state)).length,
       non_eligible:slate.games.length-eligible.length,due:agenda.due_count};
   }
+  for(const g of slate.games)if(g.study || links.has(String(g.id))){
+    g.study={...g.study,prompt_experiments:links.get(String(g.id))??[]};
+  }
   return slate;
 }
 
@@ -359,6 +426,16 @@ async function bootstrapContext(env,id) {
 }
 export async function handleResearchQueue(batch,env,validateResearch){
   for(const message of batch.messages){
+    if(message.body?.type==='prompt_lab_read'){
+      const {experiment_id,baseline_receipt_id}=message.body;
+      if(typeof experiment_id==='string' && Number.isSafeInteger(baseline_receipt_id) && baseline_receipt_id>0){
+        await confirmPromptRead(primary(env.MAX_JOURNAL),experiment_id,baseline_receipt_id);
+      }
+      message.ack();continue;
+    }
+    if(message.body?.type==='prompt_lab_publish_metrics'){
+      await publishPromptPerformance(env);message.ack();continue;
+    }
     if(message.body?.type==='prompt_lab_review'){
       // This private Queue message wakes the lab only. GET endpoints never activate a proposal.
       await tickPromptLab(primary(env.MAX_JOURNAL),validateResearch);message.ack();continue;
