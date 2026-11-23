@@ -1127,7 +1127,11 @@ function lastSourceChecks(checks){
  return [...latest.values()].map(s=>{
   const lookup=s.lookups?.at(-1),verified=lookup?.status==='OBSERVED'||lookup?.status==='NO_VERIFIED_MARKET';
   const clock=forecastTime(s.checked_at);
-  if(verified)return '<p class="tiny">Relevé direct sur '+esc(s.source)+' · '+clock+' · '+numberFr(s.games_checked,0)+' matchs vérifiés, '+numberFr(s.games_with_observed_prices,0)+' avec les deux prix observés.</p>';
+  if(verified){
+   const saved=Number.isInteger(s.games_with_saved_prices)&&s.games_with_saved_prices!==s.games_with_observed_prices?
+    ' Paires de prix effectivement archivées pour '+numberFr(s.games_with_saved_prices,0)+' match'+(s.games_with_saved_prices===1?'':'s')+'.':'';
+   return '<p class="tiny">Relevé direct sur '+esc(s.source)+' · '+clock+' · '+numberFr(s.games_checked,0)+' matchs vérifiés, '+numberFr(s.games_with_observed_prices,0)+' avec les deux prix observés.'+saved+'</p>';
+  }
   const reason=lookup?.status==='UNAVAILABLE'?'Lecture de la page impossible'+(Number.isInteger(lookup.http_status)?' (HTTP '+numberFr(lookup.http_status,0)+')':''):'Lecture de la page non attestée';
   return '<p class="tiny">Dernière tentative sur '+esc(s.source)+' · '+clock+' · '+numberFr(s.games_checked,0)+' matchs ciblés. '+reason+'.</p>';
  }).join('');
@@ -1136,7 +1140,7 @@ function oddsPanel(d,{compact=false,book='',market=''}={}){
  if(!d)return '<p>Simulation des cotes momentanément indisponible.</p>';
  const quotes=Array.isArray(d.quote_rows)?d.quote_rows:[],rows=d.decision_rows??[],count=n=>numberFr(n,0);
  const filter=compact?'':'<form id="forecast-odds"><label>Bookmaker <select name="book"><option value="">Tous</option>'+oddsOptions(d.bookmakers,{},book)+'</select></label><label>Marché <select name="market"><option value="">Tous</option>'+oddsOptions(d.markets,oddsMarketNames,market)+'</select></label><button>Filtrer</button></form>';
- const sideLabel=row=>({home:row.teams?.home,away:row.teams?.away,over:'Plus de',under:'Moins de'}[String(row.side).toLowerCase()]??row.side);
+ const sideLabel=row=>({home:row.teams?.home??'Équipe à domicile',away:row.teams?.away??'Équipe à l’extérieur',over:'Plus de',under:'Moins de'}[String(row.side).toLowerCase()]??row.side);
  const sourceName=value=>({LINESMART:'LineSmart',linesmart:'LineSmart',ESPN:'ESPN'}[value]??value);
  const quotation=row=>'<b>Cote '+esc(row.bookmaker)+(row.source?' relevée sur '+esc(sourceName(row.source)):'')+'</b> · '+esc(oddsMarketNames[row.market]??row.market)+
   (row.teams?.home&&row.teams.away?'<p>'+esc(row.teams.away)+' – '+esc(row.teams.home)+'</p>':'')+
@@ -1150,7 +1154,10 @@ function oddsPanel(d,{compact=false,book='',market=''}={}){
  const tally=b=>'<p>'+count(b.selections)+' sélections · '+count(b.wins)+' gagnées · '+count(b.losses)+' perdues · '+count(b.pushes)+' remboursées à égalité · '+count(b.voids)+' annulées · '+count(b.pending)+' en attente'+(b.unsettleable?' · '+count(b.unsettleable)+' non évaluables':'')+'.</p>';
  const recent=(n,total)=>Number.isInteger(total)&&total>n?count(n)+' dernières sur '+count(total):count(n);
  const ledger=rows.length?'<details><summary>Décisions simulées ('+recent(rows.length,d.decisions)+')</summary><ul>'+rows.map(decision).join('')+'</ul></details>':'';
- const logs=quotes.length?'<details><summary>Cotes observées ('+recent(quotes.length,d.observations)+')</summary><ul>'+quotes.map(q=>'<li>'+quotation(q)+'</li>').join('')+'</ul></details>':'';
+ const names=new Map(rows.map(r=>[String(r.match_id),r.teams]));
+ const playersByMatch=new Map(rows.filter(r=>r.player_id&&r.player_name).map(r=>[r.match_id+'/'+r.player_id,r.player_name]));
+ const logs=quotes.length?'<details><summary>Cotes observées ('+recent(quotes.length,d.observations)+')</summary><ul>'+quotes.map(q=>'<li>'+quotation({...q,
+  teams:q.teams??names.get(String(q.match_id)),player_name:q.player_name??playersByMatch.get(q.match_id+'/'+q.player_id)??(q.player_id?'Joueur ESPN '+q.player_id:null)})+'</li>').join('')+'</ul></details>':'';
  const rule=d.rule??{};
  const c=d.coverage;
  const players=c&&Number.isInteger(c.projected_players)&&Number.isInteger(c.priced_players)?

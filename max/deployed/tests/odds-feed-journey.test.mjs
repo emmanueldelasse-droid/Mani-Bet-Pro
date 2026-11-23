@@ -76,3 +76,25 @@ test('le rattrapage conserve l’échec avant HTTP, respecte un refus de la sour
   assert.equal(JSON.parse(journal[1].payload).lookups[0].http_status,403);
   assert.equal(db.prepare('SELECT count(*) n FROM odds_study_decisions').first('n'),0);
 });
+
+test('le nouveau relevé répare les marchés manquants au prix et à l’heure de la nouvelle lecture',async t=>{
+  const previous=Date.parse(fixture.captured_at),checkAt=new Date(previous+500).toISOString();
+  t.mock.timers.enable({apis:['Date'],now:previous-60000});
+  const db=d1(),state=new Map();
+  const env={MAX_JOURNAL:db,MAX_STATE:{get:key=>state.get(key),put:(key,v)=>state.set(key,v)}};
+  const g={id:'401910041',start:'2026-11-24T01:00:00.000Z',status:'STATUS_SCHEDULED',home:{id:'4',name:'Chicago Bulls',abbreviation:'CHI'},away:{id:'5',name:'Cleveland Cavaliers',abbreviation:'CLE'}};
+  await savePublishedForecast(db,g,new Date().toISOString(),{...g,checked_at:new Date().toISOString(),
+    independent_analysis:{advanced:{forecast:{status:'SIMULATED_UNCALIBRATED',probability_home:.35,projected_score:{home:104,away:113}}}}});
+  db.prepare('INSERT INTO odds_first_party_checks(checked_at,payload) VALUES(?,?)').bind(checkAt,JSON.stringify({
+    checked_at:checkAt,source:'Unibet.fr',games_with_observed_prices:1,lookups:[{status:'OBSERVED',observed_at:fixture.captured_at}]
+  })).run();
+  t.mock.timers.setTime(previous+60000);
+  const fetcher=t.mock.fn(async url=>url===fixture.source_url?Response.json(fixture.scoreboard):new Response(null,{status:503}));
+  const {recoverIncompleteBoards}=await import('../odds-feed.mjs');
+  await recoverIncompleteBoards(env,'20261123',checkAt,fetcher);
+  const quotes=db.prepare('SELECT DISTINCT observed_at FROM odds_study_quotes').all().results;
+  assert.deepEqual(quotes.map(q=>q.observed_at),[new Date(previous+60000).toISOString()]);
+  assert.equal(db.prepare('SELECT count(*) n FROM odds_study_quotes').first('n'),6);
+  await recoverIncompleteBoards(env,'20261123',checkAt,fetcher);
+  assert.equal(fetcher.mock.callCount(),2);
+});

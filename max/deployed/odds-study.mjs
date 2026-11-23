@@ -138,24 +138,95 @@ function choose(game,edition,offers,at){
     expected_return:round(expected),selected,reason:selected?'SELECTED':'BELOW_THRESHOLD',stake_units:selected?1:0};
 }
 
-export async function recordQuotedDecisions(db,edition,quotes,asOf=new Date().toISOString()){
-  const at=utc(asOf),store=session(db);
-  if(!at||!edition?.id||!Array.isArray(quotes))return [];
+// The observation clock belongs to the source fetch. It is never moved backward to satisfy
+// a database clock. D1 supplies independent integration time and the final pre-tip guard.
+const maxClockLagMs=1500;
+function inputSides(quotes){
+  return (Array.isArray(quotes)?quotes:[]).flatMap(q=>Array.isArray(q?.sides)&&q.sides.length?
+    q.sides.map(side=>({...q,side:side?.side,line:side?.line,decimal_odds:side?.decimal_odds})):[q??{}]);
+}
+function receiptItem(q){
+  return {match_id:q.match_id??null,source:q.source??null,source_url:q.source_url??null,event_url:q.event_url??null,
+    bookmaker_event_id:q.bookmaker_event_id??null,bookmaker:q.bookmaker??null,market:q.market??null,
+    player_id:q.player_id??null,side:q.side??null,line:q.line??null,decimal_odds:q.decimal_odds??null,
+    observed_at:utc(q.observed_at),status:'REJECTED',reason:null,quote_id:null,received_at:null};
+}
+function invalidReason(q,game,at,activation){
+  const observed=utc(q.observed_at);
+  if(!observed)return 'INVALID_OBSERVATION_TIME';
+  if(observed>at)return 'FUTURE_OBSERVATION';
+  if(observed<activation)return 'QUOTE_BEFORE_RULE_FREEZE';
+  if(observed>=game.start)return 'POST_TIP_QUOTE';
+  return 'INVALID_QUOTE_SOURCE_OR_MARKET';
+}
+async function storeVerifiedQuotes(store,saved,entries){
+  for(let offset=0;offset<entries.length;offset+=35){
+    const group=entries.slice(offset,offset+35);
+    const writes=group.map(({q,encoded})=>store.prepare(`INSERT OR IGNORE INTO odds_study_quotes
+      (rule_id,edition_id,match_id,bookmaker,market,subject,group_key,observed_at,side,decimal_odds,payload)
+      SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE ${clock}<? AND ?<=${clock}`)
+      .bind(ruleId,saved.id,saved.match_id,q.bookmaker,q.market,q.player_id??'',q.group_key,q.observed_at,q.side,q.decimal_odds,encoded,
+        saved.tip,q.observed_at));
+    const read=store.prepare(`SELECT r.key AS idx,q.id,q.received_at,q.edition_id,${clock} AS server_at
+      FROM json_each(?) r LEFT JOIN odds_study_quotes q
+      ON q.rule_id=? AND q.match_id=? AND q.observed_at=json_extract(r.value,'$.observed_at') AND q.payload=r.value ORDER BY r.key`)
+      .bind(JSON.stringify(group.map(e=>e.encoded)),ruleId,saved.match_id);
+    const results=await store.batch([...writes,read]);
+    const found=results.at(-1).results;
+    for(const {receipt} of group){receipt.status='NOT_FOUND';receipt.reason='QUOTE_READBACK_MISSING';}
+    for(const row of found){
+      const item=group[row.idx].receipt;
+      if(row.id!=null){
+        item.status='STORED';item.reason=null;item.quote_id=row.id;item.received_at=row.received_at;item.quote_edition_id=row.edition_id;
+      }else if(row.server_at>=saved.tip)item.reason='TIP_REACHED_BEFORE_WRITE';
+      else if(item.observed_at>row.server_at)item.reason='DATABASE_CLOCK_BEHIND_OBSERVATION';
+    }
+  }
+}
+export async function recordQuotedDecisionsWithReceipt(db,edition,quotes,asOf=new Date().toISOString()){
+  const at=utc(asOf),store=session(db),observed=inputSides(quotes);
+  const items=observed.map(receiptItem),receipt={match_id:edition?.match_id??null,edition_id:edition?.id??null,
+    requested_at:at,server_at:null,submitted_count:items.length,stored_count:0,complete:false,reason:null,quotes:items};
+  const finish=(decisions=[],reason=null)=>{
+    if(reason)for(const item of items)if(!item.reason && item.status==='REJECTED')item.reason=reason;
+    receipt.stored_count=items.filter(item=>item.status==='STORED').length;
+    receipt.complete=items.length>0 && receipt.stored_count===items.length;
+    receipt.reason=reason??(receipt.complete?null:items.length?'INCOMPLETE_READBACK':'NO_SUBMITTED_QUOTE');
+    receipt.retryable=!receipt.complete && (reason==='DATABASE_CLOCK_TOO_FAR_BEHIND' ||
+      items.some(i=>i.reason==='QUOTE_READBACK_MISSING'||i.reason==='DATABASE_CLOCK_BEHIND_OBSERVATION'));
+    return {decisions,receipt};
+  };
+  if(!at||!edition?.id||!Array.isArray(quotes))return finish([],'INVALID_REQUEST');
+  if(Date.parse(at)>Date.now())return finish([],'FUTURE_REQUEST_TIME');
   const [saved,timing]=await Promise.all([readPublishedForecast(store,edition.match_id,edition.id),
     store.prepare('SELECT p.frozen_at AS activated_at,p.parameters,'+clock+' AS server_now FROM odds_study_protocols p WHERE p.rule_id=?').bind(ruleId).first()]);
-  if(timing && timing.parameters!==JSON.stringify({rule:ODDS_RULE,bands}))throw Error('ODDS_RULE_VERSION_MISMATCH');
-  if(!saved||!timing||saved.published_at<timing.activated_at||saved.published_at>at||at>timing.server_now||timing.server_now>=saved.tip)return [];
-  const game=saved.visible;
-  const observed=quotes.flatMap(q=>Array.isArray(q?.sides)?q.sides.map(side=>({...q,side:side?.side,line:side?.line,decimal_odds:side?.decimal_odds})):q?[q]:[]);
-  const rows=observed.filter(q=>validQuote(q,game,at,timing.activated_at)).map(q=>sealed(q,game));
-  // Keep every admissible offer, even if a price is missing on the other side or the first decision is already frozen.
-  for(let i=0;i<rows.length;i+=50)await store.batch(rows.slice(i,i+50).map(q=>store.prepare(`INSERT OR IGNORE INTO odds_study_quotes
-    (rule_id,edition_id,match_id,bookmaker,market,subject,group_key,observed_at,side,decimal_odds,payload)
-    SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE ${clock}<?`).bind(ruleId,saved.id,game.id,q.bookmaker,q.market,q.player_id??'',q.group_key,q.observed_at,q.side,q.decimal_odds,JSON.stringify(q),saved.tip)));
-  if(Date.parse(saved.tip)-Date.parse(at)>ODDS_RULE.window_minutes*60000)return [];
-  const cutoff=new Date(Date.parse(at)-ODDS_RULE.max_quote_age_minutes*60000).toISOString();
+  if(!saved||!timing)return finish([],saved?'RULE_NOT_FROZEN':'EDITION_NOT_FOUND');
+  if(timing.parameters!==JSON.stringify({rule:ODDS_RULE,bands}))throw Error('ODDS_RULE_VERSION_MISMATCH');
+  receipt.server_at=timing.server_now;
+  if(saved.published_at<timing.activated_at)return finish([],'EDITION_BEFORE_RULE_FREEZE');
+  if(saved.published_at>at)return finish([],'EDITION_NOT_YET_PUBLISHED');
+  if(timing.server_now>=saved.tip || Date.now()>=Date.parse(saved.tip))return finish([],'TIP_REACHED');
+  if(Date.parse(at)-Date.parse(timing.server_now)>maxClockLagMs)return finish([],'DATABASE_CLOCK_TOO_FAR_BEHIND');
+  const game=saved.visible,entries=[];
+  for(let i=0;i<observed.length;i++){
+    const raw=observed[i];
+    if(!validQuote(raw,game,at,timing.activated_at)){items[i].reason=invalidReason(raw,game,at,timing.activated_at);continue;}
+    const q=sealed(raw,game);entries.push({q,encoded:JSON.stringify(q),receipt:items[i]});
+  }
+  // If a genuine observation itself is a few milliseconds ahead, wait once for the
+  // primary database clock. An already older observation can be inserted immediately.
+  const ahead=entries.reduce((ms,e)=>Math.max(ms,Date.parse(e.q.observed_at)-Date.parse(timing.server_now)),0);
+  if(ahead>0){
+    await new Promise(resolve=>setTimeout(resolve,ahead+1));
+    receipt.server_at=(await store.prepare('SELECT '+clock+' AS server_at').first()).server_at;
+    if(receipt.server_at>=saved.tip||Date.now()>=Date.parse(saved.tip))return finish([],'TIP_REACHED');
+  }
+  await storeVerifiedQuotes(store,saved,entries);
+  const decisionAt=at<receipt.server_at?at:receipt.server_at;
+  if(Date.parse(saved.tip)-Date.parse(decisionAt)>ODDS_RULE.window_minutes*60000)return finish();
+  const cutoff=new Date(Date.parse(decisionAt)-ODDS_RULE.max_quote_age_minutes*60000).toISOString();
   const read=await store.prepare(`SELECT id,payload,received_at FROM odds_study_quotes WHERE rule_id=? AND match_id=? AND observed_at>=?
-    AND observed_at<=? AND received_at<=${clock} ORDER BY observed_at DESC,id`).bind(ruleId,game.id,cutoff,at).all();
+    AND observed_at<=? AND received_at<=${clock} ORDER BY observed_at DESC,id`).bind(ruleId,game.id,cutoff,decisionAt).all();
   const grouped=new Map();
   for(const row of read.results){
     const q={...JSON.parse(row.payload),id:row.id,received_at:row.received_at};
@@ -166,7 +237,7 @@ export async function recordQuotedDecisions(db,edition,quotes,asOf=new Date().to
   }
   const writes=[];
   for(const group of grouped.values()){
-    const d=choose(game,saved,group,at);
+    const d=choose(game,saved,group,decisionAt);
     if(!d)continue;
     writes.push(store.prepare(`INSERT INTO odds_study_decisions(rule_id,edition_id,match_id,bookmaker,market,subject,quote_id,payload)
       SELECT ?,?,?,?,?,?,?,? WHERE ${clock}<? AND EXISTS
@@ -176,7 +247,12 @@ export async function recordQuotedDecisions(db,edition,quotes,asOf=new Date().to
         new Date(Date.parse(group[0].observed_at)+ODDS_RULE.max_quote_age_minutes*60000).toISOString()));
   }
   if(writes.length)await store.batch(writes);
-  return (await store.prepare('SELECT id,decided_at,payload FROM odds_study_decisions WHERE rule_id=? AND match_id=?').bind(ruleId,game.id).all()).results;
+  const decisions=(await store.prepare('SELECT id,decided_at,payload FROM odds_study_decisions WHERE rule_id=? AND match_id=?').bind(ruleId,game.id).all()).results;
+  return finish(decisions);
+}
+
+export async function recordQuotedDecisions(db,edition,quotes,asOf=new Date().toISOString()){
+  return (await recordQuotedDecisionsWithReceipt(db,edition,quotes,asOf)).decisions;
 }
 
 function observedOutcome(d,game,box,at){

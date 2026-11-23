@@ -3,11 +3,11 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync,readdirSync} from 'node:fs';
 import {contextForStudy} from '../study-runtime.mjs';
 
-export function d1() {
+export function d1({serverClock=()=>Date.now()}={}) {
   const sqlite=new DatabaseSync(':memory:');
   // Make SQLite's server clock advance with the deterministic Worker clock.
   sqlite.function('strftime',{deterministic:true},(format,value) => {
-    const ms=value==='now'?Date.now():Date.parse(value);
+    const ms=value==='now'?serverClock():Date.parse(value);
     if(!Number.isFinite(ms))return null;
     if(format==='%s')return String(Math.floor(ms/1000));
     if(format==='%Y-%m-%dT%H:%M:%fZ')return new Date(ms).toISOString();
@@ -16,7 +16,7 @@ export function d1() {
   sqlite.exec('PRAGMA foreign_keys=ON; PRAGMA trusted_schema=ON');
   const directory=new URL('../',import.meta.url);
   const schemaFiles=['research-journal.sql','market-study.sql','study-runtime.sql',
-    ...readdirSync(directory).filter(name=>(name.startsWith('prompt-lab')||name.startsWith('published')||name==='odds-study.sql')&&name.endsWith('.sql')).sort(),'learning.sql','player-odds-coverage.sql'];
+    ...readdirSync(directory).filter(name=>(name.startsWith('prompt-lab')||name.startsWith('published')||name==='odds-study.sql')&&name.endsWith('.sql')).sort(),'learning.sql','player-odds-coverage.sql','odds-intake.sql'];
   for(const file of schemaFiles) sqlite.exec(readFileSync(new URL(file,directory),'utf8'));
   function statement(sql,args) {
     return {

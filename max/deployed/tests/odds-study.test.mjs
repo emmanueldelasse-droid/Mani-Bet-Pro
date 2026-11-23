@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {d1,g,h,iso,tip} from './study-journey-fixture.mjs';
 import {savePublishedForecast} from '../published-forecasts.mjs';
-import {recordQuotedDecisions,settleQuotedDecisions,oddsStudySummary} from '../odds-study.mjs';
+import {recordQuotedDecisions,recordQuotedDecisionsWithReceipt,settleQuotedDecisions,oddsStudySummary} from '../odds-study.mjs';
 
 const game={...g,id:'910001211'};
 const rules='https://sportsbook.draftkings.com/help/sport-rules/basketball';
@@ -124,4 +124,38 @@ test('le bilan global limite les lignes affichées et compte toute la série, y 
   assert.equal(done.priced_games,1);assert.equal(done.observed_games,1);assert.equal(done.dates,1);
   const miss=await oddsStudySummary(db,null,{market:'MONEYLINE_OT'});assert.equal(miss.observations,0);
   assert.deepEqual(miss.bookmakers,['DraftKings']);
+});
+
+test('écart court Worker/D1, relecture exacte des deux côtés et refus des heures futures ou hors délai',async t=>{
+  t.mock.timers.enable({apis:['Date'],now:tip-7*h});
+  let lag=0;const db=d1({serverClock:()=>Date.now()-lag});
+  t.mock.timers.setTime(tip-4*h);
+  const edition=await savePublishedForecast(db,game,iso(Date.now()),card());
+  t.mock.timers.setTime(Date.now()+1000);lag=8;
+  const offer=pair('MONEYLINE_OT',null,[2,1.7],{observed_at:iso(Date.now()-100)});
+  const record=(quotes,at=iso(Date.now()))=>recordQuotedDecisionsWithReceipt(db,edition,quotes,at);
+  const {receipt}=await record(offer);
+  assert.equal(receipt.complete,true);assert.equal(receipt.stored_count,2);
+  assert.ok(receipt.quotes.every(q=>q.quote_id>0 && q.received_at>=q.observed_at));
+  assert.deepEqual(receipt.quotes.map(q=>q.observed_at),offer.map(q=>q.observed_at));
+  assert.deepEqual((await record(offer)).receipt.quotes.map(q=>q.quote_id),receipt.quotes.map(q=>q.quote_id));
+  const newer=pair('TOTAL_POINTS_OT',210);
+  setTimeout(()=>{lag=0;},1);
+  const waited=(await record(newer)).receipt;
+  assert.equal(waited.complete,true);assert.equal(waited.quotes[0].observed_at,iso(Date.now()));
+  assert.equal((await record(offer,iso(Date.now()+1))).receipt.reason,'FUTURE_REQUEST_TIME');
+  assert.equal((await record([{...offer[0],observed_at:iso(Date.now()+1)}])).receipt.quotes[0].reason,'FUTURE_OBSERVATION');
+  const badSource=(await record([{...offer[0],source_url:'https://example.org/odds'}])).receipt;
+  assert.equal(badSource.quotes[0].quote_id,null);assert.equal(badSource.stored_count,0);
+  lag=4;
+  const partial=(await record([{...offer[0],decimal_odds:1.88},{...offer[1],observed_at:iso(Date.now()),decimal_odds:2.2}])).receipt;
+  assert.equal(partial.complete,false);assert.equal(partial.stored_count,1);
+  assert.deepEqual(partial.quotes.map(q=>q.status),['STORED','NOT_FOUND']);
+  assert.equal(partial.quotes[1].reason,'DATABASE_CLOCK_BEHIND_OBSERVATION');
+  lag=2100;assert.equal((await record(offer)).receipt.reason,'DATABASE_CLOCK_TOO_FAR_BEHIND');
+  lag=0;
+  const stale=await record(pair('SPREAD_OT',-2.5,[2,2],{observed_at:iso(Date.now()-61*60000)}));
+  assert.equal(stale.receipt.complete,true,'le journal conserve le relevé daté');
+  assert.equal(stale.decisions.some(r=>JSON.parse(r.payload).market==='SPREAD_OT'),false,'une cote périmée ne déclenche pas de sélection');
+  lag=0;t.mock.timers.setTime(tip);assert.equal((await record(offer)).receipt.reason,'TIP_REACHED');
 });
