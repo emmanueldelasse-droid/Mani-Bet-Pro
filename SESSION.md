@@ -1,5 +1,13 @@
 # Mani Bet Pro · état courant
 
+## ManiBetProMax · 24 novembre 2026 · livraison MacFly
+- Source de production Max · `max/deployed/` · base vérifiée `eaf50684b0a2a522ffdd2170ce3f92b727922063` ; ne pas repartir du prototype `max/wrangler.jsonc`.
+- Incident transmission · trois rapports de 06h44 UTC non reçus ; motif brut et archive initiale non retrouvés.
+- Correctif émetteur · `max/deployed/release/macfly-delivery.mjs` · archive relue, reçus indépendants, journal des étapes, arrêt sur refus.
+- Reprise effectuée par nouvelle collecte datée réellement · trois reçus 12–14 et trois versions 57–59 confirmés.
+- Moteurs sportifs, Worker, cadence et historiques conservés · aucune amélioration prédictive revendiquée.
+- Guide et limites · `max/deployed/release/macfly-delivery.md` · consigne canonique `max/deployed/release/macfly-prompt.txt`.
+
 ## Branche active
 `main` · auto-deploy CF/GH Pages · identité runtime via `CF_VERSION_METADATA` / build `index.html`
 

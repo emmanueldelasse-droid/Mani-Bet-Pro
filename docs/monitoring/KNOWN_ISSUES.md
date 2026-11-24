@@ -4,6 +4,14 @@ Source · SESSION.md + audit code + git log mai 2026.
 
 ## P1 (prioritaire · à traiter rapidement)
 
+### Max · transmission MacFly du 24/11/2026 · reprise fiabilisée
+- Trois rapports annoncés refusés avant réception · trace brute et archive initiale non récupérables.
+- Audit Cloudflare · 18 appels réussis · zéro écriture durant le passage · droit d’écriture vérifié ensuite sans doublon.
+- Correctif émetteur · archive durable relue · plans limités D1/Queue · journal des réponses · blocage sur refus · reprise par relecture.
+- Nouvelle collecte distincte reçue et intégrée · reçus 12–14 · versions Max 57–59 · aucune reconstruction des anciens rapports.
+- Limite · motif exact du refus initial non établi ; aucun contrôle externe supprimé.
+- Procédure et preuves · `max/deployed/release/macfly-delivery.md`.
+
 ### P1-1 · Hit rate MLB v6.94 sous cible
 - Hit rate 49.8% post 315 logs · cible >55%
 - Garde-fou edge [5, 10] zone seule profitable (54.7% sur 64 paris)
