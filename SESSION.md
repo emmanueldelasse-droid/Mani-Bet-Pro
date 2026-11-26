@@ -179,3 +179,12 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
 - Cron 15 min Worker Max ; KV EU dédié ; PR #254 draft ; tests modèles/rapport/abstention.
 - Une source non disponible reste INCONCLUSIVE ; probabilités Elo non calibrées sans recommandation.
 - Avant GO merge : déploiement module engine+worker, contrôle KV last_success, UI, no legacy binding, source directe réelle, mémoire et tests complets.
+
+## 26/11/2026 · reprise MacFly et bulletin NBA
+
+- État constaté · tâche MacFly encore bloquée avant archive, `AccessDeny` rapporté ; reprise interactive du 24/11 insuffisante pour conclure sur les tâches automatiques.
+- Correctifs · enveloppes de réponse et accusés Queue vérifiés ; reprise sans renotification après acceptation ; diagnostic de refus conservé ; bulletin entièrement non soumis accepté.
+- Expérience pilote · 1/2 match évaluable, délai normal de 72 h jusqu’au 27/11 09h00 UTC ; consignes de diagnostic corrigées, aucun verdict anticipé.
+- Activation · consignes enquête/contrôle mises à jour à cadence identique ; utilitaire privé embarqué ; livraison Worker 0.12.3 préparée pour le parseur.
+- Limite de clôture · archive relue réussie dans la réparation interactive ; accès automatique à confirmer au passage prévu, sans autre destination après refus.
+- Détail et retour arrière · `max/deployed/release/macfly-delivery.md`.

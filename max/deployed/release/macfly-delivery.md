@@ -88,6 +88,29 @@ La référence doit désigner une instruction ou correction réelle. Une chaîne
 
 Ce correctif assure la conservation et la traçabilité de la reprise. Il ne désactive aucun contrôle externe et ne démontre pas qu’un refus futur est impossible.
 
+## Reprise du 26 novembre · panne automatique et diagnostic
+
+- Dernier passage automatique examiné · 26/11 12h45 UTC · archivage toujours bloqué ; aucun envoi depuis les reçus 12–14 du 24/11.
+- Motif retrouvé dans le compte rendu du 24/11 12h01 UTC · `AccessDeny` du stockage privé · outil/action exacts non conservés dans les extraits accessibles.
+- Portée de la preuve du 24/11 · reprise interactive réussie ; elle ne démontrait pas le rétablissement de l’accès dans la tâche automatique.
+- Accès dans la conversation de réparation · création privée et relecture indépendante identique vérifiées le 26/11 · accès du contexte automatique encore à confirmer.
+- Même destination · demande utilisateur du 26/11 autorise une reprise par le mécanisme Library officiel au passage prévu · tout nouveau refus reste bloquant ; aucune autre destination ni identité.
+- Trace de refus d’archivage · conserver outil, action, stade, heure, code et message brut sans secrets dans le résultat du passage, même si ce refus empêche de sauver le manifeste durable.
+- Réponses de transmission · enveloppes Cloudflare directes et wrappers MCP reconnus ; erreur explicite ou représentations contradictoires bloquantes.
+- Après notification acceptée · panne de lecture d’intégration : reprise limitée à cette lecture, sans nouvel INSERT ni notification.
+- `AccessDeny`, `AccessDenied`, `access_denied`, 401/403 et refus d’approbation · autorisation explicite nécessaire avant reprise.
+
+La correction de l’utilitaire ne restaure pas, à elle seule, un droit du service de fichiers. Un passage automatique avec archive relue et reçus effectifs reste la preuve nécessaire pour déclarer la transmission rétablie.
+
+## Bulletin médical et échéance expérimentale
+
+- Parseur NBA · un bulletin entièrement `NOT_YET_SUBMITTED` est valide ; conserver ses inconnues et zéro joueur, sans réutiliser à tort l’ancien bulletin.
+- Cas réel du 26/11 07h15 ET · onze matchs, vingt-deux équipes non soumises ; protections d’identité et de fraîcheur maintenues.
+- Expérience pilote · un match évaluable sur deux ; une finale sans le joueur ciblé ne fournit aucune observation à zéro.
+- `review_at` · première revue ; si données manquantes, grâce de 72 h après le maximum de la revue, de la fin de cohorte et des tips.
+- Pilote actuel · fin de grâce 27/11 09h00 UTC, première revue habituelle attendue 12h00 UTC · état `ACTIVE` avant cette borne conforme.
+- Contrôle · diagnostiquer un retard seulement après un passage habituel effectivement exécuté après la borne et sans clôture ; aucun changement du plan enregistré.
+
 ## Validation et retour arrière
 
 ```sh
@@ -96,6 +119,7 @@ node --test max/deployed/tests/*.test.mjs
 ```
 
 - Cas nécessaires · archive absente/altérée · octets conservés · doublon/conflit SQLite · refus outil/HTTP · ambiguïté · preuve indépendante · arrivée tardive · CLI complète.
+- Validation du 26/11 · 136 tests complets réussis, zéro échec · 25 tests de livraison et quatre tests de bulletin officiel · revue indépendante des faux accusés et du cas NOT_YET_SUBMITTED.
 - Activation · consigne de l’automatisation MacFly mise à jour ; planning existant conservé.
 - Retour arrière · revenir à la révision précédente de l’utilitaire et de la consigne, uniquement après diagnostic · conserver toutes les archives et tous les reçus.
 - Aucun déploiement du Worker nécessaire pour ce correctif de l’émetteur.

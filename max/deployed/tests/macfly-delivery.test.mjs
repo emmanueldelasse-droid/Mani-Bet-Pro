@@ -109,6 +109,150 @@ test('successful INSERT is followed by an independent SELECT before any Queue no
   assert.ok(saved.filter(x => x.pending).every(x => x.events.length < saved.at(-1).events.length));
 });
 
+test('successful MCP wrappers deliver the actual Cloudflare envelope while preserving raw output', async () => {
+  const wrappers = [
+    value => ({content: [{type: 'text', text: JSON.stringify(value)}], isError: false}),
+    value => ({structuredContent: value, content: [{type: 'text', text: 'Action completed.'}]}),
+    value => ({structuredContent: {result: value}, content: [{type: 'text', text: JSON.stringify({result: value})}]}),
+    value => ({structuredContent: {structuredContent: {content: JSON.stringify(value)}}})
+  ];
+  for (const wrap of wrappers) {
+    const m = await batch(), s = server(); await archive(m);
+    await finish(m, async request => wrap(await s.request(request)));
+    assert.equal(m.block, null);
+    assert.equal(m.reports[0].state, 'NOTIFIED_WAITING_INTEGRATION');
+    assert.equal(m.reports[0].receipt.identical, 1);
+    assert.equal(s.notifications.length, 1);
+    assert.equal(insertCount(s), 1);
+    assert.ok(m.events[0].raw.response.content || m.events[0].raw.response.structuredContent);
+  }
+});
+
+test('MCP normalization never unwraps through an error or chooses between conflicting responses', async () => {
+  const good = {success: true, errors: [], result: [{success: true, results: []}]};
+  const bad = {success: false, errors: [], result: []};
+  for (const response of [
+    {isError: true, structuredContent: good},
+    {isError: 'true', structuredContent: good},
+    {success: false, structuredContent: good},
+    {errors: {message: 'Failure'}, structuredContent: good},
+    {structuredContent: {error: 'Failed before API', result: good}},
+    {structuredContent: good, content: [{type: 'text', text: JSON.stringify(bad)}]},
+    {content: [{type: 'text', text: JSON.stringify(good)}, {type: 'text', text: JSON.stringify(bad)}]}
+  ]) {
+    const m = await batch(); await archive(m);
+    const op = await nextOperation(m);
+    await recordOutcome(m, op.id, {kind: 'RESPONSE', response});
+    assert.ok(m.block, JSON.stringify(response));
+    assert.equal(m.reports[0].receipt, null);
+    await assert.rejects(nextOperation(m), /BATCH_BLOCKED/);
+  }
+});
+
+test('NOTIFY rejects hidden failures, contradictory representations and malformed Queue acknowledgements', async () => {
+  const good = {success: true, errors: [], result: {message_id: 'fixture-message'}};
+  const bad = {success: false, errors: [{code: 500, message: 'Queue temporarily unavailable'}], result: null};
+  for (const response of [
+    {success: true, result: bad},
+    {...good, structuredContent: bad},
+    {...good, content: [{type: 'text', text: JSON.stringify(bad)}]},
+    {success: true, result: good, structuredContent: bad},
+    {success: 'true', result: good},
+    {success: true, errors: [], result: null},
+    {success: true, errors: [], result: [{success: false, results: []}]},
+    {success: true, errors: [], result: {success: false}},
+    {success: true, errors: [], result: {isError: true}},
+    {success: true, errors: [], result: {error: 'Queue not accepted'}},
+    {success: true, result: {message_id: 'missing-errors-field'}}
+  ]) {
+    const m = await batch(), s = server(); await archive(m);
+    for (let i = 0; i < 3; i++) await executeNext(m, {request: s.request, persist: async () => {}, clock});
+    const op = await nextOperation(m);
+    assert.equal(op.stage, 'NOTIFY');
+    await recordOutcome(m, op.id, {kind: 'RESPONSE', response});
+    assert.ok(m.block, JSON.stringify(response));
+    assert.equal(m.reports[0].state, 'BLOCKED');
+    assert.equal(m.reports[0].notification, undefined);
+    assert.equal(m.reports[0].integration, null);
+    await assert.rejects(nextOperation(m), /BATCH_BLOCKED/);
+  }
+});
+
+test('NOTIFY accepts normal Cloudflare Queue replies and agreeing API/transport representations', async () => {
+  const direct = {success: true, errors: [], result: {message_id: 'fixture-message'}};
+  for (const response of [direct,
+    {success: true, errors: [], messages: [], result: {metadata: {metrics: {backlog_count: 1, backlog_bytes: 66}}}},
+    {success: true, result: direct, structuredContent: direct},
+    {...direct, structuredContent: structuredClone(direct), content: [{type: 'text', text: JSON.stringify(direct)}]}
+  ]) {
+    const m = await batch(), s = server(); await archive(m);
+    for (let i = 0; i < 3; i++) await executeNext(m, {request: s.request, persist: async () => {}, clock});
+    const op = await nextOperation(m);
+    assert.equal(op.stage, 'NOTIFY');
+    await recordOutcome(m, op.id, {kind: 'RESPONSE', response});
+    assert.equal(m.block, null);
+    assert.equal(m.reports[0].state, 'CHECK_INTEGRATION');
+    assert.equal(m.reports[0].notification.operation_id, op.id);
+    assert.equal(m.reports[0].integration, null);
+  }
+});
+
+test('NOTIFY cannot accept MCP failures or refusals hidden inside nested result wrappers', async () => {
+  const failures = [
+    {success: false, errors: [{code: 500, message: 'Queue temporarily unavailable'}], result: null},
+    {isError: true, content: [{type: 'text', text: 'AccessDeny'}]}
+  ];
+  const wrap = value => ({success: true, errors: [], result: {isError: false,
+    structuredContent: value, content: [{type: 'text', text: JSON.stringify(value)}]}});
+  for (const failure of failures) {
+    let response = failure;
+    for (let depth = 1; depth <= 4; depth++) {
+      response = wrap(response);
+      const m = await batch(), s = server(); await archive(m);
+      for (let i = 0; i < 3; i++) await executeNext(m, {request: s.request, persist: async () => {}, clock});
+      const op = await nextOperation(m);
+      assert.equal(op.stage, 'NOTIFY');
+      await recordOutcome(m, op.id, {kind: 'RESPONSE', response});
+      assert.ok(m.block, `wrapper depth ${depth}`);
+      if (failure.isError) assert.equal(m.block.kind, 'AUTHORIZATION_REFUSAL');
+      assert.equal(m.reports[0].notification, undefined);
+      assert.equal(m.reports[0].state, 'BLOCKED');
+    }
+  }
+});
+
+test('Queue leaf validation rejects residual transport wrappers even under unexpected fields', async () => {
+  const bad = {success: false, errors: [{code: 500, message: 'Queue unavailable'}], result: null};
+  for (const payload of [
+    {metadata: {unexpected: {isError: false, structuredContent: bad}}},
+    {metadata: {unexpected: JSON.stringify({isError: false, structuredContent: bad})}},
+    {unexpected: {isError: false}},
+    {unexpected: {success: true, errors: [], result: {message_id: 'unrecognized-wrapper'}}}
+  ]) {
+    const m = await batch(), s = server(); await archive(m);
+    for (let i = 0; i < 3; i++) await executeNext(m, {request: s.request, persist: async () => {}, clock});
+    const op = await nextOperation(m);
+    await recordOutcome(m, op.id, {kind: 'RESPONSE', response: {success: true, errors: [], result: payload}});
+    assert.equal(m.block.kind, 'UNCONFIRMED_QUEUE_RESPONSE');
+    assert.equal(m.reports[0].notification, undefined);
+  }
+});
+
+test('normal Queue leaf responses remain valid through known MCP result wrappers', async () => {
+  for (const payload of [{}, {message_id: 'fixture-message'}, {metadata: {metrics: {backlog_count: 1}}}]) {
+    const api = {success: true, errors: [], result: payload};
+    const response = {success: true, errors: [], result: {isError: false,
+      structuredContent: {result: api}, content: [{type: 'text', text: JSON.stringify({result: api})}]}};
+    const m = await batch(), s = server(); await archive(m);
+    for (let i = 0; i < 3; i++) await executeNext(m, {request: s.request, persist: async () => {}, clock});
+    const op = await nextOperation(m);
+    await recordOutcome(m, op.id, {kind: 'RESPONSE', response});
+    assert.equal(m.block, null);
+    assert.equal(m.reports[0].state, 'CHECK_INTEGRATION');
+    assert.equal(m.reports[0].notification.operation_id, op.id);
+  }
+});
+
 test('replaying an already received original skips INSERT and keeps the original receipt and bytes', async () => {
   const s = server(), first = await batch(); await archive(first); await finish(first, s.request);
   const initialReceipt = first.reports[0].receipt.id, before = insertCount(s);
@@ -218,6 +362,22 @@ test('raw 401/403 refusals and structured status fields require explicit reautho
   assert.equal(m.events[0].raw.error.statusCode, 403);
 });
 
+test('AccessDeny and AccessDenied remain authorization refusals inside every response wrapper', async () => {
+  for (const word of ['AccessDeny', 'AccessDenied', 'access_denied']) {
+    for (const kind of ['ERROR', 'RESPONSE']) {
+      const m = await batch(); await archive(m);
+      const op = await nextOperation(m);
+      const response = {isError: true, content: [{type: 'text', text: word}],
+        structuredContent: {success: true, errors: [], result: []}};
+      await recordOutcome(m, op.id, {kind, response});
+      assert.equal(m.block.kind, 'AUTHORIZATION_REFUSAL');
+      assert.equal(m.events[0].raw.response.content[0].text, word);
+      await assert.rejects(resumeBatch(m, {resolution_reference: 'Generic transport resolution without authorization.'}),
+        /EXPLICIT_RESOLUTION_REFERENCE/);
+    }
+  }
+});
+
 test('French tool-level security refusals stop delivery even before the API is called', async () => {
   for (const message of ['Le contrôle de sécurité a refusé cette opération.',
     'Transmission bloquée par le contrôle de sécurité.', 'Approbation refusée.',
@@ -263,6 +423,31 @@ test('only a matching pregame version establishes integration; Queue acceptance 
   assert.equal(m.reports[0].state, 'INTEGRATED');
   assert.equal(m.reports[0].integration.match_id, receipt.match_id);
   assert.equal(s.notifications.length, 1);
+});
+
+test('integration read failure never resends a Queue notification that was already accepted', async () => {
+  for (const outcome of [
+    {kind: 'AMBIGUOUS', error: 'Integration SELECT timed out.'},
+    {kind: 'ERROR', error: 'Integration result unavailable.'},
+    {kind: 'REFUSED', response: {isError: true, content: [{type: 'text', text: 'AccessDeny'}]}}
+  ]) {
+    const m = await batch(), s = server(); await archive(m);
+    for (let i = 0; i < 4; i++) await executeNext(m, {request: s.request, persist: async () => {}, clock});
+    assert.equal(m.reports[0].state, 'CHECK_INTEGRATION');
+    assert.equal(s.notifications.length, 1);
+    const op = await nextOperation(m);
+    await recordOutcome(m, op.id, outcome);
+    if (outcome.kind === 'AMBIGUOUS') assert.equal(m.reports[0].state, 'NOTIFIED_WAITING_INTEGRATION');
+    await resumeBatch(m, {authorization_reference: 'User explicitly reauthorized this same private read.',
+      resolution_reference: 'Read response loss investigated; only integration read may resume.'});
+    const resumed = await nextOperation(m);
+    assert.equal(resumed.stage, 'CHECK_INTEGRATION');
+    assert.ok(resumed.request.body.sql.startsWith('SELECT'));
+    await recordOutcome(m, resumed.id, {kind: 'RESPONSE', response: await s.request(resumed.request)});
+    assert.equal(m.reports[0].state, 'NOTIFIED_WAITING_INTEGRATION');
+    assert.equal(insertCount(s), 1);
+    assert.equal(s.notifications.length, 1);
+  }
 });
 
 test('a server-confirmed late receipt stays documentary and never becomes an integrated forecast', async () => {

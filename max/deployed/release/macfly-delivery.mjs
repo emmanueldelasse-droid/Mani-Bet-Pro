@@ -176,11 +176,79 @@ function refused(outcome) {
     /^(?:http_?status|status_?code|status)$/i.test(key) && [401, 403].includes(Number(item)) || deniedStatus(item));
   const raw = JSON.stringify(outcome.response ?? outcome.error ?? '');
   return deniedStatus(outcome) || /\b(?:401\s+Unauthorized|403\s+Forbidden)\b/i.test(raw) ||
-    /(?:HTTP\s*(?:401|403)\b|auto[_ -]?review.{0,100}(?:reject|denied|refus)|approval.{0,100}(?:reject|denied)|permission denied|access denied|not authorized|not authorised)/i.test(raw) ||
+    /(?:HTTP\s*(?:401|403)\b|auto[_ -]?review.{0,100}(?:reject|denied|refus)|approval.{0,100}(?:reject|denied)|permission denied|\baccess[\s_-]*(?:deny|denied)\b|not authorized|not authorised)/i.test(raw) ||
     /(?:refus|rejet|bloqu).{0,100}(?:contr[oô]le|s[eé]curit[eé]|autorisation|approbation)|(?:contr[oô]le|s[eé]curit[eé]|autorisation|approbation).{0,100}(?:refus|rejet|bloqu)/i.test(raw);
 }
 function envelope(response) {
-  return response?.success === true && (!response.errors || response.errors.length === 0);
+  return response?.success === true && Array.isArray(response.errors) && response.errors.length === 0 &&
+    Object.hasOwn(response, 'result');
+}
+const canonicalResponse = value => JSON.stringify(value, function (key, item) {
+  return item && typeof item === 'object' && !Array.isArray(item)
+    ? Object.fromEntries(Object.keys(item).sort().map(k => [k, item[k]])) : item;
+});
+const TRANSPORT_FIELDS = new Set(['success', 'result', 'errors', 'error', 'isError', 'structuredContent', 'content']);
+const transportWrapper = value => value && typeof value === 'object' && !Array.isArray(value) &&
+  Object.keys(value).some(key => TRANSPORT_FIELDS.has(key));
+function containsTransportWrapper(value, depth = 0) {
+  if (depth > 16) return true;
+  if (typeof value === 'string') {
+    let parsed; try { parsed = JSON.parse(value); } catch { return false; }
+    return containsTransportWrapper(parsed, depth + 1);
+  }
+  if (!value || typeof value !== 'object') return false;
+  return transportWrapper(value) || Object.values(value).some(item => containsTransportWrapper(item, depth + 1));
+}
+/** Accept the actual API envelope or its MCP transport wrapper, retaining raw
+ * output in the event. Never unwrap through a tool error or choose between
+ * disagreeing structured/text responses. */
+function responseEnvelope(value, depth = 0) {
+  ensure(depth <= 8, 'RESPONSE_WRAPPER_TOO_DEEP');
+  if (typeof value === 'string') {
+    let parsed; try { parsed = JSON.parse(value); } catch { throw Error('UNRECOGNIZED_RESPONSE_ENVELOPE'); }
+    return responseEnvelope(parsed, depth + 1);
+  }
+  ensure(value && typeof value === 'object' && !Array.isArray(value), 'UNRECOGNIZED_RESPONSE_ENVELOPE');
+  ensure(!Object.hasOwn(value, 'success') || typeof value.success === 'boolean', 'INVALID_SUCCESS_FLAG');
+  ensure((value.isError == null || value.isError === false) && (value.error == null || value.error === '') &&
+    (value.errors == null || Array.isArray(value.errors) && value.errors.length === 0) &&
+    !['error', 'failed', 'denied', 'refused'].includes(String(value.status ?? '').toLowerCase()), 'TOOL_RESPONSE_ERROR');
+  // An explicit API/tool failure is authoritative even if its result happens
+  // to contain a successful envelope from a previous operation.
+  if (value.success === false) return value;
+  const candidates = [];
+  const apiShaped = Object.hasOwn(value, 'success') && Object.hasOwn(value, 'result');
+  const nestedTransport = transportWrapper(value.result);
+  if (apiShaped && !nestedTransport) candidates.push(value);
+  if (value.result != null && (!apiShaped || nestedTransport)) candidates.push(responseEnvelope(value.result, depth + 1));
+  if (value.structuredContent != null) {
+    candidates.push(responseEnvelope(value.structuredContent, depth + 1));
+  }
+  if (typeof value.content === 'string') candidates.push(responseEnvelope(value.content, depth + 1));
+  else if (Array.isArray(value.content)) {
+    for (const item of value.content) {
+      if (item?.type !== 'text' || typeof item.text !== 'string') continue;
+      // Non-JSON status text is not a server reply. Refusal detection examines
+      // the entire raw outcome before reaching this function.
+      let parsed; try { parsed = JSON.parse(item.text); } catch { continue; }
+      candidates.push(responseEnvelope(parsed, depth + 1));
+    }
+  }
+  ensure(candidates.length > 0, 'UNRECOGNIZED_RESPONSE_ENVELOPE');
+  // Compare the actual API contract, not transport-only fields present on one
+  // representation. Missing errors remain missing and cannot create success.
+  const signature = c => canonicalResponse({success: c.success, errors: c.errors, result: c.result});
+  ensure(candidates.every(c => signature(c) === signature(candidates[0])), 'CONFLICTING_RESPONSE_WRAPPERS');
+  return candidates[0];
+}
+function queueAccepted(response) {
+  const payload = response?.result;
+  ensure(envelope(response) && payload && typeof payload === 'object' && !Array.isArray(payload) &&
+    !containsTransportWrapper(payload) &&
+    (payload.isError == null || payload.isError === false) && (payload.error == null || payload.error === '') &&
+    (payload.errors == null || Array.isArray(payload.errors) && payload.errors.length === 0) &&
+    (!Object.hasOwn(payload, 'success') || payload.success === true) &&
+    !['error', 'failed', 'denied', 'refused'].includes(String(payload.status ?? '').toLowerCase()), 'UNCONFIRMED_QUEUE_RESPONSE');
 }
 function rows(response) {
   ensure(envelope(response) && Array.isArray(response.result) && response.result.length === 1 &&
@@ -204,15 +272,18 @@ export async function recordOutcome(manifest, operationId, outcome, {clock} = {}
   manifest.events.push(event); manifest.pending = null;
   if (refused(outcome)) { block(manifest, report, 'AUTHORIZATION_REFUSAL', event); return event; }
   if (outcome.kind === 'AMBIGUOUS') {
-    report.state = op.stage === 'INSERT' ? 'VERIFY' : op.stage === 'NOTIFY' ? 'QUEUE_AMBIGUOUS' : 'RETRY_LATER';
+    report.state = op.stage === 'INSERT' ? 'VERIFY' : op.stage === 'NOTIFY' ? 'QUEUE_AMBIGUOUS'
+      : op.stage === 'CHECK_INTEGRATION' && report.notification ? 'NOTIFIED_WAITING_INTEGRATION' : 'RETRY_LATER';
     return event;
   }
-  if (outcome.kind !== 'RESPONSE' || !envelope(outcome.response)) {
+  if (outcome.kind !== 'RESPONSE') {
     block(manifest, report, 'UNCONFIRMED_FAILURE', event); return event;
   }
   try {
+    const response = responseEnvelope(outcome.response);
+    if (!envelope(response)) { block(manifest, report, 'UNCONFIRMED_FAILURE', event); return event; }
     if (['PENDING', 'VERIFY'].includes(op.stage)) {
-      const found = rows(outcome.response);
+      const found = rows(response);
       ensure(found.length <= 1, 'AMBIGUOUS_RECEIPT');
       if (!found.length) { report.state = op.stage === 'PENDING' ? 'INSERT' : 'RETRY_LATER'; return event; }
       const receipt = found[0];
@@ -222,11 +293,12 @@ export async function recordOutcome(manifest, operationId, outcome, {clock} = {}
       report.receipt = {...receipt, verified_by: op.id, verified_at: event.at}; report.state = 'NOTIFY';
     } else if (op.stage === 'INSERT') {
       // A successful INSERT never proves reception. Always issue a separate SELECT.
-      rows(outcome.response); report.state = 'VERIFY';
+      rows(response); report.state = 'VERIFY';
     } else if (op.stage === 'NOTIFY') {
+      queueAccepted(response);
       report.notification = {operation_id: op.id, accepted_at: event.at}; report.state = 'CHECK_INTEGRATION';
     } else if (op.stage === 'CHECK_INTEGRATION') {
-      const found = rows(outcome.response); ensure(found.length <= 1, 'AMBIGUOUS_INTEGRATION');
+      const found = rows(response); ensure(found.length <= 1, 'AMBIGUOUS_INTEGRATION');
       if (!found.length) { report.state = 'NOTIFIED_WAITING_INTEGRATION'; return event; }
       const version = found[0];
       if (version.status === 'AFTER_TIP') {
@@ -258,7 +330,8 @@ export async function resumeBatch(manifest, {authorization_reference, resolution
     manifest.block = null;
   }
   for (const report of manifest.reports) {
-    if (['BLOCKED', 'RETRY_LATER', 'QUEUE_AMBIGUOUS'].includes(report.state)) report.state = 'PENDING';
+    if (['BLOCKED', 'RETRY_LATER', 'QUEUE_AMBIGUOUS'].includes(report.state))
+      report.state = report.notification ? 'CHECK_INTEGRATION' : 'PENDING';
     else if (report.state === 'NOTIFIED_WAITING_INTEGRATION') report.state = 'CHECK_INTEGRATION';
   }
 }

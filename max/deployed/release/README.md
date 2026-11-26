@@ -2,6 +2,8 @@
 
 La livraison des rapports MacFly dispose d’un [protocole exécutable de reprise](macfly-delivery.md). Ce correctif côté émetteur ne nécessite pas de republier le Worker.
 
+Le correctif du 26 novembre ajoute aussi la prise en charge des bulletins NBA entièrement `NOT_YET_SUBMITTED`. Cette partie est livrée par le Worker `max-independent-0.12.3`, avec les mêmes moteurs et liaisons. Les consignes privées embarquent leur utilitaire ; la publication GitHub seule ne rétablit pas un droit d’archivage de la tâche.
+
 Le commit `16b22188e924bb9b46dfad8f0a4c2981dd01a683` archive les treize modules Cloudflare servis par la version 20 (`18e2067c-e2bc-4790-b89a-7a2ce3d299fa`). Le code à publier se trouve dans `max/deployed/`. La configuration de la PR prototype, `max/wrangler.jsonc`, référence encore une cadence de quinze minutes.
 
 ## Vérifier le paquet

@@ -453,3 +453,11 @@ Détail complet · `docs/decisions/DECISION-002-NBA-ENGINE-PARITY-MBP-A2.md`. R�
 - 14 occurrences fuites `err.message` localisées
 - 6 stratégies auth Paper proposées (à valider ChatGPT)
 - Phase 1 (critiques rapides · CRIT-B/C/E + HAUT-6) · ~2h effort · risque faible
+
+## 26/11/2026 · MacFly et collecte officielle
+
+- `AccessDeny` archivage privé en tâche automatique · toujours non résolu par preuve dans ce contexte ; 14 reçus D1, dernier au 24/11 07h49 UTC. Reprise même destination explicitement autorisée au prochain passage ; nouveaux refus bloquants et diagnostic exact exigé.
+- Utilitaire livraison · correction des wrappers MCP, contradictions d’accusés Queue, classification AccessDeny et reprise après notification déjà acceptée.
+- Bulletin médical · `OFFICIAL_NO_VERIFIED_ROWS` reproduit sur un PDF valide entièrement NOT_YET_SUBMITTED ; parseur corrigé, zéro statut joueur inventé.
+- Expérience ACTIVE prétendument en retard · faux positif : 1/2 cas évaluable et grâce 72 h normale ; diagnostic des deux automatisations corrigé. Fin de grâce 27/11 09h00 UTC ; revue habituelle attendue 12h00 UTC.
+- Preuves, portée et reprise · `max/deployed/release/macfly-delivery.md`.
