@@ -77,7 +77,11 @@ export function parseOfficialPages(pages,document){
     note:text(row,columns.reason,page.width+5).slice(0,200)});players++;
   }
  }
- if(!table.size||!players)throw Error('OFFICIAL_NO_VERIFIED_ROWS');
+ // A valid early bulletin may contain only explicit NOT YET SUBMITTED rows.
+ // Keep those unknowns fresh instead of falling back to an older medical report.
+ const hasPendingTeams=[...table.values()].some(match=>
+  Object.values(match.teams).some(t=>t.status==='NOT_YET_SUBMITTED'));
+ if(!table.size||(!players&&!hasPendingTeams))throw Error('OFFICIAL_NO_VERIFIED_ROWS');
  return {schema_version:'max-official-table-v1',...document,matches:[...table.values()],players};
 }
 export function officialForGame(table,game,nowISO){

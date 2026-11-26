@@ -1,5 +1,13 @@
 # Mani Bet Pro · état courant
 
+## ManiBetProMax · 24 novembre 2026 · livraison MacFly
+- Source de production Max · `max/deployed/` · base vérifiée `eaf50684b0a2a522ffdd2170ce3f92b727922063` ; ne pas repartir du prototype `max/wrangler.jsonc`.
+- Incident transmission · trois rapports de 06h44 UTC non reçus ; motif brut et archive initiale non retrouvés.
+- Correctif émetteur · `max/deployed/release/macfly-delivery.mjs` · archive relue, reçus indépendants, journal des étapes, arrêt sur refus.
+- Reprise effectuée par nouvelle collecte datée réellement · trois reçus 12–14 et trois versions 57–59 confirmés.
+- Moteurs sportifs, Worker, cadence et historiques conservés · aucune amélioration prédictive revendiquée.
+- Guide et limites · `max/deployed/release/macfly-delivery.md` · consigne canonique `max/deployed/release/macfly-prompt.txt`.
+
 ## Branche active
 `main` · auto-deploy CF/GH Pages · identité runtime via `CF_VERSION_METADATA` / build `index.html`
 
@@ -171,3 +179,12 @@ MBP-NBA-PLAYOFF-GATE-LOG · Option A · observabilité pure
 - Cron 15 min Worker Max ; KV EU dédié ; PR #254 draft ; tests modèles/rapport/abstention.
 - Une source non disponible reste INCONCLUSIVE ; probabilités Elo non calibrées sans recommandation.
 - Avant GO merge : déploiement module engine+worker, contrôle KV last_success, UI, no legacy binding, source directe réelle, mémoire et tests complets.
+
+## 26/11/2026 · reprise MacFly et bulletin NBA
+
+- État constaté · tâche MacFly encore bloquée avant archive, `AccessDeny` rapporté ; reprise interactive du 24/11 insuffisante pour conclure sur les tâches automatiques.
+- Correctifs · enveloppes de réponse et accusés Queue vérifiés ; reprise sans renotification après acceptation ; diagnostic de refus conservé ; bulletin entièrement non soumis accepté.
+- Expérience pilote · 1/2 match évaluable, délai normal de 72 h jusqu’au 27/11 09h00 UTC ; consignes de diagnostic corrigées, aucun verdict anticipé.
+- Activation · consignes enquête/contrôle mises à jour à cadence identique ; utilitaire privé embarqué ; livraison Worker 0.12.3 préparée pour le parseur.
+- Limite de clôture · archive relue réussie dans la réparation interactive ; accès automatique à confirmer au passage prévu, sans autre destination après refus.
+- Détail et retour arrière · `max/deployed/release/macfly-delivery.md`.

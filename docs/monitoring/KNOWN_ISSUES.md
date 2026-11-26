@@ -4,6 +4,14 @@ Source · SESSION.md + audit code + git log mai 2026.
 
 ## P1 (prioritaire · à traiter rapidement)
 
+### Max · transmission MacFly du 24/11/2026 · reprise fiabilisée
+- Trois rapports annoncés refusés avant réception · trace brute et archive initiale non récupérables.
+- Audit Cloudflare · 18 appels réussis · zéro écriture durant le passage · droit d’écriture vérifié ensuite sans doublon.
+- Correctif émetteur · archive durable relue · plans limités D1/Queue · journal des réponses · blocage sur refus · reprise par relecture.
+- Nouvelle collecte distincte reçue et intégrée · reçus 12–14 · versions Max 57–59 · aucune reconstruction des anciens rapports.
+- Limite · motif exact du refus initial non établi ; aucun contrôle externe supprimé.
+- Procédure et preuves · `max/deployed/release/macfly-delivery.md`.
+
 ### P1-1 · Hit rate MLB v6.94 sous cible
 - Hit rate 49.8% post 315 logs · cible >55%
 - Garde-fou edge [5, 10] zone seule profitable (54.7% sur 64 paris)
@@ -445,3 +453,11 @@ Détail complet · `docs/decisions/DECISION-002-NBA-ENGINE-PARITY-MBP-A2.md`. R�
 - 14 occurrences fuites `err.message` localisées
 - 6 stratégies auth Paper proposées (à valider ChatGPT)
 - Phase 1 (critiques rapides · CRIT-B/C/E + HAUT-6) · ~2h effort · risque faible
+
+## 26/11/2026 · MacFly et collecte officielle
+
+- `AccessDeny` archivage privé en tâche automatique · toujours non résolu par preuve dans ce contexte ; 14 reçus D1, dernier au 24/11 07h49 UTC. Reprise même destination explicitement autorisée au prochain passage ; nouveaux refus bloquants et diagnostic exact exigé.
+- Utilitaire livraison · correction des wrappers MCP, contradictions d’accusés Queue, classification AccessDeny et reprise après notification déjà acceptée.
+- Bulletin médical · `OFFICIAL_NO_VERIFIED_ROWS` reproduit sur un PDF valide entièrement NOT_YET_SUBMITTED ; parseur corrigé, zéro statut joueur inventé.
+- Expérience ACTIVE prétendument en retard · faux positif : 1/2 cas évaluable et grâce 72 h normale ; diagnostic des deux automatisations corrigé. Fin de grâce 27/11 09h00 UTC ; revue habituelle attendue 12h00 UTC.
+- Preuves, portée et reprise · `max/deployed/release/macfly-delivery.md`.
